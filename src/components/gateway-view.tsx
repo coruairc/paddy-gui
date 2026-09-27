@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Copy, Radio, Send, Terminal } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Activity, Copy, Radio, Send, Terminal } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,12 @@ import { sendTurn } from "@/lib/harness/send";
 import { useHelix } from "@/lib/harness/store";
 import type { ChannelStatus } from "@/lib/harness/types";
 import { formatRelative } from "@/lib/utils";
-import { OpenClawTargetPanel } from "@/components/openclaw-target-panel";
+import {
+  OpenClawTargetPanel,
+  type OpenClawTargetControl,
+  type OpenClawTargetStatus,
+} from "@/components/openclaw-target-panel";
+import { channelsBridgeNotice, channelsProbeSummary } from "@/lib/harness/channels-panel";
 
 const STATUS: Record<ChannelStatus, { label: string; variant: "ok" | "warn" | "danger" | "default" }> = {
   connected: { label: "connected", variant: "ok" },
@@ -136,6 +141,12 @@ export function GatewayView() {
   const [saving, setSaving] = useState<string | null>(null);
   const [conflicts, setConflicts] = useState<ImportConflict[]>([]);
   const [importSource, setImportSource] = useState<"openclaw" | "hermes" | "both">("both");
+  const [openclawStatus, setOpenclawStatus] = useState<OpenClawTargetStatus>({
+    savedRuntime: null,
+    probe: { status: "idle" },
+  });
+  const openclawControl = useRef<OpenClawTargetControl | null>(null);
+  const onOpenclawStatus = useCallback((s: OpenClawTargetStatus) => setOpenclawStatus(s), []);
 
   async function refresh() {
     try {
@@ -280,6 +291,8 @@ export function GatewayView() {
   const pending = wakes.filter((w) => !w.fired);
   const ocCount = lineage?.openclawChannels.filter((c) => c.hasToken).length ?? 0;
   const hmCount = lineage?.hermesChannels.filter((c) => c.hasToken).length ?? 0;
+  const bridgeNotice = channelsBridgeNotice(openclawStatus.savedRuntime);
+  const probeSummary = channelsProbeSummary(openclawStatus.probe);
 
   return (
     <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8">
@@ -295,7 +308,7 @@ export function GatewayView() {
           </p>
         </header>
 
-        <OpenClawTargetPanel />
+        <OpenClawTargetPanel onStatusChange={onOpenclawStatus} controlRef={openclawControl} />
 
         <section className="grid gap-3 sm:grid-cols-3">
           <Stat label="Channels live" value={`${connected}/${channels.length}`} />
@@ -451,6 +464,42 @@ export function GatewayView() {
               One list. Saving writes Paddy config — tokens in secrets, access policy on the channel.
             </p>
           </div>
+          {bridgeNotice.paused ? (
+            <div
+              className="mb-3 rounded-2xl bg-elevated p-4 shadow-[var(--shadow-border)]"
+              role="status"
+              aria-live="polite"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <p className="text-sm text-fg">{bridgeNotice.message}</p>
+                <Badge variant="warn">bridge · paused</Badge>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={openclawStatus.probe.status === "loading"}
+                  aria-busy={openclawStatus.probe.status === "loading"}
+                  onClick={() => openclawControl.current?.probe()}
+                >
+                  <Activity className="size-3.5" />
+                  {openclawStatus.probe.status === "loading" ? "Probing…" : "Probe OpenClaw"}
+                </Button>
+                <span
+                  className={
+                    probeSummary.tone === "danger"
+                      ? "text-sm text-danger"
+                      : probeSummary.tone === "ok"
+                        ? "text-sm text-fg"
+                        : "text-sm text-muted"
+                  }
+                >
+                  {probeSummary.text}
+                </span>
+              </div>
+            </div>
+          ) : null}
           <ul className="grid gap-3 sm:grid-cols-2">
             {channels.map((ch) => {
               const st = STATUS[ch.status];

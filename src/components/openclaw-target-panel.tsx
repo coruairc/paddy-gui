@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useState, type FormEvent, type RefObject } from "react";
 import { Activity, Link2, Save } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -18,19 +18,29 @@ import {
   type AgentRuntime,
   type OpenClawTarget,
 } from "@/lib/harness/openclaw-gateway-api";
+import type { ChannelsProbeUi } from "@/lib/harness/channels-panel";
 
-type ProbeUi =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "ok"; detail: string }
-  | { status: "error"; detail: string }
-  | { status: "empty"; detail: string };
+type ProbeUi = ChannelsProbeUi;
+
+/** Imperative handle so the Channels panel can re-run this panel's existing Probe. */
+export type OpenClawTargetControl = { probe: () => void };
+
+export type OpenClawTargetStatus = {
+  /** Server-resolved effective runtime (not the unsaved dropdown draft). */
+  savedRuntime: AgentRuntime | null;
+  probe: ProbeUi;
+};
+
+type OpenClawTargetPanelProps = {
+  onStatusChange?: (status: OpenClawTargetStatus) => void;
+  controlRef?: RefObject<OpenClawTargetControl | null>;
+};
 
 /**
  * Gateway → OpenClaw target: URL + auth-token + Probe + persist runtime.
  * Hosted demo forces “paddy” and disables OpenClaw loopback.
  */
-export function OpenClawTargetPanel() {
+export function OpenClawTargetPanel({ onStatusChange, controlRef }: OpenClawTargetPanelProps = {}) {
   const baseId = useId();
   const urlId = `${baseId}-url`;
   const tokenId = `${baseId}-token`;
@@ -43,6 +53,7 @@ export function OpenClawTargetPanel() {
   const [tokenConfigured, setTokenConfigured] = useState(false);
   const [note, setNote] = useState<string | undefined>();
   const [runtime, setRuntime] = useState<AgentRuntime>("paddy");
+  const [savedRuntime, setSavedRuntime] = useState<AgentRuntime | null>(null);
   const [url, setUrl] = useState("");
   const [tokenDraft, setTokenDraft] = useState(""); // write-only — never hydrated from server
   const [model, setModel] = useState("");
@@ -60,6 +71,7 @@ export function OpenClawTargetPanel() {
       setTokenConfigured(state.tokenConfigured);
       setNote(state.note);
       setRuntime(state.effectiveRuntime);
+      setSavedRuntime(state.effectiveRuntime);
       setUrl(state.target.url ?? "");
       setModel(state.target.model ?? "");
       // Never echo token into the field.
@@ -75,6 +87,11 @@ export function OpenClawTargetPanel() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Sync to parent (Gateway Channels panel) — external to this component's tree.
+  useEffect(() => {
+    onStatusChange?.({ savedRuntime, probe });
+  }, [onStatusChange, savedRuntime, probe]);
 
   const loopbackBlocked = loopbackDisabled && isLoopbackOpenClawUrl(url);
   const openclawControlsDisabled = hostedDemo || loading;
@@ -129,6 +146,14 @@ export function OpenClawTargetPanel() {
     }
   }
 
+  useEffect(() => {
+    if (!controlRef) return;
+    controlRef.current = { probe: () => void onProbe() };
+    return () => {
+      controlRef.current = null;
+    };
+  });
+
   async function onSave(e: FormEvent) {
     e.preventDefault();
     if (hostedDemo) {
@@ -154,6 +179,7 @@ export function OpenClawTargetPanel() {
       toast("Saved", { description: result.detail });
       setTokenDraft("");
       setRuntime(result.effectiveRuntime);
+      setSavedRuntime(result.effectiveRuntime);
       void refresh();
     } catch (err) {
       if (isCliAuthFailure(err)) markCliAuthNeeded();
