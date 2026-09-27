@@ -11,6 +11,8 @@ import {
 import { envAccountsFromProcess } from "./lineage.mjs";
 import { enqueueOutboundDurable } from "./outbound.mjs";
 
+export { OPENCLAW_CHANNELS_PAUSED_MESSAGE } from "./channels-paused.ts";
+
 export const BRIDGE_CHANNELS = [
   "telegram",
   "discord",
