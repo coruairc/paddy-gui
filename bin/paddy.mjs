@@ -47,6 +47,7 @@ import {
   upsertCanonicalChannel,
   validateCanonical,
 } from "../src/lib/harness/config.mjs";
+import { channelBridgeState } from "../src/lib/harness/bridge-gate.mjs";
 import {
   parseConfigureSections,
   runConfigureWizard,
@@ -1808,7 +1809,13 @@ function cmdChannels(rest, flags) {
       const on = Boolean(acc && (acc.token || acc.host || acc.user));
       return `  ${on ? "on " : "off"}  ${id.padEnd(10)} ${on ? acc.dmPolicy || "pairing" : "—"}`;
     });
-    out(flags, { ok: true, accounts }, `Channels\n${lines.join("\n")}`);
+    // openclaw.runtime=openclaw: saved config still lists; the bridge itself is paused.
+    const gate = channelBridgeState();
+    out(
+      flags,
+      { ok: true, accounts, runtime: gate.runtime, bridge: gate.bridge, ...(gate.message ? { message: gate.message } : {}) },
+      `Channels\n${lines.join("\n")}${gate.message ? `\n\n${gate.message}` : ""}`,
+    );
     return;
   }
 

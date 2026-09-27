@@ -8,10 +8,26 @@ import {
   savePendingPairs,
   upsertCanonicalChannel,
 } from "./config.mjs";
+import { channelBridgeState, channelsPausedBody, CHANNELS_PAUSED_HTTP_STATUS } from "./bridge-gate.mjs";
 import { envAccountsFromProcess } from "./lineage.mjs";
 import { enqueueOutboundDurable } from "./outbound.mjs";
 
 export { OPENCLAW_CHANNELS_PAUSED_MESSAGE } from "./channels-paused.ts";
+export { CHANNELS_PAUSED_HTTP_STATUS } from "./bridge-gate.mjs";
+
+/**
+ * Webhook guard for every /api/hooks/* route. Returns null when Paddy's bridge owns
+ * channels (runtime=paddy). When openclaw.runtime=openclaw, returns a 409 JSON response
+ * `{ ok: false, error: OPENCLAW_CHANNELS_PAUSED_MESSAGE, code: "openclaw_channels_paused", runtime: "openclaw" }`
+ * so providers never get processed twice.
+ */
+export function channelsPausedWebhookResponse(opts?: { home?: string }): Response | null {
+  if (channelBridgeState({ home: opts?.home }).start) return null;
+  return new Response(JSON.stringify(channelsPausedBody()), {
+    status: CHANNELS_PAUSED_HTTP_STATUS,
+    headers: { "content-type": "application/json; charset=utf-8" },
+  });
+}
 
 export const BRIDGE_CHANNELS = [
   "telegram",

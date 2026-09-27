@@ -447,3 +447,21 @@ test("paddy config set does not echo secrets", () => {
   const show = run(["config", "show", "--json"], { PADDY_HOME: home });
   assert.doesNotMatch(show.stdout, /SUPERSECRETCLI99/);
 });
+
+test("channels list prints the OpenClaw paused message once when runtime=openclaw", () => {
+  const msg = "Channels are configured in ~/.openclaw/openclaw.json, Paddy's bridge is paused.";
+  const home = mkdtempSync(join(tmpdir(), "paddy-home-"));
+  const paddy = run(["channels", "list"], { PADDY_HOME: home });
+  assert.equal(paddy.status, 0, paddy.stderr);
+  assert.ok(!paddy.stdout.includes(msg));
+  assert.equal(run(["config", "set", "openclaw.runtime", "\"openclaw\""], { PADDY_HOME: home }).status, 0);
+  const r = run(["channels", "list"], { PADDY_HOME: home });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^Channels\n/);
+  assert.match(r.stdout, /telegram/);
+  assert.equal(r.stdout.split(msg).length - 1, 1);
+  const j = JSON.parse(run(["channels", "list", "--json"], { PADDY_HOME: home }).stdout);
+  assert.equal(j.runtime, "openclaw");
+  assert.equal(j.bridge, "paused");
+  assert.equal(j.message, msg);
+});

@@ -170,6 +170,8 @@ paddy config set openclaw.model openclaw
 
 4. Restart `paddy gateway`. Hosted/demo stays on `openclaw.runtime=paddy` + SuperGrok and never requires OpenClaw.
 
+**Channels on the OpenClaw runtime:** OpenClaw owns the bots (`~/.openclaw/openclaw.json`). With `openclaw.runtime=openclaw`, `paddy gateway` does not start Paddy’s channel bridge (no second poller against the same bots), `paddy channels` still lists your saved config and prints “Channels are configured in ~/.openclaw/openclaw.json, Paddy's bridge is paused.”, and every `/api/hooks/*` route (including `/api/hooks/whatsapp`) answers **409** with `{"ok":false,"error":"<that message>","code":"openclaw_channels_paused","runtime":"openclaw"}`. The runtime is read when the gateway starts, so restart `paddy gateway` after switching.
+
 **ChatGPT on OpenClaw:** operators on OpenClaw **2026.9.14** should run `openclaw update` before relying on ChatGPT-backed agents through this path. Paddy always calls chat completions with `stream: true` (required for that backend).
 
 Probe from the Control UI / FE via `probeOpenClaw` (server fn) or `probeBrain` when runtime is `openclaw` — hits `GET /v1/models`, not a full agent turn.

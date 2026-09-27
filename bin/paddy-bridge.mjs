@@ -19,6 +19,15 @@ import {
   readOutboundQueue,
   writeOutboundQueue,
 } from "../src/lib/harness/outbound.mjs";
+import { channelBridgeState } from "../src/lib/harness/bridge-gate.mjs";
+
+// openclaw.runtime=openclaw: OpenClaw owns the bots. Exit before any poller/timer starts.
+// (paddy-gateway already skips spawning us; this covers a direct `node bin/paddy-bridge.mjs`.)
+const bridgeGate = channelBridgeState();
+if (!bridgeGate.start) {
+  process.stdout.write(`paddy-bridge: ${bridgeGate.message}\n`);
+  process.exit(0);
+}
 
 const HOME = process.env.PADDY_HOME?.trim() || join(homedir(), ".paddy");
 const STATUS = join(HOME, "channels-status.json");

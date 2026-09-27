@@ -1,5 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { applyEnvAccounts, decideInbound, loadChannelConfig } from "@/lib/harness/channels";
+import {
+  applyEnvAccounts,
+  channelsPausedWebhookResponse,
+  decideInbound,
+  loadChannelConfig,
+} from "@/lib/harness/channels";
 import { handleInboundFromVerifiedWebhook } from "@/lib/harness/cli-api";
 import { normalizeInbound } from "@/lib/harness/inbound";
 import { verifyWhatsappSignature } from "@/lib/harness/webhook-verify";
@@ -16,6 +21,9 @@ function whatsappAccount() {
 }
 
 async function handleGet(request: Request) {
+  // openclaw.runtime=openclaw: OpenClaw owns channels — refuse the Meta verify handshake too.
+  const paused = channelsPausedWebhookResponse();
+  if (paused) return paused;
   const url = new URL(request.url);
   const mode = url.searchParams.get("hub.mode");
   const token = url.searchParams.get("hub.verify_token");
@@ -29,6 +37,8 @@ async function handleGet(request: Request) {
 }
 
 async function handlePost(request: Request) {
+  const paused = channelsPausedWebhookResponse();
+  if (paused) return paused;
   const acc = whatsappAccount();
   if (!acc?.token || !acc.phoneId) {
     return json({ ok: false, error: "WhatsApp is not connected." }, 400);

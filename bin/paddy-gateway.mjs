@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { channelBridgeState } from "../src/lib/harness/bridge-gate.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const host = process.env.PADDY_BIND || "127.0.0.1";
@@ -56,7 +57,13 @@ process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
 start([wrapper, viteBin, "dev", "--host", host, "--port", String(port)], "dashboard");
-start([bridge, "--origin", `http://${host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host}:${port}`], "bridge");
+// openclaw.runtime=openclaw: OpenClaw polls the bots — never start a second poller.
+const bridgeGate = channelBridgeState();
+if (bridgeGate.start) {
+  start([bridge, "--origin", `http://${host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host}:${port}`], "bridge");
+} else {
+  process.stdout.write(`paddy: ${bridgeGate.message}\n`);
+}
 
 const origin = `http://${host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host}:${port}`;
 const token = (process.env.PADDY_CLI_TOKEN || "").trim();

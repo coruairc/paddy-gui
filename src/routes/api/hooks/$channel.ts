@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { isBridgeChannel } from "@/lib/harness/channels";
+import { channelsPausedWebhookResponse, isBridgeChannel } from "@/lib/harness/channels";
 import { handleInboundFromVerifiedWebhook } from "@/lib/harness/cli-api";
 import { discordPing, slackUrlVerification, toCliInboundBody } from "@/lib/harness/inbound";
 import { verifyChannelWebhook } from "@/lib/harness/webhook-verify";
@@ -12,6 +12,9 @@ function json(data: unknown, status = 200): Response {
 }
 
 async function handlePost(request: Request, channel: string) {
+  // openclaw.runtime=openclaw: OpenClaw owns channels — refuse before touching the body.
+  const paused = channelsPausedWebhookResponse();
+  if (paused) return paused;
   if (!isBridgeChannel(channel)) return json({ ok: false, error: "Unknown channel." }, 404);
 
   const rawBody = await request.text();
