@@ -15,23 +15,23 @@ Same shape as the usual harness installers.
 macOS / Linux / WSL:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/coruairc/paddy/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.sh | bash
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/coruairc/paddy/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.ps1 | iex
 ```
 
 Skip first-run config:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/coruairc/paddy/main/install.sh | bash -s -- --no-config
+curl -fsSL https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.sh | bash -s -- --no-config
 ```
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/coruairc/paddy/main/install.ps1))) -NoConfig
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.ps1))) -NoConfig
 ```
 
 If git or Node.js 22+ is missing, the script offers to install them. It clones this repo to `~/.paddy/src`, runs `npm install`, and puts `paddy` on your PATH (`~/.local/bin`, and `/usr/local/bin` when writable). If this terminal still says `command not found`:
@@ -95,7 +95,7 @@ Put keys in `~/.paddy/src/selfhost.env` (copy `selfhost.env.example`) or `~/.pad
 ## Manual
 
 ```bash
-git clone https://github.com/coruairc/paddy.git
+git clone https://github.com/coruairc/paddy-gui.git
 cd paddy
 npm install          # puts `paddy` on PATH
 paddy config

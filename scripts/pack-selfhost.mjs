@@ -49,8 +49,8 @@ if (existsSync(pkgPath)) {
   pkg.name = "paddy";
   pkg.description = "Paddy — Irish-roots super harness. CLI: paddy gateway";
   pkg.bin = { paddy: "./bin/paddy.mjs" };
-  pkg.repository = { type: "git", url: "git+https://github.com/coruairc/paddy.git" };
-  pkg.homepage = "https://github.com/coruairc/paddy";
+  pkg.repository = { type: "git", url: "git+https://github.com/coruairc/paddy-gui.git" };
+  pkg.homepage = "https://github.com/coruairc/paddy-gui";
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 }
 

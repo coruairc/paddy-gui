@@ -1,6 +1,6 @@
-export const INSTALL_REPO = "coruairc/paddy";
+export const INSTALL_REPO = "coruairc/paddy-gui";
 export const INSTALL_RAW =
-  "https://raw.githubusercontent.com/coruairc/paddy/main";
+  "https://raw.githubusercontent.com/coruairc/paddy-gui/main";
 export const INSTALL_PAGES = "https://coruairc.github.io/paddy";
 
 export const INSTALL_SH = `curl -fsSL ${INSTALL_RAW}/install.sh | bash`;

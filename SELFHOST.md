@@ -9,16 +9,16 @@ Not affiliated with the OpenClaw Foundation, Nous Research, OpenAI, Anthropic, G
 Same shape as the usual harness installers. If git or Node.js 22+ is missing, the installer offers to install them.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/coruairc/paddy/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.sh | bash
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/coruairc/paddy/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.ps1 | iex
 ```
 
-That clones [coruairc/paddy](https://github.com/coruairc/paddy), runs `npm install`, and puts `paddy` on your PATH. Then:
+That clones [coruairc/paddy-gui](https://github.com/coruairc/paddy-gui), runs `npm install`, and puts `paddy` on your PATH. Then:
 
 ```bash
 paddy gateway

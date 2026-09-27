@@ -248,7 +248,7 @@ Keys live in ~/.paddy/.env (secrets) and selfhost.env (brains). config.json is t
 canonical structure — OpenClaw and Hermes files are import/export only.
 
 Quick start
-  curl -fsSL https://raw.githubusercontent.com/coruairc/paddy/main/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.sh | bash
   paddy gateway
 `;
 }

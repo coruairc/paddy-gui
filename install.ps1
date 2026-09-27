@@ -1,9 +1,9 @@
 # Paddy installer for Windows PowerShell 5+.
 # Not affiliated with the OpenClaw Foundation or Nous Research.
 #
-#   irm https://raw.githubusercontent.com/coruairc/paddy/main/install.ps1 | iex
-#   powershell -c "irm https://raw.githubusercontent.com/coruairc/paddy/main/install.ps1 | iex"
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/coruairc/paddy/main/install.ps1))) -NoOnboard
+#   irm https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.ps1 | iex
+#   powershell -c "irm https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.ps1 | iex"
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.ps1))) -NoOnboard
 
 [CmdletBinding()]
 param(
@@ -12,7 +12,7 @@ param(
   [switch]$DryRun,
   [switch]$Yes,
   [string]$Ref = $(if ($env:PADDY_REF) { $env:PADDY_REF } else { "main" }),
-  [string]$Repo = $(if ($env:PADDY_REPO) { $env:PADDY_REPO } else { "coruairc/paddy" }),
+  [string]$Repo = $(if ($env:PADDY_REPO) { $env:PADDY_REPO } else { "coruairc/paddy-gui" }),
   [string]$GitDir = $(if ($env:PADDY_GIT_DIR) { $env:PADDY_GIT_DIR } else { (Join-Path $HOME ".paddy\src") }),
   [string]$BinDir = $(if ($env:PADDY_BIN_DIR) { $env:PADDY_BIN_DIR } else { (Join-Path $HOME ".local\bin") })
 )

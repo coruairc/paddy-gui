@@ -2,12 +2,12 @@
 # Paddy installer — Irish-roots super harness.
 # Not affiliated with the OpenClaw Foundation or Nous Research.
 #
-#   curl -fsSL https://raw.githubusercontent.com/coruairc/paddy/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.sh | bash
 #   curl -fsSL …/install.sh | bash -s -- --no-config
 #   curl -fsSL …/install.sh | bash -s -- --help
 set -euo pipefail
 
-REPO="${PADDY_REPO:-coruairc/paddy}"
+REPO="${PADDY_REPO:-coruairc/paddy-gui}"
 REF="${PADDY_REF:-main}"
 PREFIX="${PADDY_HOME:-${HOME}/.paddy}"
 GIT_DIR="${PADDY_GIT_DIR:-${PREFIX}/src}"
@@ -21,11 +21,11 @@ usage() {
 Paddy installer
 
 Usage:
-  curl -fsSL https://raw.githubusercontent.com/coruairc/paddy/main/install.sh | bash
-  curl -fsSL https://raw.githubusercontent.com/coruairc/paddy/main/install.sh | bash -s -- [flags]
+  curl -fsSL https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.sh | bash -s -- [flags]
 
 Windows:
-  powershell -c "irm https://raw.githubusercontent.com/coruairc/paddy/main/install.ps1 | iex"
+  powershell -c "irm https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.ps1 | iex"
 
 Flags:
   --help            This text
