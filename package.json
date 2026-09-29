@@ -1,9 +1,10 @@
 {
-  "name": "app-builder-workspace",
+  "name": "opencode-web",
   "private": true,
   "sideEffects": false,
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "description": "Standalone local web interface and controller for OpenCode. Not part of Paddy/OpenClaw.",
   "bin": {
     "paddy": "./bin/paddy.mjs"
   },
@@ -11,7 +12,7 @@
     "nf3": "0.3.17"
   },
   "scripts": {
-    "dev": "node scripts/with-app-env.mjs vite dev --host 0.0.0.0 --port 8080",
+    "dev": "node scripts/with-app-env.mjs vite dev --host 127.0.0.1 --port 8080",
     "build": "node scripts/with-app-env.mjs vite build && npm run db:migrate",
     "db:migrate": "node scripts/migrate.mjs",
     "build:dev": "node scripts/with-app-env.mjs vite build --mode development",
@@ -22,7 +23,7 @@
     "postinstall": "node scripts/link-cli.mjs",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --test 'scripts/**/*.test.mjs' bin/paddy.test.mjs install.sh.test.mjs && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/harness/mutate.test.ts src/lib/harness/channels.test.ts src/lib/harness/lineage.test.ts src/lib/harness/config.test.ts src/lib/harness/memory-store.test.ts src/lib/harness/outbound.test.ts src/lib/harness/memory-hermes.test.ts src/lib/harness/memory-recall.test.ts src/lib/harness/untrusted.test.ts src/lib/harness/secret-scope.test.ts src/lib/harness/inbound.test.ts src/lib/harness/compact.test.ts src/lib/harness/related.test.ts src/lib/harness/mcp.test.ts src/lib/harness/subagent-policy.test.ts src/lib/harness/cli-auth.test.ts src/lib/harness/webhook-verify.test.ts src/lib/harness/failover.test.ts src/lib/harness/openclaw-gateway.test.ts src/lib/harness/openclaw-gateway-helpers.test.ts src/lib/harness/run-turn-preference.test.ts src/lib/harness/hermes-memory-defaults.test.ts src/lib/harness/hermes-memory-ux.test.ts src/lib/harness/cli-token.test.ts src/lib/harness/config-panel.test.ts src/lib/harness/configure-wizard.test.ts src/lib/harness/setup-model-picker.test.mjs",
+    "test": "node --test 'scripts/**/*.test.mjs' bin/paddy.test.mjs install.sh.test.mjs && node --experimental-strip-types --test src/server/security.test.ts src/server/opencode-client.test.ts src/server/api.test.ts src/server/normalize.test.ts src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/harness/mutate.test.ts src/lib/harness/channels.test.ts src/lib/harness/lineage.test.ts src/lib/harness/config.test.ts src/lib/harness/memory-store.test.ts src/lib/harness/outbound.test.ts src/lib/harness/memory-hermes.test.ts src/lib/harness/memory-recall.test.ts src/lib/harness/untrusted.test.ts src/lib/harness/secret-scope.test.ts src/lib/harness/inbound.test.ts src/lib/harness/compact.test.ts src/lib/harness/related.test.ts src/lib/harness/mcp.test.ts src/lib/harness/subagent-policy.test.ts src/lib/harness/cli-auth.test.ts src/lib/harness/webhook-verify.test.ts src/lib/harness/failover.test.ts src/lib/harness/openclaw-gateway.test.ts src/lib/harness/openclaw-gateway-helpers.test.ts src/lib/harness/run-turn-preference.test.ts src/lib/harness/hermes-memory-defaults.test.ts src/lib/harness/hermes-memory-ux.test.ts src/lib/harness/cli-token.test.ts src/lib/harness/config-panel.test.ts src/lib/harness/configure-wizard.test.ts src/lib/harness/setup-model-picker.test.mjs",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

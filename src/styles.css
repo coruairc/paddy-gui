@@ -25,6 +25,21 @@
   --shadow-border-hover: 0 0 0 1px rgba(255, 255, 255, 0.14);
 }
 
+[data-theme="light"] {
+  --color-bg: #f6f6f4;
+  --color-surface: #ffffff;
+  --color-elevated: #efefec;
+  --color-fg: #18181b;
+  --color-muted: #52525b;
+  --color-subtle: #71717a;
+  --color-border: #e4e4e7;
+  --color-accent: #18181b;
+  --color-accent-fg: #fafafa;
+  --color-ok: #3f7d4a;
+  --color-warn: #9a6b2f;
+  --color-danger: #a33b34;
+}
+
 @layer base {
   html {
     -webkit-font-smoothing: antialiased;

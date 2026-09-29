@@ -1,107 +1,110 @@
-<p align="center">
-  <img src="public/paddy-icon.jpg" width="160" height="160" alt="Paddy Irishman">
-</p>
+# Paddy
 
-# Paddy Irishman
+Local desk for a coding agent on your computer. The interface is Paddy. [OpenCode](https://opencode.ai) does the work.
 
-Irish-roots super harness. Gateway presence plus a closed learning loop.
+```
+Browser  -- HTTP / SSE -->  local controller  -->  OpenCode
+                                (localhost)         models, sessions, tools, files, shell
+```
 
-Not affiliated with the OpenClaw Foundation, Nous Research, Guinness, or Paddy Irish Whiskey.
+The browser never runs shell commands and never reads the filesystem. The controller is the security boundary. It talks to OpenCode's HTTP API (`opencode serve`) and forwards events. It does not scrape CLI output, and it does not reimplement the agent.
 
-## Install
+## What you can do
 
-Same shape as the usual harness installers.
+- Pick a local project and chat in that directory
+- Watch the agent work: reading, editing, running commands
+- Allow or deny permission prompts in the thread
+- See changed files and diffs
+- Stop a run, then retry
+- Close the browser and resume the same OpenCode session later
+- Set providers, models, agents, and MCP from Settings
 
-macOS / Linux / WSL:
+OpenCode remains the authority for sessions, messages, models, and file changes. The desk stores only GUI metadata (project bookmarks, appearance, an optional server password) in `~/.config/opencode-web/state.json`.
+
+## Requirements
+
+- Node.js 22+
+- npm
+- OpenCode on `PATH`, or at `~/.opencode/bin/opencode`
+
+## Install OpenCode
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.sh | bash
+curl -fsSL https://opencode.ai/install | bash
+opencode --version
 ```
 
-Windows (PowerShell):
-
-```powershell
-irm https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.ps1 | iex
-```
-
-Skip first-run config:
+## Start
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.sh | bash -s -- --no-config
+npm install
+npm run dev
 ```
 
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.ps1))) -NoConfig
-```
+Open http://127.0.0.1:8080.
 
-If git or Node.js 22+ is missing, the script offers to install them. It clones this repo to `~/.paddy/src`, runs `npm install`, and puts `paddy` on your PATH (`~/.local/bin`, and `/usr/local/bin` when writable). If this terminal still says `command not found`:
+`npm run dev` binds to localhost. Remote bind is opt-in and requires a token:
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
-hash -r
-paddy gateway
+OPENCODE_WEB_HOST=0.0.0.0 OPENCODE_WEB_TOKEN="$(openssl rand -hex 24)" npm run dev
 ```
 
-## Then
+Without `OPENCODE_WEB_TOKEN`, non-loopback API calls are rejected.
+
+## Connect
+
+On startup the controller:
+
+1. Looks for an OpenCode binary (`OPENCODE_BIN`, then `~/.opencode/bin/opencode`).
+2. Uses `OPENCODE_URL`, or a URL saved in Settings → Connection, if set.
+3. Otherwise attaches to `http://127.0.0.1:4096` when that server is already healthy.
+4. Otherwise starts `opencode serve` on localhost.
+
+If OpenCode is already running and wants a password, set it in Settings → Connection. The password stays in the controller state file (mode `0600`) and is not returned to the browser.
+
+## Projects
+
+Sidebar → Add project, then paste an absolute directory. The controller checks that the path exists, is a directory, and is on the allowlist before any OpenCode call uses it. Removing a project only removes it from this desk.
+
+The active project and its git branch show in the header. They do not take over the conversation.
+
+## Models, agents, MCP
+
+Settings reads providers, models, agents, and MCP status from the installed OpenCode. Saving a key calls OpenCode's auth API. The key is not kept in frontend state and is redacted from diagnostics.
+
+The header model menu lists models OpenCode reports, grouped by provider. Choosing one writes OpenCode config (`PATCH /config`). There is no separate model catalogue in this repo.
+
+## Security
+
+- The OpenCode child binds to `127.0.0.1`.
+- API calls from non-loopback addresses require `OPENCODE_WEB_TOKEN`.
+- Cross-origin browser requests are rejected.
+- Workspace paths must be absolute directories on the project allowlist.
+- API keys and the OpenCode server password are not logged and are stripped from responses.
+- Permission prompts are shown in the thread. Nothing dangerous is auto-approved.
+- There is no cloud backend.
+
+## Development
 
 ```bash
-paddy config               # write ~/.paddy — models, channels, secrets
-paddy config show          # canonical JSON (tokens redacted)
-paddy gateway              # control plane (foreground)
-paddy gateway start        # background
-paddy dashboard            # web console
-paddy chat "hello"
-paddy models
-paddy models prefer laguna
-paddy channels add telegram --token <bot>
-paddy config import        # from ~/.openclaw and ~/.hermes
-paddy channels export --to both
-paddy pairing approve ABCD
-paddy skills
-paddy skills install meeting-actions
-paddy skills import ./SKILL.md
-paddy skills export standup-notes
-paddy memory
-paddy doctor
+npm install
+npm run dev       # desk + controller at http://127.0.0.1:8080
+npm run build
+npm run preview
+npm run test
+npm run typecheck
 ```
 
-`paddy onboard` is an alias for `paddy config`.
+`OPENCODE_WEB_HOME` overrides the state directory. `OPENCODE_BIN` points at a specific binary. `OPENCODE_URL` points at an already-running server.
 
-## Config
+Tests mock OpenCode. A real API key is not required. They cover connection, sessions, prompts, config updates, event frames, invalid workspaces, unauthorized remote access, secret redaction, and malformed JSON.
 
-One file. Paddy owns it. OpenClaw and Hermes are import/export only.
+## Layout
 
-| File | What it holds |
+| Piece | Role |
 |---|---|
-| `~/.paddy/config.json` | Structure and behaviour (gateway, brain, channels, access policy) |
-| `~/.paddy/.env` | Secrets (`TELEGRAM_BOT_TOKEN`, CLI token, …) referenced as `${ENV}` |
-| `selfhost.env` | Brain keys / setup-tokens |
-
-```bash
-paddy config                 # init
-paddy config show
-paddy config validate
-paddy config import --from openclaw
-paddy channels add telegram --token <bot>
-paddy models prefer laguna
-```
-
-Saving a channel writes Paddy config. Export writes OpenClaw / Hermes compatibility files without changing Paddy. Import merges with conflict prompts — never a silent overwrite.
-
-Access policy on each channel: **pairing**, **allowlist**, or **open**.
-
-Put keys in `~/.paddy/src/selfhost.env` (copy `selfhost.env.example`) or `~/.paddy/selfhost.env`. Sign-in in the dashboard is for the browser; the CLI spends the gateway environment.
-
-## Manual
-
-```bash
-git clone https://github.com/coruairc/paddy-gui.git
-cd paddy
-npm install          # puts `paddy` on PATH
-paddy config
-paddy gateway
-```
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+| `src/components/desk` | Chat, sidebar, settings — existing Paddy visual language |
+| `src/server/opencode-client.ts` | OpenCode HTTP client, matched to `opencode serve` |
+| `src/server/runtime.ts` | Detect, start, reconnect, event fan-out |
+| `src/server/api.ts` | Browser API. Validates projects and redacts secrets |
+| `src/server/state.ts` | GUI metadata only |

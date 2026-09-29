@@ -1,4 +1,5 @@
 import { readdirSync } from "node:fs";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
@@ -142,12 +143,50 @@ function authPopupPlugin(): Plugin {
   };
 }
 
-// `0.0.0.0:8080` is the live-preview contract — don't change host/port.
+/**
+ * Local controller. The browser only talks to /api on this process.
+ * OpenCode itself stays on 127.0.0.1 and is never exposed by this plugin.
+ */
+function opencodeControllerPlugin(): Plugin {
+  const mount = (middlewares: { use: (fn: (req: IncomingMessage, res: ServerResponse, next: (err?: unknown) => void) => void) => void }) => {
+    middlewares.use(async (req, res, next) => {
+      const path = (req.url ?? "").split("?", 1)[0] ?? "";
+      if (!path.startsWith("/api")) {
+        next();
+        return;
+      }
+      try {
+        const { handleNode } = (await import("./src/server/http.ts")) as {
+          handleNode: (req: IncomingMessage, res: ServerResponse) => Promise<void>;
+        };
+        await handleNode(req, res);
+      } catch (err) {
+        console.error("[opencode-web] controller failed:", err);
+        if (!res.headersSent) {
+          res.statusCode = 500;
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ error: "Controller error" }));
+        }
+      }
+    });
+  };
+  return {
+    name: "opencode-web-controller",
+    configureServer(server) {
+      mount(server.middlewares);
+    },
+    configurePreviewServer(server) {
+      mount(server.middlewares);
+    },
+  };
+}
+
+// Dev server stays on port 8080. Host defaults to loopback; set OPENCODE_WEB_HOST to opt into remote bind.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
 export default defineConfig(({ command, isPreview }) => ({
   server: {
-    host: "0.0.0.0",
+    host: process.env.OPENCODE_WEB_HOST || "127.0.0.1",
     port: 8080,
     strictPort: true,
   },
@@ -157,7 +196,8 @@ export default defineConfig(({ command, isPreview }) => ({
     strictPort: true,
   },
   resolve: { tsconfigPaths: true },
-  plugins: [
+    plugins: [
+    opencodeControllerPlugin(),
     pgliteBootstrapPlugin(),
     // Before tanstackStart so /auth/popup never falls through to the SPA.
     authPopupPlugin(),
