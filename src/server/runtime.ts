@@ -3,7 +3,8 @@
  * and keep GUI metadata. The browser never receives the server password.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { accessSync } from "node:fs";
 import { homedir } from "node:os";
@@ -77,6 +78,7 @@ export class ControllerRuntime {
     const fromEnv = process.env.OPENCODE_BIN?.trim();
     const candidates = [
       fromEnv,
+      which("opencode"),
       join(homedir(), ".opencode", "bin", "opencode"),
       "/usr/local/bin/opencode",
       "/usr/bin/opencode",
@@ -310,7 +312,16 @@ export class ControllerRuntime {
 }
 
 function randomPassword(): string {
-  return `ocw_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  return `ocw_${randomBytes(24).toString("hex")}`;
+}
+
+function which(command: string): string | null {
+  try {
+    const found = execFileSync("which", [command], { encoding: "utf8" }).trim();
+    return found || null;
+  } catch {
+    return null;
+  }
 }
 
 function sleep(ms: number): Promise<void> {

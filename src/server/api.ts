@@ -355,14 +355,15 @@ async function replyPermission(runtime: ControllerRuntime, request: Request, id:
   }
   const project = activeProject(runtime);
   const sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
-  if (body.kind === "question") {
-    if (reply === "reject") await runtime.requireClient().rejectQuestion(project?.path, id);
-    else {
-      const answer = typeof body.message === "string" ? body.message : "yes";
-      await runtime.requireClient().replyQuestion(project?.path, id, [[answer]]);
+    if (body.kind === "question") {
+      if (reply === "reject") await runtime.requireClient().rejectQuestion(project?.path, id);
+      else {
+        const answer = typeof body.message === "string" ? body.message.trim() : "";
+        if (!answer) return json(400, { error: "An answer is required" });
+        await runtime.requireClient().replyQuestion(project?.path, id, [[answer]]);
+      }
+      return json(200, { ok: true });
     }
-    return json(200, { ok: true });
-  }
   await runtime.requireClient().replyPermission(project?.path, id, reply, sessionId);
   return json(200, { ok: true });
 }

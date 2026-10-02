@@ -17,3 +17,9 @@ public/__grok
 .vite
 .cache
 .paddy-data
+# OpenCode project config. May be written when a project model is saved. Never commit secrets.
+config.json
+opencode.json
+opencode.jsonc
+
+.vercel

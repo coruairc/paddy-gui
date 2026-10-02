@@ -47,6 +47,8 @@ export function DeskApp() {
   const [showJump, setShowJump] = useState(false);
   const [selectedDiff, setSelectedDiff] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  const sessionRef = useRef<string | null>(null);
+  sessionRef.current = sessionId;
 
   const project = projects.find((item) => item.id === activeProjectId) ?? null;
 
@@ -83,13 +85,11 @@ export function DeskApp() {
       return;
     }
     if (event.type === "status") {
-      setSessionId((current) => {
-        if (current && event.sessionId && current !== event.sessionId) return current;
-        setWorking(event.state === "working" || event.state === "retry");
-        if (event.state === "error" && event.detail) setError(event.detail);
-        if (event.state === "idle") setWorking(false);
-        return current;
-      });
+      const current = sessionRef.current;
+      if (current && event.sessionId && current !== event.sessionId) return;
+      setWorking(event.state === "working" || event.state === "retry");
+      if (event.state === "error" && event.detail) setError(event.detail);
+      if (event.state === "idle") setWorking(false);
       return;
     }
     if (event.type === "diff") {
@@ -655,7 +655,15 @@ function PermissionCard({
             )}
             <Button
               size="sm"
-              onClick={() => onReply("once", prompt.kind === "question" ? window.prompt("Answer") || "ok" : undefined)}
+              onClick={() => {
+                if (prompt.kind !== "question") {
+                  onReply("once");
+                  return;
+                }
+                const answer = window.prompt("Answer");
+                if (!answer?.trim()) return;
+                onReply("once", answer.trim());
+              }}
             >
               {prompt.kind === "question" ? "Answer" : "Allow"}
             </Button>

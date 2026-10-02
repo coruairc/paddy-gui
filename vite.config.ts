@@ -181,12 +181,22 @@ function opencodeControllerPlugin(): Plugin {
   };
 }
 
-// Dev server stays on port 8080. Host defaults to loopback; set OPENCODE_WEB_HOST to opt into remote bind.
+function bindHost(): string {
+  const requested = process.env.OPENCODE_WEB_HOST?.trim() || "127.0.0.1";
+  const loopback = requested === "127.0.0.1" || requested === "localhost" || requested === "::1";
+  if (!loopback && !process.env.OPENCODE_WEB_TOKEN?.trim()) {
+    console.error("[opencode-web] refusing non-loopback bind without OPENCODE_WEB_TOKEN; using 127.0.0.1");
+    return "127.0.0.1";
+  }
+  return requested;
+}
+
+// Dev server stays on port 8080. Host defaults to loopback; set OPENCODE_WEB_HOST and OPENCODE_WEB_TOKEN to opt into remote bind.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
 export default defineConfig(({ command, isPreview }) => ({
   server: {
-    host: process.env.OPENCODE_WEB_HOST || "127.0.0.1",
+    host: bindHost(),
     port: 8080,
     strictPort: true,
   },
@@ -198,10 +208,6 @@ export default defineConfig(({ command, isPreview }) => ({
   resolve: { tsconfigPaths: true },
     plugins: [
     opencodeControllerPlugin(),
-    pgliteBootstrapPlugin(),
-    // Before tanstackStart so /auth/popup never falls through to the SPA.
-    authPopupPlugin(),
-    // Dev-only /__app-env, read by scripts/check-auth-invariant.mjs.
     appEnvPlugin(),
     // PWA head + ?install=1 tutorial page; runs before Start/Nitro.
     grokPwaPlugin(),

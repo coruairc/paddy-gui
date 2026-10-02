@@ -133,6 +133,13 @@ test("config changes are forwarded, not reimplemented", async () => {
   assert.equal((result.body as { model: string }).model, "anthropic/claude");
 });
 
+test("question replies require an explicit answer", async () => {
+  const { runtime } = runtimeWithProject();
+  const missing = await call(runtime, "POST", "/api/permissions/que_1/reply", { reply: "once", kind: "question" });
+  assert.equal(missing.status, 400);
+  assert.match((missing.body as { error: string }).error, /answer/i);
+});
+
 test("OpenCode errors keep a useful status", async () => {
   const { runtime } = runtimeWithProject();
   runtime.client = {

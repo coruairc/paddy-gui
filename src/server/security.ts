@@ -111,7 +111,7 @@ export function safeJson(text: string): { ok: true; value: unknown } | { ok: fal
   }
 }
 
-const SECRET_KEY = /^(api[_-]?key|key|token|password|secret|authorization|refresh|access)$/i;
+const SECRET_KEY = /(^key$|api[_-]?key|token|password|secret|authorization|credential|private[_-]?key)/i;
 
 /** Remove credential-shaped fields before anything reaches the browser or logs. */
 export function redactSecrets<T>(value: T, extra: readonly string[] = []): T {

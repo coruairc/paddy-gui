@@ -1,6 +1,8 @@
 # Paddy
 
-Local desk for a coding agent on your computer. The interface is Paddy. [OpenCode](https://opencode.ai) does the work.
+This is a standalone web interface and local controller for OpenCode. It is not part of the Paddy/OpenClaw agent runtime.
+
+Paddy is the interface. [OpenCode](https://opencode.ai) is the underlying agent and runtime.
 
 ```
 Browser  -- HTTP / SSE -->  local controller  -->  OpenCode
@@ -64,7 +66,7 @@ If OpenCode is already running and wants a password, set it in Settings → Conn
 
 ## Projects
 
-Sidebar → Add project, then paste an absolute directory. The controller checks that the path exists, is a directory, and is on the allowlist before any OpenCode call uses it. Removing a project only removes it from this desk.
+Sidebar → Add project, then paste an absolute directory. The controller checks that the path exists and is a directory, stores the real path, and refuses later session calls that are not one of those bookmarks. Removing a project only removes it from this desk.
 
 The active project and its git branch show in the header. They do not take over the conversation.
 
@@ -73,6 +75,14 @@ The active project and its git branch show in the header. They do not take over 
 Settings reads providers, models, agents, and MCP status from the installed OpenCode. Saving a key calls OpenCode's auth API. The key is not kept in frontend state and is redacted from diagnostics.
 
 The header model menu lists models OpenCode reports, grouped by provider. Choosing one writes OpenCode config (`PATCH /config`). There is no separate model catalogue in this repo.
+
+## Permissions
+
+If OpenCode asks before a command or edit, the request appears in the thread. Nothing is approved automatically. Allow, Always, and Deny are forwarded to OpenCode's permission API. Cancelling a question does not send an answer.
+
+## MCP and agents
+
+Settings → Agents and Settings → MCP show what the installed OpenCode reports. Saving an agent writes the fields OpenCode already supports (`prompt`, `model`) through `PATCH /config`. Adding an MCP server calls OpenCode's `POST /mcp`. If the installed server does not support a control, the desk shows the error instead of inventing a setting.
 
 ## Security
 
@@ -97,7 +107,20 @@ npm run typecheck
 
 `OPENCODE_WEB_HOME` overrides the state directory. `OPENCODE_BIN` points at a specific binary. `OPENCODE_URL` points at an already-running server.
 
-Tests mock OpenCode. A real API key is not required. They cover connection, sessions, prompts, config updates, event frames, invalid workspaces, unauthorized remote access, secret redaction, and malformed JSON.
+Tests mock OpenCode. A real API key is not required. They cover connection, sessions, prompts, config updates, event frames, invalid workspaces, unauthorized remote access, secret redaction, malformed JSON, and permission answers.
+
+```bash
+npm test
+```
+
+## Known limitations
+
+- The desk does not search `PATH` beyond `which opencode` plus `~/.opencode/bin/opencode`. Set `OPENCODE_BIN` if detection misses your install.
+- A project bookmark is an absolute directory you explicitly add. Later calls cannot point OpenCode at a path that is not one of those bookmarks.
+- Provider keys are stored by OpenCode, not by this app. Diagnostics redact common secret field names; do not paste keys into chat.
+- Remote bind (`OPENCODE_WEB_HOST`) is refused unless `OPENCODE_WEB_TOKEN` is set. The desk UI itself is built for localhost and does not attach that token to browser requests, so remote use is not a supported client mode yet.
+- Agent and MCP controls only cover the installed OpenCode HTTP API. Unsupported options are not synthesized.
+- Streaming depends on OpenCode's event stream. If it drops, the thread shows the error and Stop/Reconnect rather than a silent spinner.
 
 ## Layout
 
