@@ -1,8 +1,8 @@
 # Paddy
 
-This is a standalone web interface and local controller for OpenCode. It is not part of the Paddy/OpenClaw agent runtime.
+Paddy is a local web interface for [OpenCode](https://opencode.ai). Paddy is the interface. OpenCode does the work.
 
-Paddy is the interface. [OpenCode](https://opencode.ai) is the underlying agent and runtime.
+This is a standalone web interface and local controller for OpenCode. It is not part of the Paddy/OpenClaw agent runtime.
 
 ```
 Browser  -- HTTP / SSE -->  local controller  -->  OpenCode
@@ -36,6 +36,31 @@ curl -fsSL https://opencode.ai/install | bash
 opencode --version
 ```
 
+## Install
+
+The one-liner clones the repo, runs `npm install`, and puts `paddy` on PATH:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.sh | bash
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.ps1 | iex
+```
+
+After install:
+
+```bash
+paddy              # start the desk at http://127.0.0.1:8080
+paddy update       # pull the latest and reinstall
+paddy doctor       # print install + runtime info
+paddy uninstall    # remove the wrapper
+```
+
+If git or Node.js 22+ are missing, the installer offers to install them.
+
 ## Start
 
 ```bash
@@ -43,15 +68,21 @@ npm install
 npm run dev
 ```
 
+Or, after the install script:
+
+```bash
+paddy
+```
+
 Open http://127.0.0.1:8080.
 
-`npm run dev` binds to localhost. Remote bind is opt-in and requires a token:
+`npm run dev` and `paddy` both bind to localhost. Remote bind is opt-in and requires a token:
 
 ```bash
 OPENCODE_WEB_HOST=0.0.0.0 OPENCODE_WEB_TOKEN="$(openssl rand -hex 24)" npm run dev
 ```
 
-Without `OPENCODE_WEB_TOKEN`, non-loopback API calls are rejected.
+Without `OPENCODE_WEB_TOKEN`, non-loopback API calls are refused.
 
 ## Connect
 

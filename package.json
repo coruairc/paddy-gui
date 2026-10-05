@@ -1,10 +1,13 @@
 {
-  "name": "opencode-web",
+  "name": "paddy-gui",
   "private": true,
   "sideEffects": false,
   "type": "module",
   "version": "0.2.0",
-  "description": "Standalone local web interface and controller for OpenCode. Not part of Paddy/OpenClaw.",
+  "description": "Local web interface for OpenCode. Paddy is the interface; OpenCode does the work.",
+  "bin": {
+    "paddy": "./bin/paddy.mjs"
+  },
   "overrides": {
     "nf3": "0.3.17"
   },
@@ -15,8 +18,10 @@
     "preview": "node scripts/with-app-env.mjs vite preview",
     "preview:restart": "node scripts/preview.mjs restart",
     "preview:stop": "node scripts/preview.mjs stop",
+    "paddy": "node bin/paddy.mjs",
+    "postinstall": "node scripts/link-cli.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/server/security.test.ts src/server/opencode-client.test.ts src/server/api.test.ts src/server/normalize.test.ts",
+    "test": "node --test scripts/install.sh.test.mjs && node --experimental-strip-types --test src/server/security.test.ts src/server/opencode-client.test.ts src/server/api.test.ts src/server/normalize.test.ts",
     "lint": "eslint .",
     "format": "prettier --write ."
   },
