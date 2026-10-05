@@ -26,7 +26,16 @@ jobs:
 
       - name: log in to GHCR
         if: github.event_name != 'pull_request'
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The default `docker` buildx driver cannot export GHA cache. This sets up
+      # a docker-container driver that supports cache-from/cache-to: type=gha.
+      - name: set up buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: metadata
         id: meta
