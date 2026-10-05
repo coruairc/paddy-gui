@@ -38,7 +38,9 @@ opencode --version
 
 ## Install
 
-The one-liner clones the repo, runs `npm install`, and puts `paddy` on PATH:
+Two paths:
+
+**Option 1 — one-liner from source** (clones the repo, runs `npm install`, puts `paddy` on PATH):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.sh | bash
@@ -50,16 +52,25 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/coruairc/paddy-gui/main/install.ps1 | iex
 ```
 
-After install:
+If git or Node.js 22+ are missing, the installer offers to install them.
+
+**Option 2 — container image** (Node 24 + Paddy, OpenCode bundled):
 
 ```bash
-paddy              # start the desk at http://127.0.0.1:8080
-paddy update       # pull the latest and reinstall
-paddy doctor       # print install + runtime info
-paddy uninstall    # remove the wrapper
+docker run --rm -p 8080:8080 \
+  -e OPENCODE_WEB_TOKEN="$(openssl rand -hex 24)" \
+  ghcr.io/coruairc/paddy-gui:latest
 ```
 
-If git or Node.js 22+ are missing, the installer offers to install them.
+Or with the bundled compose file:
+
+```bash
+OPENCODE_WEB_TOKEN=$(openssl rand -hex 24) docker compose up
+```
+
+Open http://localhost:8080.
+
+`OPENCODE_WEB_HOST` defaults to `0.0.0.0` in the image. The controller still requires `OPENCODE_WEB_TOKEN` for non-loopback callers. State lives at `/state` inside the container; the compose file maps `./paddy-data` onto it.
 
 ## Start
 

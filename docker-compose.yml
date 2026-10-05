@@ -1,0 +1,31 @@
+# Run Paddy in a container.
+#
+#   OPENCODE_WEB_TOKEN=$(openssl rand -hex 24) docker compose up
+#
+# Then open http://localhost:8080.
+#
+# State lives on the host in ./paddy-data so projects and appearance survive
+# image rebuilds.
+
+services:
+  paddy:
+    image: ghcr.io/coruairc/paddy-gui:latest
+    pull_policy: always
+    container_name: paddy
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      OPENCODE_WEB_HOST: 0.0.0.0
+      # Override before starting. The controller refuses non-loopback calls
+      # without a token.
+      OPENCODE_WEB_TOKEN: ${OPENCODE_WEB_TOKEN:?set OPENCODE_WEB_TOKEN to a random string}
+      PADDY_HOME: /state
+    volumes:
+      - ./paddy-data:/state
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
