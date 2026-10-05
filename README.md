@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/paddy-icon.jpg" width="160" height="160" alt="Paddy">
+</p>
+
 # Paddy
 
 Paddy is a local web interface for [OpenCode](https://opencode.ai). Paddy is the interface. OpenCode does the work.

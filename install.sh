@@ -302,7 +302,41 @@ if [ "$path_has_bin" != 1 ]; then
   fi
 fi
 
-printf '\n\033[1;32mPaddy installed\033[0m\n\n'
+paddy_mark() {
+  if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
+    cat <<'PADDYMARK'
+            ▄▄▄   ▄▄▄   ▀▀▀   ▀▀▀
+          ▀███▀ █████ ███▀  █████
+        ▄▄▄█▀▀▀▄█████▀▀▀▀▀███
+       ███████ ███▀▀▀  ▄▄▄▄▄
+      ███  ██████ ▄▀▀▀▀▀▄███▀
+     ████▄▄██████▀▄▄ ████▀▀▀
+    ██▀██▀████████▀███▀▀▀▀▀
+    ▀▄▄▄ ▄▄▄███▀▀▀█▀▀▀███
+        ▀▀▀▀▀▀ ▀▀▀▀▀  ▀▀▀▀
+PADDYMARK
+  else
+    cat <<'PADDYPLAIN'
+              .-----.
+           .-'#######'-.
+          /########### \
+         | ###     ### |
+         |  (•)   (•)  |
+          \    ___    /
+           |  /~~~\  |
+           |  |   |  |
+           |  |   |  |
+            \ '---' /
+PADDYPLAIN
+  fi
+}
+
+paddy_mark
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
+  printf '\n\033[1;32mPaddy installed\033[0m\n\n'
+else
+  printf '\nPaddy installed\n\n'
+fi
 cat <<EOF
   paddy              # start the desk at http://127.0.0.1:8080
   paddy update       # pull the latest and reinstall
