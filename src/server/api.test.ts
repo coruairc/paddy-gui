@@ -96,7 +96,7 @@ test("new session, resume, and rename stay on OpenCode", async () => {
 
 test("project selection rejects paths outside the allowlist", async () => {
   const { runtime } = runtimeWithProject();
-  const bad = await call(runtime, "POST", "/api/projects", { path: "/tmp/not-a-real-opencode-web-workspace" });
+  const bad = await call(runtime, "POST", "/api/projects", { path: "/tmp/not-a-real-paddy-workspace" });
   assert.equal(bad.status, 400);
   const relative = await call(runtime, "POST", "/api/projects", { path: "relative" });
   assert.equal(relative.status, 400);

@@ -40,7 +40,7 @@ export const EMPTY_STATE: AppState = {
 
 export function stateFilePath(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
   const override = env.OPENCODE_WEB_HOME?.trim();
-  const root = override || join(home, ".config", "opencode-web");
+  const root = override || join(home, ".paddy");
   return join(root, "state.json");
 }
 

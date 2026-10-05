@@ -18,7 +18,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const installRoot = resolve(here, "..");
 const home = homedir();
 const binDir = process.env.PADDY_BIN_DIR?.trim() || join(home, ".local", "bin");
-const stateDir = process.env.PADDY_HOME?.trim() || join(home, ".config", "opencode-web");
+const stateDir =
+  process.env.PADDY_HOME?.trim() ||
+  (existsSync(join(home, ".paddy")) ? join(home, ".paddy") : join(home, ".config", "opencode-web"));
 const nodeMajor = Number.parseInt((process.versions.node.split(".")[0] ?? "0"), 10);
 
 function say(line) { process.stdout.write(`${line}\n`); }
@@ -78,7 +80,7 @@ Usage:
   paddy help           Print this help
 
 Environment:
-  PADDY_HOME           State directory (default ~/.config/opencode-web)
+  PADDY_HOME           State directory (default ~/.paddy)
   PADDY_BIN_DIR        Where the wrapper lives (default ~/.local/bin)
   OPENCODE_URL         Connect to an already-running OpenCode server
   OPENCODE_SERVER_PASSWORD

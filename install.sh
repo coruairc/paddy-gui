@@ -9,7 +9,7 @@ set -euo pipefail
 
 REPO="${PADDY_REPO:-coruairc/paddy-gui}"
 REF="${PADDY_REF:-main}"
-PREFIX="${PADDY_HOME:-${HOME}/.config/opencode-web}"
+PREFIX="${PADDY_HOME:-${HOME}/.paddy}"
 GIT_DIR="${PADDY_GIT_DIR:-${HOME}/.local/share/paddy-gui}"
 BIN_DIR="${PADDY_BIN_DIR:-${HOME}/.local/bin}"
 DRY_RUN=0

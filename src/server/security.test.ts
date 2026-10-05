@@ -32,7 +32,7 @@ test("invalid workspaces never pass the allowlist", () => {
   const project = join(root, "app");
   mkdirSync(project);
   assert.equal(validateWorkspacePath("relative/path").ok, false);
-  assert.equal(validateWorkspacePath("/no/such/opencode-web-path").ok, false);
+  assert.equal(validateWorkspacePath("/no/such/paddy-path").ok, false);
   assert.equal(validateWorkspacePath(join(project, "missing-file")).ok, false);
   const file = join(root, "note.txt");
   writeFileSync(file, "x");

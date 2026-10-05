@@ -161,7 +161,7 @@ function opencodeControllerPlugin(): Plugin {
         };
         await handleNode(req, res);
       } catch (err) {
-        console.error("[opencode-web] controller failed:", err);
+        console.error("[paddy] controller failed:", err);
         if (!res.headersSent) {
           res.statusCode = 500;
           res.setHeader("content-type", "application/json");
@@ -171,7 +171,7 @@ function opencodeControllerPlugin(): Plugin {
     });
   };
   return {
-    name: "opencode-web-controller",
+    name: "paddy-controller",
     configureServer(server) {
       mount(server.middlewares);
     },
@@ -185,7 +185,7 @@ function bindHost(): string {
   const requested = process.env.OPENCODE_WEB_HOST?.trim() || "127.0.0.1";
   const loopback = requested === "127.0.0.1" || requested === "localhost" || requested === "::1";
   if (!loopback && !process.env.OPENCODE_WEB_TOKEN?.trim()) {
-    console.error("[opencode-web] refusing non-loopback bind without OPENCODE_WEB_TOKEN; using 127.0.0.1");
+    console.error("[paddy] refusing non-loopback bind without OPENCODE_WEB_TOKEN; using 127.0.0.1");
     return "127.0.0.1";
   }
   return requested;

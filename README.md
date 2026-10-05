@@ -21,7 +21,7 @@ The browser never runs shell commands and never reads the filesystem. The contro
 - Close the browser and resume the same OpenCode session later
 - Set providers, models, agents, and MCP from Settings
 
-OpenCode remains the authority for sessions, messages, models, and file changes. The desk stores only GUI metadata (project bookmarks, appearance, an optional server password) in `~/.config/opencode-web/state.json`.
+OpenCode remains the authority for sessions, messages, models, and file changes. Paddy keeps only what the desk needs (project bookmarks, appearance, an optional server password) in `~/.paddy/state.json`. Set `PADDY_HOME` to override. Earlier installs kept state at `~/.config/opencode-web`; it is reused if present.
 
 ## Requirements
 
