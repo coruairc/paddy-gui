@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/paddy-icon.jpg" width="160" height="160" alt="Paddy">
+  <img src="public/paddy-icon-circle.png" width="160" height="160" alt="Paddy">
 </p>
 
 # Paddy

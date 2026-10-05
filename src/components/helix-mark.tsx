@@ -15,7 +15,7 @@ export function HelixMark({
         className,
       )}
     >
-      <img src="/paddy-icon.jpg" alt="" className="size-full object-cover" />
+      <img src="/paddy-icon-circle.png" alt="" className="size-full object-cover" />
     </span>
   );
 }
