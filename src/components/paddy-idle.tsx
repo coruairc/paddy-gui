@@ -1,46 +1,41 @@
-import { useEffect, useState } from "react";
-import { HelixMark } from "@/components/helix-mark";
+import { PaddyMascot, type PaddyAnimation } from "@/components/paddy-mascot";
+import { isAnimationEnabled } from "@/components/paddy-animations";
+import { useAutonomousDrink } from "@/components/use-autonomous-drink";
 import { cn } from "@/lib/utils";
 
-export type PaddyIdleMove = "pint" | "jig" | "gold";
-
-const MOVES: { id: PaddyIdleMove; caption: string }[] = [
-  { id: "pint", caption: "Downing a pint. Chat when you're ready." },
-  { id: "jig", caption: "Irish dancing. Drop a message to join in." },
-  { id: "gold", caption: "Pulling a pot of gold. Ask him anything." },
-];
+export type PaddyIdleMove = "drink" | "jig" | "coinToss";
 
 const IDLE_CAPTION = "Standing by. Chat when you're ready.";
-
-function pickMove(): PaddyIdleMove {
-  return MOVES[Math.floor(Math.random() * MOVES.length)]!.id;
-}
+const MOTION_CAPTION: Record<PaddyIdleMove, string> = {
+  drink: "Downing a pint. Chat when you're ready.",
+  jig: "Irish dancing. Drop a message to join in.",
+  coinToss: "Tossing a coin into the pot. Ask him anything.",
+};
 
 export function PaddyIdle({
   name,
   className,
   move: forced,
+  busy = false,
 }: {
   name: string;
   className?: string;
-  /** Override for tests / Storybook; otherwise random after mount. */
+  /** Override for tests / Storybook. When set, autonomy is suspended. */
   move?: PaddyIdleMove;
+  /** True while a session is working — keeps Paddy on idle. */
+  busy?: boolean;
 }) {
-  // Static on SSR / first paint; randomize only after mount to avoid hydration mismatch.
-  const [move, setMove] = useState<PaddyIdleMove | null>(forced ?? null);
+  const manual = forced !== undefined;
+  const { animation: autonomous, onAnimationEnd } = useAutonomousDrink({
+    suspended: busy || manual,
+  });
 
-  useEffect(() => {
-    if (forced !== undefined) {
-      setMove(forced);
-      return;
-    }
-    setMove(pickMove());
-  }, [forced]);
+  // A manually forced animation takes precedence; otherwise Paddy runs
+  // autonomously between idle and drink.
+  const animation: PaddyAnimation =
+    manual && isAnimationEnabled(forced) ? forced : autonomous;
 
-  const caption =
-    move === null
-      ? IDLE_CAPTION
-      : (MOVES.find((m) => m.id === move)?.caption ?? IDLE_CAPTION);
+  const caption = animation === "idle" ? IDLE_CAPTION : MOTION_CAPTION[animation];
 
   return (
     <div
@@ -49,42 +44,11 @@ export function PaddyIdle({
         className,
       )}
     >
-      <div
-        className={cn(
-          "paddy-idle-stage rise-in",
-          move ? `paddy-idle--${move}` : "paddy-idle--idle",
-        )}
-        aria-hidden
-      >
-        <div className="paddy-idle-figure">
-          <HelixMark className="size-28 text-accent sm:size-36" />
-        </div>
-        {move === "pint" ? (
-          <span className="paddy-idle-prop paddy-idle-pint" aria-hidden>
-            🍺
-          </span>
-        ) : null}
-        {move === "gold" ? (
-          <>
-            <span className="paddy-idle-prop paddy-idle-pot" aria-hidden>
-              💰
-            </span>
-            <span className="paddy-idle-prop paddy-idle-coin paddy-idle-coin-a" aria-hidden>
-              🪙
-            </span>
-            <span className="paddy-idle-prop paddy-idle-coin paddy-idle-coin-b" aria-hidden>
-              🪙
-            </span>
-            <span className="paddy-idle-prop paddy-idle-coin paddy-idle-coin-c" aria-hidden>
-              🪙
-            </span>
-          </>
-        ) : null}
-        {move === "jig" ? (
-          <span className="paddy-idle-prop paddy-idle-notes" aria-hidden>
-            ♪
-          </span>
-        ) : null}
+      <div className={cn("paddy-idle-stage rise-in", `paddy-idle--${animation}`)} aria-hidden>
+        <PaddyMascot
+          animation={animation}
+          onAnimationEnd={manual ? undefined : onAnimationEnd}
+        />
       </div>
       <div className="rise-in stagger-2">
         <h1 className="font-display text-4xl tracking-tight sm:text-5xl">{name}</h1>
