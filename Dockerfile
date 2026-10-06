@@ -1,8 +1,8 @@
 # Paddy desk — local web client for OpenCode.
 # Image: ghcr.io/coruairc/paddy-gui
 #
-#   docker run --rm -p 8080:8080 \
-#     -e OPENCODE_WEB_TOKEN="$(openssl rand -hex 24)" \
+#   docker run --rm -p 127.0.0.1:8080:8080 \
+#     -e OPENCODE_WEB_HOST=127.0.0.1 \
 #     ghcr.io/coruairc/paddy-gui:latest
 #
 # Paddy is the interface. OpenCode does the work. The container runs the dev
@@ -39,10 +39,10 @@ COPY public ./public
 COPY src ./src
 COPY index.html* tsconfig.json vite.config.ts SELFHOST* ./
 
-# Paddy defaults to loopback. The container must be reachable from the host, so
-# bind to all interfaces. The controller refuses non-loopback calls without a
-# token, so OPENCODE_WEB_TOKEN must be set by the user.
-ENV OPENCODE_WEB_HOST=0.0.0.0 \
+# The host port is intended to be published on loopback by default. The Vite
+# process listens on the container interface, while OPENCODE_WEB_HOST tells
+# the controller whether the published application is local-only or remote.
+ENV OPENCODE_WEB_HOST=127.0.0.1 \
     PORT=8080
 
 EXPOSE 8080

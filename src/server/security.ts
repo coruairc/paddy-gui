@@ -28,8 +28,9 @@ export function authorizePeer(input: {
   remoteAddress?: string | null;
   authorization?: string | null;
   token?: string | null;
+  localOnly?: boolean;
 }): { ok: true } | { ok: false; status: 401; error: string } {
-  if (isLoopbackAddress(input.remoteAddress)) return { ok: true };
+  if (isLoopbackAddress(input.remoteAddress) || input.localOnly) return { ok: true };
   const expected = input.token?.trim();
   if (!expected) {
     return {

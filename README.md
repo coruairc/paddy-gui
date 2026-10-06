@@ -61,20 +61,32 @@ If git or Node.js 22+ are missing, the installer offers to install them.
 **Option 2 — container image** (Node 24 + Paddy, OpenCode bundled):
 
 ```bash
-docker run --rm -p 8080:8080 \
-  -e OPENCODE_WEB_TOKEN="$(openssl rand -hex 24)" \
+docker run --rm -p 127.0.0.1:8080:8080 \
+  -e OPENCODE_WEB_HOST=127.0.0.1 \
   ghcr.io/coruairc/paddy-gui:latest
 ```
 
 Or with the bundled compose file:
 
 ```bash
-OPENCODE_WEB_TOKEN=$(openssl rand -hex 24) docker compose up
+docker compose up
 ```
 
 Open http://localhost:8080.
 
-`OPENCODE_WEB_HOST` defaults to `0.0.0.0` in the image. The controller still requires `OPENCODE_WEB_TOKEN` for non-loopback callers. State lives at `/state` inside the container; the compose file maps `./paddy-data` onto it.
+The default container/Compose setup publishes only to `127.0.0.1` and needs no Paddy login. State lives at `/state` inside the container; the compose file maps `./paddy-data` onto it.
+
+For LAN/remote access, bind deliberately to a non-loopback address and provide a token:
+
+```bash
+TOKEN="$(openssl rand -hex 24)"
+docker run --rm -p 8080:8080 \
+  -e OPENCODE_WEB_HOST=0.0.0.0 \
+  -e OPENCODE_WEB_TOKEN="$TOKEN" \
+  ghcr.io/coruairc/paddy-gui:latest
+```
+
+Open `http://localhost:8080/?token=$TOKEN` once. Paddy exchanges the URL token for an HttpOnly cookie, removes it from the address bar, and uses that cookie for normal API calls and the SSE event stream.
 
 ## Start
 
@@ -134,6 +146,7 @@ Settings → Agents and Settings → MCP show what the installed OpenCode report
 
 - The OpenCode child binds to `127.0.0.1`.
 - API calls from non-loopback addresses require `OPENCODE_WEB_TOKEN`.
+- In token mode, the first URL token is exchanged for an HttpOnly, SameSite cookie; EventSource/SSE and streaming requests use that cookie.
 - Cross-origin browser requests are rejected.
 - Workspace paths must be absolute directories on the project allowlist.
 - API keys and the OpenCode server password are not logged and are stripped from responses.
@@ -164,7 +177,7 @@ npm test
 - The desk does not search `PATH` beyond `which opencode` plus `~/.opencode/bin/opencode`. Set `OPENCODE_BIN` if detection misses your install.
 - A project bookmark is an absolute directory you explicitly add. Later calls cannot point OpenCode at a path that is not one of those bookmarks.
 - Provider keys are stored by OpenCode, not by this app. Diagnostics redact common secret field names; do not paste keys into chat.
-- Remote bind (`OPENCODE_WEB_HOST`) is refused unless `OPENCODE_WEB_TOKEN` is set. The desk UI itself is built for localhost and does not attach that token to browser requests, so remote use is not a supported client mode yet.
+- Remote bind (`OPENCODE_WEB_HOST`) is refused unless `OPENCODE_WEB_TOKEN` is set. Remote browser access starts with the one-time `?token=...` URL exchange described above.
 - Agent and MCP controls only cover the installed OpenCode HTTP API. Unsupported options are not synthesized.
 - Streaming depends on OpenCode's event stream. If it drops, the thread shows the error and Stop/Reconnect rather than a silent spinner.
 

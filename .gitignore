@@ -21,5 +21,7 @@ public/__grok
 config.json
 opencode.json
 opencode.jsonc
+# OpenWork working storage (chat attachments, local notes). Private, never commit.
+.opencode/
 
 .vercel

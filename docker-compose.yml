@@ -1,6 +1,6 @@
 # Run Paddy in a container.
 #
-#   OPENCODE_WEB_TOKEN=$(openssl rand -hex 24) docker compose up
+#   docker compose up
 #
 # Then open http://localhost:8080.
 #
@@ -14,12 +14,12 @@ services:
     container_name: paddy
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
-      OPENCODE_WEB_HOST: 0.0.0.0
-      # Override before starting. The controller refuses non-loopback calls
-      # without a token.
-      OPENCODE_WEB_TOKEN: ${OPENCODE_WEB_TOKEN:?set OPENCODE_WEB_TOKEN to a random string}
+      OPENCODE_WEB_HOST: 127.0.0.1
+      # For LAN/remote access, change both the port binding/host and set a
+      # random OPENCODE_WEB_TOKEN explicitly.
+      OPENCODE_WEB_TOKEN: ${OPENCODE_WEB_TOKEN:-}
       PADDY_HOME: /state
     volumes:
       - ./paddy-data:/state

@@ -117,6 +117,7 @@ export function DeskApp() {
 
   useEffect(() => {
     let cancelled = false;
+    let source: EventSource | undefined;
     void api.bootstrap().then((data) => {
       if (cancelled) return;
       setBoot(data);
@@ -127,19 +128,26 @@ export function DeskApp() {
       setModel(data.model);
       document.documentElement.dataset.theme = data.appearance;
       if (data.status.error && !data.status.connected) setError(data.status.error);
-    }).catch((err: Error) => setError(err.message));
-    const source = new EventSource("/api/events");
-    source.onmessage = (message) => {
-      try {
-        applyEvent(JSON.parse(message.data) as DeskEvent);
-      } catch {
-        /* ignore malformed frames */
+      if (window.location.search.includes("token=")) {
+        window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
       }
-    };
-    source.onerror = () => setError((current) => current ?? "Lost the desk connection. Reconnecting…");
+      const stream = new EventSource("/api/events");
+      source = stream;
+      stream.onmessage = (message) => {
+        try {
+          applyEvent(JSON.parse(message.data) as DeskEvent);
+        } catch {
+          /* ignore malformed frames */
+        }
+      };
+      stream.onerror = () => setError((current) => current ?? "Lost the desk connection. Reconnecting…");
+      stream.addEventListener("error", () => {
+        if (stream.readyState === EventSource.CLOSED) stream.close();
+      });
+    }).catch((err: Error) => setError(err.message));
     return () => {
       cancelled = true;
-      source.close();
+      source?.close();
     };
   }, [applyEvent]);
 
@@ -435,7 +443,7 @@ export function DeskApp() {
                   }}
                 >
                   {!messages.length ? (
-                    <PaddyIdle name="Paddy" />
+                    <PaddyIdle name="Paddy" busy={working} />
                   ) : (
                     <div className="mx-auto flex max-w-2xl flex-col gap-6">
                       {messages.map((message) => (
@@ -845,4 +853,3 @@ function agentNames(payload: unknown): string[] {
   if (!Array.isArray(payload)) return [];
   return payload.map((item) => (item && typeof item === "object" && "name" in item ? String((item as { name?: string }).name ?? "") : "")).filter(Boolean);
 }
-

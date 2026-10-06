@@ -80,8 +80,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
+function initialTokenPath(path: string): string {
+  if (typeof window === "undefined") return path;
+  const token = new URLSearchParams(window.location.search).get("token");
+  if (!token) return path;
+  const url = new URL(path, window.location.origin);
+  url.searchParams.set("token", token);
+  return url.pathname + url.search;
+}
+
 export const api = {
-  bootstrap: () => request<Bootstrap>("/api/bootstrap"),
+  // The one-time URL token is exchanged for an HttpOnly cookie by the
+  // controller. Subsequent fetches and EventSource inherit that cookie.
+  bootstrap: () => request<Bootstrap>(initialTokenPath("/api/bootstrap")),
   connect: () => request<ConnectionStatus>("/api/connect", { method: "POST" }),
   disconnect: () => request<ConnectionStatus>("/api/disconnect", { method: "POST" }),
   addProject: (path: string, name?: string) =>

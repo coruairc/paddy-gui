@@ -11,6 +11,11 @@ test("loopback is allowed without a token", () => {
   assert.equal(authorizePeer({ remoteAddress: "::1" }).ok, true);
 });
 
+test("container-local mode is allowed only when explicitly enabled", () => {
+  assert.equal(authorizePeer({ remoteAddress: "172.17.0.1", localOnly: true }).ok, true);
+  assert.equal(authorizePeer({ remoteAddress: "172.17.0.1", localOnly: false }).ok, false);
+});
+
 test("remote access is rejected unless the token matches", () => {
   const denied = authorizePeer({ remoteAddress: "10.0.0.8", authorization: "Bearer no" });
   assert.equal(denied.ok, false);
