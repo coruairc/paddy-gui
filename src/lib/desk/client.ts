@@ -13,6 +13,32 @@ export type ConnectionStatus = {
 
 export type Project = { id: string; name: string; path: string; createdAt: number };
 
+export type RuntimeModel = {
+  id: string;
+  name?: string;
+  status?: string;
+  limit?: { context?: number; input?: number; output?: number };
+  capabilities?: { reasoning?: boolean; attachment?: boolean; toolcall?: boolean };
+};
+
+export type RuntimeProvider = {
+  id: string;
+  name?: string;
+  env?: string[];
+  models?: Record<string, RuntimeModel>;
+};
+
+export type ProviderAuthMethod = { type?: string; label?: string };
+
+export type ProvidersResponse = {
+  providers?: {
+    all?: RuntimeProvider[];
+    default?: Record<string, string>;
+    connected?: string[];
+  };
+  auth?: Record<string, ProviderAuthMethod[]>;
+};
+
 export type SessionSummary = {
   id: string;
   title: string;
@@ -116,7 +142,7 @@ export const api = {
   abort: (id: string) => request("/api/sessions/" + encodeURIComponent(id) + "/abort", { method: "POST" }),
   retry: (id: string) => request("/api/sessions/" + encodeURIComponent(id) + "/retry", { method: "POST" }),
   diff: (id: string) => request<{ files: DiffFile[] }>("/api/sessions/" + encodeURIComponent(id) + "/diff"),
-  providers: () => request<{ providers: unknown; auth: unknown }>("/api/providers"),
+  providers: () => request<ProvidersResponse>("/api/providers"),
   agents: () => request<unknown>("/api/agents"),
   mcp: () => request<unknown>("/api/mcp"),
   config: () => request<Record<string, unknown>>("/api/config"),

@@ -4,7 +4,6 @@ import { HelixMark } from "@/components/helix-mark";
 import { Markdown } from "@/components/markdown";
 import { PaddyIdle } from "@/components/paddy-idle";
 import { SettingsPanel } from "@/components/desk/settings";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn, formatTime } from "@/lib/utils";
@@ -33,6 +32,7 @@ export function DeskApp() {
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState("");
   const [working, setWorking] = useState(false);
+  const [creatingChat, setCreatingChat] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [serverPassword, setServerPassword] = useState("");
   const [prompts, setPrompts] = useState<PermissionPrompt[]>([]);
@@ -41,13 +41,12 @@ export function DeskApp() {
   const [branch, setBranch] = useState<string | null>(null);
   const [model, setModel] = useState("");
   const [agent, setAgent] = useState("");
-  const [models, setModels] = useState<string[]>([]);
   const [agents, setAgents] = useState<string[]>([]);
-  const [modelOpen, setModelOpen] = useState(false);
   const [stick, setStick] = useState(true);
   const [showJump, setShowJump] = useState(false);
   const [selectedDiff, setSelectedDiff] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  const composer = useRef<HTMLTextAreaElement>(null);
   const sessionRef = useRef<string | null>(null);
   sessionRef.current = sessionId;
 
@@ -155,7 +154,6 @@ export function DeskApp() {
   useEffect(() => {
     if (!project || !status?.connected) return;
     void api.vcs().then((info) => setBranch(info.branch ?? null)).catch(() => setBranch(null));
-    void api.providers().then((payload) => setModels(modelIds(payload.providers))).catch(() => setModels([]));
     void api.agents().then((payload) => setAgents(agentNames(payload))).catch(() => setAgents([]));
   }, [project, status?.connected]);
 
@@ -180,20 +178,27 @@ export function DeskApp() {
     setMessages([]);
     setFiles([]);
     setSettingsOpen(false);
-    const data = await api.sessions();
+    setStick(true);
+    const [data, config] = await Promise.all([
+      api.sessions(),
+      api.config().catch(() => ({} as Record<string, unknown>)),
+    ]);
     setSessions(data.sessions);
+    if (typeof config.model === "string") setModel(config.model);
   }
 
-  async function addProject() {
+  async function addProject(): Promise<Project | null> {
     const path = window.prompt("Absolute path to the project");
-    if (!path) return;
+    if (!path) return null;
     try {
       const result = await api.addProject(path);
       setProjects((current) => (current.some((item) => item.id === result.project.id) ? current : [...current, result.project]));
       await chooseProject(result.project.id);
       setError(null);
+      return result.project;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not add that project");
+      return null;
     }
   }
 
@@ -214,18 +219,32 @@ export function DeskApp() {
   }
 
   async function newChat() {
-    if (!project) {
-      setError("Add a project before starting a chat.");
-      return;
-    }
+    if (creatingChat) return;
+    setCreatingChat(true);
     setSettingsOpen(false);
     setError(null);
-    const created = await api.createSession();
-    setSessions((current) => upsertSession(current, created.session));
-    setSessionId(created.session.id);
-    setMessages([]);
-    setFiles([]);
-    setWorking(false);
+    try {
+      // A session belongs to a project. If none is selected yet, use the
+      // existing Add Project flow, then create the chat in that project.
+      const targetProject = project ?? await addProject();
+      if (!targetProject) return;
+      const created = await api.createSession();
+      setSessions((current) => upsertSession(current, created.session));
+      setActiveProjectId(targetProject.id);
+      setSessionId(created.session.id);
+      setMessages([]);
+      setFiles([]);
+      setPrompts([]);
+      setWorking(false);
+      setStick(true);
+      setShowJump(false);
+      setInspector("work");
+      requestAnimationFrame(() => composer.current?.focus());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create a new chat");
+    } finally {
+      setCreatingChat(false);
+    }
   }
 
   async function submit() {
@@ -282,17 +301,6 @@ export function DeskApp() {
     setPrompts((current) => current.filter((item) => item.id !== prompt.id));
   }
 
-  async function pickModel(next: string) {
-    setModel(next);
-    setModelOpen(false);
-    if (!next) return;
-    try {
-      await api.patchConfig({ model: next });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save that model");
-    }
-  }
-
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-bg text-fg">
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -308,10 +316,11 @@ export function DeskApp() {
             <button
               type="button"
               onClick={() => void newChat()}
+              disabled={creatingChat}
               className="flex h-11 w-full items-center gap-2.5 rounded-xl px-2.5 text-sm text-fg transition-colors hover:bg-surface"
             >
               <Plus className="size-4 shrink-0" />
-              New chat
+              {creatingChat ? "Creating chat…" : "New chat"}
             </button>
             <SectionLabel>Projects</SectionLabel>
             {projects.map((item) => (
@@ -394,18 +403,6 @@ export function DeskApp() {
                 <span className={cn("size-1.5 rounded-full", status?.connected ? "bg-ok pulse-live" : "bg-subtle")} />
                 {status?.connected ? "Live" : "Offline"}
               </span>
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setModelOpen((open) => !open)}
-                  className="flex h-10 max-w-[14rem] items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-sm text-fg"
-                >
-                  <span className="truncate">{shortModel(model) || "Model"}</span>
-                </button>
-                {modelOpen && (
-                  <ModelMenu models={models} current={model} onPick={(value) => void pickModel(value)} onClose={() => setModelOpen(false)} />
-                )}
-              </div>
               {active && !settingsOpen && (
                 <div className="hidden items-center gap-2 sm:flex">
                   <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => void retry()} disabled={working}>Retry</button>
@@ -424,10 +421,12 @@ export function DeskApp() {
               status={status}
               projects={projects}
               appearance={boot?.appearance ?? "dark"}
+              model={model}
               onAppearance={(appearance) => {
                 document.documentElement.dataset.theme = appearance;
                 setBoot((current) => (current ? { ...current, appearance } : current));
               }}
+              onModelChange={setModel}
               onProjectsChange={setProjects}
               onReconnect={() => void api.connect().then(setStatus)}
             />
@@ -535,6 +534,7 @@ export function DeskApp() {
                 >
                   <div className="mx-auto flex max-w-2xl items-end gap-2 rounded-2xl bg-elevated p-2 shadow-[var(--shadow-border)]">
                     <textarea
+                      ref={composer}
                       value={draft}
                       onChange={(event) => setDraft(event.target.value)}
                       onKeyDown={(event) => {
@@ -767,57 +767,6 @@ function ChangesList({ files, selected, onSelect }: { files: DiffFile[]; selecte
   );
 }
 
-function ModelMenu({
-  models,
-  current,
-  onPick,
-  onClose,
-}: {
-  models: string[];
-  current: string;
-  onPick: (model: string) => void;
-  onClose: () => void;
-}) {
-  const groups = new Map<string, string[]>();
-  for (const id of models) {
-    const provider = id.split("/")[0] || "other";
-    groups.set(provider, [...(groups.get(provider) ?? []), id]);
-  }
-  return (
-    <>
-      <button type="button" className="fixed inset-0 z-20 cursor-default" aria-label="Close models" onClick={onClose} />
-      <div className="absolute top-11 right-0 z-30 max-h-80 w-72 overflow-y-auto rounded-xl bg-elevated p-2 shadow-[var(--shadow-border)]">
-        {[...groups.entries()].map(([provider, items]) => (
-          <div key={provider} className="mb-2">
-            <p className="px-2 py-1 text-[11px] tracking-wide text-muted uppercase">{provider}</p>
-            {items.slice(0, 12).map((id) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => onPick(id)}
-                className={cn(
-                  "flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-sm hover:bg-surface",
-                  id === current && "bg-surface text-fg",
-                )}
-              >
-                <span className="truncate">{id.slice(provider.length + 1)}</span>
-                {id === current && <Badge variant="accent">on</Badge>}
-              </button>
-            ))}
-          </div>
-        ))}
-        {!models.length && <p className="px-2 py-2 text-xs text-muted">No models from the runtime yet.</p>}
-      </div>
-    </>
-  );
-}
-
-function shortModel(model: string): string {
-  if (!model) return "";
-  const slash = model.indexOf("/");
-  return slash === -1 ? model : model.slice(slash + 1);
-}
-
 function matches(session: SessionSummary, query: string): boolean {
   const needle = query.trim().toLowerCase();
   return !needle || session.title.toLowerCase().includes(needle);
@@ -867,18 +816,6 @@ function mergeMessage(list: ChatMessage[], message: ChatMessage): ChatMessage[] 
       ? { ...item, text: message.text || item.text, error: message.error ?? item.error, activity: message.activity.length ? message.activity : item.activity }
       : item,
   );
-}
-
-function modelIds(payload: unknown): string[] {
-  const record = payload as { all?: { id?: string; models?: Record<string, { id?: string }> }[] } | null;
-  const ids: string[] = [];
-  for (const provider of record?.all ?? []) {
-    if (!provider.id) continue;
-    for (const model of Object.values(provider.models ?? {})) {
-      if (model.id) ids.push(`${provider.id}/${model.id}`);
-    }
-  }
-  return ids.slice(0, 200);
 }
 
 function agentNames(payload: unknown): string[] {

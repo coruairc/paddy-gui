@@ -2,13 +2,18 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { api, type ConnectionStatus, type Project } from "@/lib/desk/client";
+import {
+  api,
+  type ConnectionStatus,
+  type Project,
+  type ProviderAuthMethod,
+  type RuntimeProvider,
+} from "@/lib/desk/client";
 
 const SECTIONS = [
   "General",
   "Connection",
   "Providers",
-  "Models",
   "Agents",
   "Permissions",
   "MCP",
@@ -23,14 +28,18 @@ export function SettingsPanel({
   status,
   projects,
   appearance,
+  model,
   onAppearance,
+  onModelChange,
   onProjectsChange,
   onReconnect,
 }: {
   status: ConnectionStatus | null;
   projects: Project[];
   appearance: "dark" | "light";
+  model: string;
   onAppearance: (appearance: "dark" | "light") => void;
+  onModelChange: (model: string) => void;
   onProjectsChange: (projects: Project[]) => void;
   onReconnect: () => void;
 }) {
@@ -65,8 +74,7 @@ export function SettingsPanel({
           <div className="mt-5">
           {section === "General" && <General status={status} />}
           {section === "Connection" && <Connection status={status} onReconnect={onReconnect} />}
-          {section === "Providers" && <Providers />}
-          {section === "Models" && <Models />}
+          {section === "Providers" && <Providers model={model} onModelChange={onModelChange} />}
           {section === "Agents" && <Agents />}
           {section === "Permissions" && <Permissions />}
           {section === "MCP" && <Mcp />}
@@ -138,109 +146,231 @@ function Connection({ status, onReconnect }: { status: ConnectionStatus | null; 
   );
 }
 
-function Providers() {
-  const [auth, setAuth] = useState<Record<string, { type?: string; label?: string }[]>>({});
+function Providers({ model, onModelChange }: { model: string; onModelChange: (model: string) => void }) {
+  const [providers, setProviders] = useState<RuntimeProvider[]>([]);
+  const [defaults, setDefaults] = useState<Record<string, string>>({});
+  const [auth, setAuth] = useState<Record<string, ProviderAuthMethod[]>>({});
   const [connected, setConnected] = useState<string[]>([]);
-  const [provider, setProvider] = useState("");
-  const [key, setKey] = useState("");
-  const [note, setNote] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
-    const payload = await api.providers();
-    const methods = (payload.auth ?? {}) as Record<string, { type?: string; label?: string }[]>;
-    setAuth(methods);
-    const list = payload.providers as { connected?: string[] } | null;
-    setConnected(list?.connected ?? []);
-    setProvider((current) => current || Object.keys(methods)[0] || "");
+    setError(null);
+    try {
+      const payload = await api.providers();
+      setProviders(payload.providers?.all ?? []);
+      setDefaults(payload.providers?.default ?? {});
+      setConnected(payload.providers?.connected ?? []);
+      setAuth(payload.auth ?? {});
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load provider configuration.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    void load().catch((err: Error) => setError(err.message));
+    void load();
   }, []);
 
-  const ids = Object.keys(auth);
+  const needle = query.trim().toLowerCase();
+  const visible = providers
+    .filter((provider) =>
+      !needle || `${provider.name ?? ""} ${provider.id} ${(provider.env ?? []).join(" ")}`.toLowerCase().includes(needle),
+    )
+    .sort((a, b) => Number(connected.includes(b.id)) - Number(connected.includes(a.id)) || (a.name ?? a.id).localeCompare(b.name ?? b.id));
+
   return (
-    <div className="max-w-lg space-y-3 text-sm">
-      <p className="text-muted">Providers come from the installed OpenCode. Keys are sent to OpenCode and are not kept in the browser.</p>
-      {error && <p className="text-danger">{error}</p>}
-      <ul className="space-y-1">
-        {ids.map((id) => (
-          <li key={id} className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
-            <span>{id}</span>
-            <span className="text-xs text-subtle">{connected.includes(id) ? "Connected" : "Not connected"}</span>
-          </li>
-        ))}
-        {!ids.length && <li className="text-subtle">No provider auth methods reported yet.</li>}
-      </ul>
-      <select className="h-9 w-full rounded-lg border border-border bg-bg px-2" value={provider} onChange={(event) => setProvider(event.target.value)}>
-        {ids.map((id) => (
-          <option key={id} value={id}>{id}</option>
-        ))}
-      </select>
-      <Input type="password" value={key} onChange={(event) => setKey(event.target.value)} placeholder="API key" autoComplete="off" />
-      <div className="flex gap-2">
-        <Button
-          onClick={() => {
-            setError(null);
-            void api.setKey(provider, key).then(() => {
-              setKey("");
-              setNote("Saved in OpenCode.");
-              return load();
-            }).catch((err: Error) => setError(err.message));
-          }}
-          disabled={!provider || !key}
-        >
-          Save key
-        </Button>
-        <Button variant="outline" onClick={() => void api.removeKey(provider).then(load).catch((err: Error) => setError(err.message))} disabled={!provider}>
-          Remove
-        </Button>
+    <div className="space-y-4">
+      <div className="space-y-1 text-sm text-muted">
+        <p>Each provider below is reported by OpenCode. Credentials stay with OpenCode; selecting a model sets the desk default.</p>
+        {model && <p>Current desk default: <span className="font-mono text-xs text-fg">{model}</span></p>}
       </div>
-      {note && <p className="text-ok">{note}</p>}
+      <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter providers" className="max-w-md" />
+      {error && <p className="text-sm text-danger">{error}</p>}
+      {loading && <p className="text-sm text-muted">Loading providers from OpenCode…</p>}
+      {!loading && !visible.length && <p className="text-sm text-muted">No providers match this filter.</p>}
+      <div className="space-y-3">
+        {visible.map((provider) => (
+          <ProviderCard
+            key={provider.id}
+            provider={provider}
+            authMethods={auth[provider.id] ?? []}
+            connected={connected.includes(provider.id)}
+            defaultModel={defaults[provider.id] ?? ""}
+            deskModel={model}
+            onModelChange={onModelChange}
+            onRefresh={() => void load()}
+          />
+        ))}
+      </div>
     </div>
   );
 }
 
-function Models() {
-  const [models, setModels] = useState<string[]>([]);
-  const [selected, setSelected] = useState("");
+function ProviderCard({
+  provider,
+  authMethods,
+  connected,
+  defaultModel,
+  deskModel,
+  onModelChange,
+  onRefresh,
+}: {
+  provider: RuntimeProvider;
+  authMethods: ProviderAuthMethod[];
+  connected: boolean;
+  defaultModel: string;
+  deskModel: string;
+  onModelChange: (model: string) => void;
+  onRefresh: () => void;
+}) {
+  const models = Object.entries(provider.models ?? {}).map(([key, item]) => ({
+    id: item.id || key,
+    name: item.name || item.id || key,
+    status: item.status,
+  }));
+  const prefix = `${provider.id}/`;
+  const currentForProvider = deskModel.startsWith(prefix) ? deskModel.slice(prefix.length) : "";
+  const providerDefault = defaultModel === "[redacted]" ? "" : defaultModel;
+  const initialChoice = currentForProvider || providerDefault || models[0]?.id || "";
+  const [selected, setSelected] = useState(initialChoice);
+  const [modelQuery, setModelQuery] = useState("");
+  const [keyDraft, setKeyDraft] = useState("");
   const [note, setNote] = useState<string | null>(null);
-  useEffect(() => {
-    void api.providers().then((payload) => {
-      const record = payload.providers as { all?: { id?: string; models?: Record<string, { id?: string }> }[] } | null;
-      const ids: string[] = [];
-      for (const provider of record?.all ?? []) {
-        if (!provider.id) continue;
-        for (const model of Object.values(provider.models ?? {})) {
-          if (model.id) ids.push(`${provider.id}/${model.id}`);
-        }
-      }
-      setModels(ids);
-    }).catch(() => setModels([]));
-    void api.config().then((config) => {
-      if (typeof config.model === "string") setSelected(config.model);
-    }).catch(() => undefined);
-  }, []);
+  const [error, setError] = useState<string | null>(null);
+  const [savingKey, setSavingKey] = useState(false);
+  const [savingModel, setSavingModel] = useState(false);
+
+  useEffect(() => setSelected(currentForProvider || providerDefault || models[0]?.id || ""), [currentForProvider, providerDefault, provider.id]);
+
+  const apiAuth = authMethods.some((method) => method.type === "api");
+  const filteredModels = models.filter((item) => {
+    const filter = modelQuery.trim().toLowerCase();
+    return !filter || `${item.name} ${item.id}`.toLowerCase().includes(filter);
+  });
+
+  async function saveKey() {
+    if (!keyDraft.trim()) return;
+    setSavingKey(true);
+    setError(null);
+    setNote(null);
+    try {
+      await api.setKey(provider.id, keyDraft.trim());
+      setKeyDraft("");
+      setNote("Credential saved in OpenCode.");
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save this provider credential.");
+    } finally {
+      setSavingKey(false);
+    }
+  }
+
+  async function removeKey() {
+    setSavingKey(true);
+    setError(null);
+    setNote(null);
+    try {
+      await api.removeKey(provider.id);
+      setNote("Provider credential removed from OpenCode.");
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove this provider credential.");
+    } finally {
+      setSavingKey(false);
+    }
+  }
+
+  async function setDeskDefault() {
+    if (!selected) return;
+    const fullModel = `${provider.id}/${selected}`;
+    setSavingModel(true);
+    setError(null);
+    setNote(null);
+    try {
+      await api.patchConfig({ model: fullModel });
+      onModelChange(fullModel);
+      setNote("Desk default model saved in OpenCode.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save this model.");
+    } finally {
+      setSavingModel(false);
+    }
+  }
+
   return (
-    <div className="max-w-lg space-y-3 text-sm">
-      <p className="text-muted">The list is whatever OpenCode currently exposes. Saving updates OpenCode configuration.</p>
-      <select className="h-9 w-full rounded-lg border border-border bg-bg px-2" value={selected} onChange={(event) => setSelected(event.target.value)}>
-        <option value="">Select a model</option>
-        {models.map((id) => (
-          <option key={id} value={id}>{id}</option>
-        ))}
-      </select>
-      <div className="flex gap-2">
-        <Button onClick={() => void api.patchConfig({ model: selected }).then(() => setNote("Default model saved.")).catch((err: Error) => setNote(err.message))} disabled={!selected}>
-          Set default
-        </Button>
-        <Button variant="outline" onClick={() => void api.patchConfig({ model: selected }, "project").then(() => setNote("Project model saved.")).catch((err: Error) => setNote(err.message))} disabled={!selected}>
-          Set for this project
-        </Button>
+    <details className="group rounded-xl border border-border bg-elevated shadow-[var(--shadow-border)]">
+      <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3 [&::-webkit-details-marker]:hidden">
+        <span className={cn("size-2 shrink-0 rounded-full", connected ? "bg-ok" : "bg-subtle")} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-fg">{provider.name || provider.id}</span>
+          <span className="block truncate font-mono text-[11px] text-subtle">{provider.id}</span>
+        </span>
+        <span className="shrink-0 text-xs text-muted">{connected ? "Connected" : "Not connected"}</span>
+        <span className="shrink-0 text-xs text-subtle">{models.length} models</span>
+        <span className="shrink-0 text-muted transition-transform group-open:rotate-180">⌄</span>
+      </summary>
+      <div className="space-y-4 border-t border-border px-4 py-4">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <section className="space-y-2">
+            <h3 className="text-xs font-medium tracking-wide text-muted uppercase">Provider configuration</h3>
+            {provider.env?.length ? (
+              <p className="text-xs text-subtle">OpenCode environment keys: <span className="font-mono">{provider.env.join(", ")}</span></p>
+            ) : null}
+            {authMethods.length ? (
+              <ul className="space-y-1 text-xs text-muted">
+                {authMethods.map((method, index) => (
+                  <li key={`${method.type ?? "auth"}-${index}`}>{method.label || method.type || "Authentication supported"}</li>
+                ))}
+              </ul>
+            ) : <p className="text-xs text-subtle">OpenCode reports no interactive authentication methods for this provider.</p>}
+            {apiAuth ? (
+              <>
+                <Input type="password" value={keyDraft} onChange={(event) => setKeyDraft(event.target.value)} placeholder={`API key for ${provider.name || provider.id}`} autoComplete="off" />
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" onClick={() => void saveKey()} disabled={!keyDraft.trim() || savingKey}>
+                    {savingKey ? "Saving…" : "Save credential"}
+                  </Button>
+                  {connected && <Button size="sm" variant="outline" onClick={() => void removeKey()} disabled={savingKey}>Remove credential</Button>}
+                </div>
+              </>
+            ) : (
+              <p className="text-xs text-subtle">Configure this provider using its OpenCode sign-in method.</p>
+            )}
+          </section>
+          <section className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-xs font-medium tracking-wide text-muted uppercase">Models</h3>
+              {providerDefault && <span className="truncate text-[11px] text-subtle">OpenCode default: {providerDefault}</span>}
+            </div>
+            {models.length ? (
+              <>
+                {models.length > 12 && <Input value={modelQuery} onChange={(event) => setModelQuery(event.target.value)} placeholder={`Filter ${models.length} models`} className="h-8 text-xs" />}
+                <select
+                  size={Math.min(6, Math.max(3, filteredModels.length))}
+                  className="w-full rounded-lg border border-border bg-bg p-1 text-xs"
+                  value={selected}
+                  onChange={(event) => setSelected(event.target.value)}
+                >
+                  {filteredModels.slice(0, 100).map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}{item.status && item.status !== "active" ? ` · ${item.status}` : ""}
+                    </option>
+                  ))}
+                </select>
+                <Button size="sm" variant="outline" onClick={() => void setDeskDefault()} disabled={!selected || savingModel}>
+                  {savingModel ? "Saving…" : currentForProvider === selected ? "Current desk default" : "Use as desk default"}
+                </Button>
+              </>
+            ) : <p className="text-xs text-subtle">OpenCode reports no models for this provider.</p>}
+          </section>
+        </div>
+        {note && <p className="text-xs text-ok">{note}</p>}
+        {error && <p className="text-xs text-danger">{error}</p>}
       </div>
-      {note && <p className="text-muted">{note}</p>}
-    </div>
+    </details>
   );
 }
 
