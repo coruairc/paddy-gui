@@ -195,208 +195,134 @@
   border-radius: 99px;
 }
 
-/* Idle Paddy mascot (empty chat) */
+/* Layered Paddy mascot (empty chat). Full-body artwork on a shared transparent stage. */
 .paddy-idle-stage {
   position: relative;
   display: grid;
   place-items: center;
-  width: 11rem;
-  height: 11rem;
+  width: 20rem;
+  height: 22rem;
 }
 
 @media (min-width: 640px) {
   .paddy-idle-stage {
-    width: 13rem;
-    height: 13rem;
+    width: 24rem;
+    height: 26rem;
   }
 }
 
-.paddy-idle-figure {
+.paddy-mascot {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.paddy-stage {
   position: relative;
-  z-index: 1;
-  transform-origin: 50% 85%;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 400 / 430;
+  isolation: isolate;
 }
 
-.paddy-idle-prop {
+.paddy-glow {
   position: absolute;
-  z-index: 2;
+  inset: 12%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 45%, rgba(21, 155, 81, 0.2), rgba(233, 91, 19, 0.1) 55%, transparent 72%);
+  filter: blur(20px);
+  animation: paddy-glow-pulse 3.2s ease-in-out infinite;
   pointer-events: none;
-  line-height: 1;
-  user-select: none;
 }
 
-/* Pint — tip back and drain */
-.paddy-idle--pint .paddy-idle-figure {
-  animation: paddy-pint-sway 2.4s ease-in-out infinite;
-}
-.paddy-idle-pint {
-  right: -0.35rem;
-  bottom: 0.9rem;
-  font-size: 2.25rem;
-  transform-origin: 40% 90%;
-  animation: paddy-pint-drain 2.4s ease-in-out infinite;
+@keyframes paddy-glow-pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.07); }
 }
 
-@keyframes paddy-pint-sway {
-  0%,
-  100% {
-    transform: rotate(0deg) translateY(0);
-  }
-  35% {
-    transform: rotate(-8deg) translateY(2px);
-  }
-  55% {
-    transform: rotate(-14deg) translateY(4px);
-  }
-  75% {
-    transform: rotate(-4deg) translateY(1px);
-  }
+.paddy-body-wrap,
+.paddy-body {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
 }
 
-@keyframes paddy-pint-drain {
-  0%,
-  20% {
-    transform: rotate(12deg) translateY(0) scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: rotate(-28deg) translateY(-6px) scale(1.05);
-    opacity: 1;
-  }
-  70% {
-    transform: rotate(-40deg) translateY(4px) scale(0.92);
-    opacity: 0.85;
-  }
-  100% {
-    transform: rotate(12deg) translateY(0) scale(1);
-    opacity: 1;
-  }
+.paddy-body-wrap { transform-origin: 50% 94%; }
+
+/* IDLE — gentle breathe layered under the subtle drawn idle frames */
+[data-paddy-animation="idle"] .paddy-body-wrap { animation: paddy-idle-breathe 3.4s ease-in-out infinite; }
+@keyframes paddy-idle-breathe {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-5px) scale(1.012); }
 }
 
-/* Jig — bounce and kick */
-.paddy-idle--jig .paddy-idle-figure {
-  animation: paddy-jig 0.85s ease-in-out infinite;
-}
-.paddy-idle-notes {
-  top: 0.2rem;
-  right: 0.1rem;
-  font-size: 1.5rem;
-  color: var(--color-accent);
-  animation: paddy-notes 0.85s ease-in-out infinite;
+/* DRINK — the drawn frames do the motion; wrap adds a small body settle */
+[data-paddy-animation="drink"] .paddy-body-wrap { animation: paddy-drink-sway 2.7s ease-in-out both; }
+@keyframes paddy-drink-sway {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  40% { transform: translateY(-2px) rotate(-1.5deg); }
+  62% { transform: translateY(-4px) rotate(-2.5deg); }
+  82% { transform: translateY(-1px) rotate(-0.5deg); }
 }
 
-@keyframes paddy-jig {
-  0%,
-  100% {
-    transform: translateY(0) rotate(-4deg);
-  }
-  25% {
-    transform: translateY(-14px) rotate(6deg);
-  }
-  50% {
-    transform: translateY(0) rotate(-2deg);
-  }
-  75% {
-    transform: translateY(-10px) rotate(5deg);
-  }
+/* JIG — the drawn dance frames carry the motion; the wrap only adds a light
+   rhythmic step so Paddy stays grounded instead of bouncing as a whole. */
+[data-paddy-animation="jig"] .paddy-body-wrap { animation: paddy-jig-step 0.28s ease-in-out infinite; }
+@keyframes paddy-jig-step {
+  0%, 100% { transform: translateY(0) rotate(-0.5deg); }
+  25% { transform: translateY(-1.5px) rotate(0.6deg); }
+  50% { transform: translateY(0) rotate(0.2deg); }
+  75% { transform: translateY(-1px) rotate(-0.6deg); }
+}
+[data-paddy-animation="jig"] .paddy-glow { animation-duration: 0.48s; }
+
+/* COIN TOSS — drawn frames carry the body; the coin is an independent element
+   that arcs smoothly (browser-interpolated) so it never jumps like a slide. */
+[data-paddy-animation="coinToss"] .paddy-body-wrap { animation: paddy-toss-flick 2.1s ease-in-out both; }
+@keyframes paddy-toss-flick {
+  0%, 100% { transform: translateY(0); }
+  35%      { transform: translateY(-1px); }
+  70%      { transform: translateY(0); }
 }
 
-@keyframes paddy-notes {
-  0%,
-  100% {
-    transform: translate(0, 0) scale(1);
-    opacity: 0.35;
-  }
-  50% {
-    transform: translate(8px, -10px) scale(1.15);
-    opacity: 1;
-  }
-}
-
-/* Pot of gold — hop + coins */
-.paddy-idle--gold .paddy-idle-figure {
-  animation: paddy-gold-hop 2.2s ease-in-out infinite;
-}
-.paddy-idle-pot {
-  left: -0.15rem;
-  bottom: 0.35rem;
-  font-size: 2rem;
-  animation: paddy-pot-pop 2.2s ease-in-out infinite;
-}
-.paddy-idle-coin {
-  font-size: 1.15rem;
+.paddy-coin {
+  position: absolute;
+  width: 7%;
+  aspect-ratio: 1;
+  left: 75%;
+  top: 20%;
+  margin-left: -3.5%;
+  margin-top: -3.5%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 32%, #fff2c2, #ffd75a 42%, #e8a81e 70%, #a26a08 96%);
+  box-shadow:
+    0 0 10px rgba(255, 196, 64, 0.65),
+    inset 0 -2px 4px rgba(120, 74, 6, 0.55),
+    inset 0 1px 2px rgba(255, 255, 255, 0.5);
   opacity: 0;
-}
-.paddy-idle-coin-a {
-  left: 15%;
-  top: 35%;
-  animation: paddy-coin-fly 2.2s ease-in-out infinite;
-}
-.paddy-idle-coin-b {
-  left: 48%;
-  top: 18%;
-  animation: paddy-coin-fly 2.2s ease-in-out 0.15s infinite;
-}
-.paddy-idle-coin-c {
-  right: 12%;
-  top: 30%;
-  animation: paddy-coin-fly 2.2s ease-in-out 0.3s infinite;
+  pointer-events: none;
+  z-index: 2;
 }
 
-@keyframes paddy-gold-hop {
-  0%,
-  100% {
-    transform: translateY(0) scale(1);
-  }
-  40% {
-    transform: translateY(0) scale(1);
-  }
-  55% {
-    transform: translateY(-18px) scale(1.04);
-  }
-  70% {
-    transform: translateY(0) scale(1);
-  }
+[data-paddy-animation="coinToss"] .paddy-coin {
+  /* Prepare holds ~0.35s; then the coin arcs up and back over ~0.85s. */
+  animation: paddy-coin-arc 0.85s ease-in-out 0.35s both;
 }
 
-@keyframes paddy-pot-pop {
-  0%,
-  40% {
-    transform: scale(0.85) translateY(6px);
-    opacity: 0.7;
-  }
-  55% {
-    transform: scale(1.12) translateY(0);
-    opacity: 1;
-  }
-  100% {
-    transform: scale(1) translateY(0);
-    opacity: 1;
-  }
-}
-
-@keyframes paddy-coin-fly {
-  0%,
-  45% {
-    transform: translate(0, 0) scale(0.6);
-    opacity: 0;
-  }
-  60% {
-    opacity: 1;
-  }
-  100% {
-    transform: translate(0, -42px) scale(1);
-    opacity: 0;
-  }
+@keyframes paddy-coin-arc {
+  0%   { left: 75%; top: 20%; opacity: 0; transform: rotate(0deg) scale(1); }
+  10%  { opacity: 1; }
+  30%  { left: 74%; top: 13%; transform: rotate(90deg) scale(1.03); }
+  50%  { left: 71%; top: 6%;  transform: rotate(180deg) scale(1); }
+  70%  { left: 74%; top: 13%; transform: rotate(270deg) scale(0.99); }
+  90%  { left: 75%; top: 20%; opacity: 1; transform: rotate(360deg) scale(1); }
+  100% { left: 75%; top: 20%; opacity: 0; transform: rotate(360deg) scale(1); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .paddy-idle-figure,
-  .paddy-idle-prop {
-    animation: none !important;
-  }
-}
-
-.paddy-idle--idle .paddy-idle-figure {
-  transform: none;
+  .paddy-mascot * { animation: none !important; }
+  .paddy-body-wrap { transform: none !important; }
 }
