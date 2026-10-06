@@ -52,6 +52,9 @@ export class ControllerRuntime {
   constructor(stateFile = stateFilePath()) {
     this.stateFile = stateFile;
     this.state = readState(stateFile);
+    // A controller restart must not lose the password of a server it spawned,
+    // otherwise the still-running OpenCode looks like an unknown server.
+    this.ownedPassword = this.state.ownedServerPassword || "";
   }
 
   persist(): void {
@@ -140,6 +143,9 @@ export class ControllerRuntime {
     const port = await freePort(4096);
     const password = this.ownedPassword || randomPassword();
     this.ownedPassword = password;
+    // Persist so a controller restart can re-attach to this server.
+    this.state.ownedServerPassword = password;
+    this.persist();
     const username = "opencode";
     await this.spawnServer(binary, port, username, password);
     const ready = await this.waitUntilReady(`http://127.0.0.1:${port}`, { username, password });

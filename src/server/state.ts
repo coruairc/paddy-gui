@@ -27,6 +27,9 @@ export type AppState = {
   connectionUsername: string;
   /** Never serialized to the browser. */
   connectionPassword: string;
+  /** Password this controller generated for a server it spawned, kept so a
+   *  controller restart can re-attach to the still-running server. */
+  ownedServerPassword: string;
 };
 
 export const EMPTY_STATE: AppState = {
@@ -36,6 +39,7 @@ export const EMPTY_STATE: AppState = {
   connectionUrl: "",
   connectionUsername: "opencode",
   connectionPassword: "",
+  ownedServerPassword: "",
 };
 
 export function stateFilePath(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
@@ -91,6 +95,8 @@ export function normalizeState(input: Partial<AppState> | null | undefined): App
         ? input.connectionUsername
         : "opencode",
     connectionPassword: typeof input?.connectionPassword === "string" ? input.connectionPassword : "",
+    ownedServerPassword:
+      typeof input?.ownedServerPassword === "string" ? input.ownedServerPassword : "",
   };
 }
 

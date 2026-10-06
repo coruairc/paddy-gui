@@ -34,6 +34,7 @@ export function DeskApp() {
   const [draft, setDraft] = useState("");
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [serverPassword, setServerPassword] = useState("");
   const [prompts, setPrompts] = useState<PermissionPrompt[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [inspector, setInspector] = useState<"work" | "changes">("work");
@@ -462,14 +463,45 @@ export function DeskApp() {
                     </div>
                   )}
                 </div>
-                {error && (
+                {error && status?.authRequired ? (
+                  <form
+                    className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-1.5 text-[11px]"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const password = serverPassword.trim();
+                      if (!password) return;
+                      void api
+                        .settings({ connectionPassword: password })
+                        .then(() => api.connect())
+                        .then((next) => {
+                          setStatus(next);
+                          setServerPassword("");
+                          setError(next.connected ? null : (next.error ?? null));
+                        })
+                        .catch((err: Error) => setError(err.message));
+                    }}
+                  >
+                    <span className="min-w-0 flex-1 truncate text-danger">{error}</span>
+                    <Input
+                      type="password"
+                      value={serverPassword}
+                      onChange={(event) => setServerPassword(event.target.value)}
+                      placeholder="OpenCode server password"
+                      autoComplete="off"
+                      className="h-7 w-52 px-2 text-[11px]"
+                    />
+                    <Button type="submit" size="sm" disabled={!serverPassword.trim()}>
+                      Save and reconnect
+                    </Button>
+                  </form>
+                ) : error ? (
                   <p className="truncate border-t border-border px-4 py-1.5 text-[11px] text-danger">
                     {error}
                     <button type="button" className="ml-2 text-muted hover:text-fg" onClick={() => void api.connect().then(setStatus)}>
                       Reconnect
                     </button>
                   </p>
-                )}
+                ) : null}
                 {files.length > 0 && (
                   <button
                     type="button"

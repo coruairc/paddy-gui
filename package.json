@@ -21,7 +21,7 @@
     "paddy": "node bin/paddy.mjs",
     "postinstall": "node scripts/link-cli.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test scripts/install.sh.test.mjs && node --experimental-strip-types --test src/server/security.test.ts src/server/opencode-client.test.ts src/server/api.test.ts src/server/normalize.test.ts src/components/autonomous-drink.test.ts",
+    "test": "node --test scripts/install.sh.test.mjs && node --experimental-strip-types --test src/server/security.test.ts src/server/opencode-client.test.ts src/server/api.test.ts src/server/normalize.test.ts src/server/state.test.ts src/components/autonomous-drink.test.ts",
     "lint": "eslint .",
     "format": "prettier --write ."
   },
