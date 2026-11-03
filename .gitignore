@@ -21,6 +21,8 @@ public/__grok
 config.json
 opencode.json
 opencode.jsonc
+# GSD planning config lives under .planning/ and holds no secrets.
+!.planning/config.json
 # OpenWork working storage (chat attachments, local notes). Private, never commit.
 .opencode/
 
