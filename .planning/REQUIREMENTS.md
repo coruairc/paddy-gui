@@ -81,37 +81,37 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SEC-01 | TBD | Pending |
-| SEC-02 | TBD | Pending |
-| SEC-03 | TBD | Pending |
-| SEC-04 | TBD | Pending |
-| PKG-01 | TBD | Pending |
-| PKG-02 | TBD | Pending |
-| PKG-03 | TBD | Pending |
-| PKG-04 | TBD | Pending |
-| LOOP-01 | TBD | Pending |
-| LOOP-02 | TBD | Pending |
-| LOOP-03 | TBD | Pending |
-| LOOP-04 | TBD | Pending |
-| LOOP-05 | TBD | Pending |
-| QUAL-01 | TBD | Pending |
-| QUAL-02 | TBD | Pending |
-| QUAL-03 | TBD | Pending |
-| QUAL-04 | TBD | Pending |
-| CLN-01 | TBD | Pending |
-| CLN-02 | TBD | Pending |
-| CLN-03 | TBD | Pending |
-| CLN-04 | TBD | Pending |
-| VER-01 | TBD | Pending |
-| VER-02 | TBD | Pending |
-| VER-03 | TBD | Pending |
-| VER-04 | TBD | Pending |
+| SEC-01 | Phase 1 | Pending |
+| SEC-02 | Phase 1 | Pending |
+| SEC-03 | Phase 1 | Pending |
+| SEC-04 | Phase 1 | Pending |
+| PKG-01 | Phase 5 | Pending |
+| PKG-02 | Phase 5 | Pending |
+| PKG-03 | Phase 5 | Pending |
+| PKG-04 | Phase 5 | Pending |
+| LOOP-01 | Phase 2 | Pending |
+| LOOP-02 | Phase 2 | Pending |
+| LOOP-03 | Phase 2 | Pending |
+| LOOP-04 | Phase 2 | Pending |
+| LOOP-05 | Phase 2 | Pending |
+| QUAL-01 | Phase 4 | Pending |
+| QUAL-02 | Phase 4 | Pending |
+| QUAL-03 | Phase 4 | Pending |
+| QUAL-04 | Phase 4 | Pending |
+| CLN-01 | Phase 3 | Pending |
+| CLN-02 | Phase 3 | Pending |
+| CLN-03 | Phase 3 | Pending |
+| CLN-04 | Phase 3 | Pending |
+| VER-01 | Phase 6 | Pending |
+| VER-02 | Phase 6 | Pending |
+| VER-03 | Phase 6 | Pending |
+| VER-04 | Phase 6 | Pending |
 
 **Coverage:**
 - v1 requirements: 25 total
-- Mapped to phases: 0
-- Unmapped: 25 ⚠️ (populated during roadmap creation)
+- Mapped to phases: 25
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-11-03*
-*Last updated: 2026-11-03 after initial definition*
+*Last updated: 2026-11-03 after roadmap creation*
