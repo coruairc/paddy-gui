@@ -639,17 +639,20 @@ try {
 
 All other claims are verified against HEAD source (read this session, line-cited), live environment probes, or cited project documents. No web research was performed (per orchestrator instruction; prior milestone research is the plan of record).
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **chooseProject model override (Pitfall 7)**
+1. **chooseProject model override (Pitfall 7)** (RESOLVED)
    - What we know: `app.tsx:200` re-seeds from project config on project switch; criterion 3 only requires reload/restart persistence.
    - What's unclear: whether to guard it now (`&& !model`) or leave it for Phase 8 reconciliation.
    - Recommendation: optional one-line guard as discretion; default to leaving it and noting Phase 8 ownership. Either satisfies the locked criteria.
-2. **Should `reset` clear deskModel?**
+   - **RESOLVED:** default adopted — the guard is LEFT for Phase 8 reconciliation (orchestrator direction); `app.tsx` is not modified this phase. Recorded in 07-03-PLAN.md `<objective>` ("the app.tsx:200 chooseProject guard is LEFT for Phase 8 reconciliation (RESEARCH Open Question 1 default; orchestrator direction)").
+2. **Should `reset` clear deskModel?** (RESOLVED)
    - What we know: `reset` (`api.ts:112-122`) clears projects/appearance/connection fields; `deskModel` is GUI metadata like `appearance`.
    - What's unclear: CONTEXT does not mention reset.
    - Recommendation: add `runtime.state.deskModel = "";` to reset for consistency (one line, discretion). Existing reset test (`api.test.ts:203-211`) keeps passing; optionally extend it.
-3. **Attach-branch coverage** — resolved by Pitfall 8: skip this phase (needs a second seam); document for Phase 8+.
+   - **RESOLVED:** recommendation adopted — reset clears `deskModel` (`runtime.state.deskModel = "";` beside the appearance reset). Recorded in 07-02-PLAN.md Task 2 action and must_haves truth ("reset clears deskModel alongside the other GUI metadata (discretion adopted per RESEARCH Open Question 2)"); the reset test is extended and renamed "reset clears passwords and deskModel".
+3. **Attach-branch coverage** (RESOLVED) — resolved by Pitfall 8: skip this phase (needs a second seam); document for Phase 8+.
+   - **RESOLVED:** recorded in 07-01-PLAN.md prohibition ("no attach-branch test and no fetch/client-factory seam on ControllerRuntime this phase") and Task 2 action (Pitfall 8 locked scope guard); consistent with D-01's locked scope (failing spawn test plus seam only).
 
 ## Environment Availability
 
