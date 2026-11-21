@@ -49,11 +49,11 @@ Plans:
   3. Ctrl+C, `docker stop`, and Settings → Reset terminate the spawned `opencode serve` child — no `opencode` process survives the controller.
   4. Stop, retry, and resume-after-browser-restart still work on the same session after these fixes.
   5. A permission prompt can be allowed or denied inline and the run continues or aborts accordingly.
-**Plans**: 1/4 plans executed
+**Plans**: 2/4 plans executed
 **UI hint**: yes
 Plans:
 - [x] 02-01-PLAN.md — Reconcile optimistic message bubble (LOOP-01)
-- [ ] 02-02-PLAN.md — Password save preserves stored password (LOOP-02)
+- [x] 02-02-PLAN.md — Password save preserves stored password (LOOP-02)
 - [ ] 02-03-PLAN.md — Process exit kills spawned child (LOOP-03)
 - [ ] 02-04-PLAN.md — Inline permission prompts and session resume (LOOP-04/05)
 
@@ -114,7 +114,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Controller Auth Hardening | 1/1 | Complete    | 2026-11-21 |
-| 2. Core Loop Correctness | 1/4 | In Progress | - |
+| 2. Core Loop Correctness | 2/4 | In Progress | - |
 | 3. Repository Cleanup and Honest Docs | 0/TBD | Not started | - |
 | 4. Trustworthy Quality Gates | 0/TBD | Not started | - |
 | 5. Install and Persist | 0/TBD | Not started | - |
