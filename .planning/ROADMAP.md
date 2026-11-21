@@ -38,8 +38,13 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 3 plans
 
 Plans:
+**Wave 1**
 - [ ] 07-01-PLAN.md — Exact-match redaction tracer + byte-identical regressions; hermetic probe seam + spawn test fix (V2-03, V2-01)
+
+**Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 07-02-PLAN.md — deskModel persistence: state field + silent upgrade, settings/bootstrap surface, browser mirror (V2-02)
+
+**Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 07-03-PLAN.md — Honest Settings (deskModel Save, read-only Agents/Permissions), dead-chain deletion + 404 regression, both-environment gate (V2-02, V2-01, V2-03)
 
 ### Phase 8: Chat Model Picker
