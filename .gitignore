@@ -27,3 +27,6 @@ opencode.jsonc
 .opencode/
 
 .vercel
+
+# Graphify generated knowledge-graph cache (regenerable, not source)
+graphify-out/

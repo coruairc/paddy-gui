@@ -1,43 +1,33 @@
 {
   "contract": "1.0.0",
   "flavor": "core",
-  "milestone": "v1.0",
+  "milestone": "v1.1 — OpenCode v2 Desk",
   "phases": [
     {
-      "number": "1",
-      "name": "Controller Auth Hardening",
-      "status": "complete"
+      "number": "7",
+      "name": "v2 Hardening Foundation",
+      "status": "pending"
     },
     {
-      "number": "2",
-      "name": "Core Loop Correctness",
-      "status": "complete"
+      "number": "8",
+      "name": "Chat Model Picker",
+      "status": "pending"
     },
     {
-      "number": "3",
-      "name": "Repository Cleanup and Honest Docs",
-      "status": "complete"
+      "number": "9",
+      "name": "Slash Command Palette",
+      "status": "pending"
     },
     {
-      "number": "4",
-      "name": "Trustworthy Quality Gates",
-      "status": "complete"
-    },
-    {
-      "number": "5",
-      "name": "Install and Persist",
-      "status": "complete"
-    },
-    {
-      "number": "6",
-      "name": "End-to-End Verification",
-      "status": "complete"
+      "number": "10",
+      "name": "v1.1 End-to-End Verification",
+      "status": "pending"
     }
   ],
   "next": {
-    "command": "/gsd-progress",
-    "label": "Show progress",
-    "reason": "Unsure of state — showing progress"
+    "command": "/gsd-progress --next",
+    "label": "Advance to the next step",
+    "reason": "Phase 1 of 4 · executing"
   },
-  "updated_at": "2026-11-21T18:04:06.456Z"
+  "updated_at": "2026-11-21T22:16:33.315Z"
 }
