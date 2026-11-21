@@ -177,7 +177,7 @@ export class ControllerRuntime {
     const client = new OpenCodeClient({ baseUrl: url, username: auth.username, password: auth.password });
     try {
       const health = await client.getStatus();
-      this.client?.disconnect();
+      this.client?.disconnect?.();
       this.client = client;
       this.startEventLoop();
       return this.setStatus({
@@ -295,7 +295,7 @@ export class ControllerRuntime {
 
   async disconnect(): Promise<ConnectionStatus> {
     this.loopAbort?.abort();
-    this.client?.disconnect();
+    this.client?.disconnect?.();
     this.client = null;
     if (this.child && !this.child.killed) {
       this.child.kill();

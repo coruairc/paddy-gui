@@ -31,7 +31,7 @@ export async function handleApi(runtime: ControllerRuntime, request: Request): P
     if (request.method === "POST" && route === "/disconnect") return json(200, await runtime.disconnect());
     if (request.method === "GET" && route === "/bootstrap") return json(200, await bootstrap(runtime));
     if (request.method === "GET" && route === "/diagnostics") return json(200, diagnostics(runtime));
-    if (request.method === "POST" && route === "/settings/reset") return reset(runtime);
+    if (request.method === "POST" && route === "/settings/reset") return await reset(runtime);
     if (request.method === "GET" && route === "/projects") return json(200, { projects: runtime.state.projects, activeProjectId: runtime.state.activeProjectId });
     if (request.method === "POST" && route === "/projects") return await addProject(runtime, request);
     const project = route.match(/^\/projects\/([^/]+)$/);
@@ -109,12 +109,14 @@ function diagnostics(runtime: ControllerRuntime) {
   );
 }
 
-function reset(runtime: ControllerRuntime): ApiResult {
+async function reset(runtime: ControllerRuntime): Promise<ApiResult> {
+  await runtime.disconnect();
   runtime.state.projects = [];
   runtime.state.activeProjectId = null;
   runtime.state.appearance = "dark";
   runtime.state.connectionUrl = "";
   runtime.state.connectionPassword = "";
+  runtime.state.ownedServerPassword = "";
   runtime.persist();
   return json(200, publicState(runtime.state));
 }
@@ -159,7 +161,8 @@ async function updateSettings(runtime: ControllerRuntime, request: Request): Pro
   if (typeof body.connectionUsername === "string" && body.connectionUsername.trim()) {
     runtime.state.connectionUsername = body.connectionUsername.trim();
   }
-  if (typeof body.connectionPassword === "string") runtime.state.connectionPassword = body.connectionPassword;
+  if (body.clearConnectionPassword === true) runtime.state.connectionPassword = "";
+  else if (typeof body.connectionPassword === "string" && body.connectionPassword.trim() !== "") runtime.state.connectionPassword = body.connectionPassword;
   runtime.persist();
   return json(200, publicState(runtime.state));
 }
