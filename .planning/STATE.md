@@ -5,16 +5,16 @@ milestone_name: OpenCode v2 Desk
 current_phase: 07
 current_phase_name: v2 Hardening Foundation
 status: executing
-stopped_at: v1.1 roadmap created (phases 7-10); Phase 7 ready to plan
-last_updated: "2026-11-21T22:48:47.568Z"
+stopped_at: Completed 07-02-PLAN.md
+last_updated: "2026-11-21T23:10:18.440Z"
 last_activity: 2026-11-21
 last_activity_desc: Phase 07 execution started
-state_head: 2e162a46c7f32a38a6938b02b3f21f2fcc859ada
+state_head: e9e9b3ca42c4d290d0512b44040801ae012aefbf
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -29,8 +29,8 @@ See: .planning/PROJECT.md (updated 2026-11-21)
 ## Current Position
 
 Phase: 07 (v2 Hardening Foundation) — EXECUTING
-Plan: 2 of 3
-Status: Executing Phase 07
+Plan: 3 of 3
+Status: Ready to execute
 Last activity: 2026-11-21 — Phase 07 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -56,6 +56,11 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: —
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 07 P02 | 20 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -69,6 +74,8 @@ Recent decisions affecting current work:
 - [Roadmap v1.1]: V2-03 redaction hardening lands in Phase 7, before any new model/command routes route identifier-shaped payloads through `redactSecrets`.
 - [Roadmap v1.1]: Feature verticals (model picker, commands) land data path before UI, per the four-layer pattern; sequentially to keep review surface one-feature-wide.
 - [Roadmap v1.1]: Zero new dependencies — both widgets are hand-built WAI-ARIA APG comboboxes (research SUMMARY.md).
+- [Phase 07]: deskModel accepts any string; no model-list validation in the controller (OpenCode authoritative, Phase 8 reconciles)
+- [Phase 07]: bootstrap seeds model from persisted deskModel and keeps both model and raw deskModel; reset clears deskModel
 
 ### Pending Todos
 
@@ -92,8 +99,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-21
-Stopped at: v1.1 roadmap created (phases 7-10); Phase 7 ready to plan
+Last session: 2026-11-21T23:10:18.408Z
+Stopped at: Completed 07-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
