@@ -53,7 +53,7 @@ function run(cmd, args, cwd = installRoot) {
 
 const args = process.argv.slice(2);
 const subcommand = args[0] ?? "start";
-const rest = args.slice(1);
+const _rest = args.slice(1);
 
 switch (subcommand) {
   case "-v":
@@ -149,5 +149,4 @@ Environment:
     break;
   }
 
-  void rest;
 }

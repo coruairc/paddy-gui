@@ -71,7 +71,7 @@ async function bootstrap(runtime: ControllerRuntime) {
   const project = activeProject(runtime);
   let sessions: SessionSummary[] = [];
   let model = "";
-  let agent = "";
+  const agent = "";
   if (status.connected && project) {
     try {
       const listed = await runtime.requireClient().listSessions(project.path);

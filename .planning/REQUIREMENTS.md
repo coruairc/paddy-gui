@@ -38,10 +38,10 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Cleanup
 
-- [ ] **CLN-01**: App-builder template scaffolding is removed and the build no longer references it
-- [ ] **CLN-02**: `SELFHOST.md` and `selfhost.env.example` describe only shipped behavior, or are deleted
-- [ ] **CLN-03**: Unused heavy dependencies are removed without breaking build, lint, or tests
-- [ ] **CLN-04**: `README.md` install and run instructions match what the code actually does
+- [x] **CLN-01**: App-builder template scaffolding is removed and the build no longer references it
+- [x] **CLN-02**: `SELFHOST.md` and `selfhost.env.example` describe only shipped behavior, or are deleted
+- [x] **CLN-03**: Unused heavy dependencies are removed without breaking build, lint, or tests
+- [x] **CLN-04**: `README.md` install and run instructions match what the code actually does
 
 ### Verification
 
@@ -98,10 +98,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | QUAL-02 | Phase 4 | Pending |
 | QUAL-03 | Phase 4 | Pending |
 | QUAL-04 | Phase 4 | Pending |
-| CLN-01 | Phase 3 | Pending |
-| CLN-02 | Phase 3 | Pending |
-| CLN-03 | Phase 3 | Pending |
-| CLN-04 | Phase 3 | Pending |
+| CLN-01 | Phase 3 | Complete |
+| CLN-02 | Phase 3 | Complete |
+| CLN-03 | Phase 3 | Complete |
+| CLN-04 | Phase 3 | Complete |
 | VER-01 | Phase 6 | Pending |
 | VER-02 | Phase 6 | Pending |
 | VER-03 | Phase 6 | Pending |
