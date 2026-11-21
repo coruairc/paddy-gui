@@ -61,11 +61,12 @@ export type ActivityItem = {
 
 export type ChatMessage = {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   text: string;
   created: number;
   error?: string;
   activity: ActivityItem[];
+  pending?: boolean;
 };
 
 export type DiffFile = { file: string; additions: number; deletions: number; patch: string };

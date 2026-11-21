@@ -7,6 +7,7 @@ import { SettingsPanel } from "@/components/desk/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn, formatTime } from "@/lib/utils";
+import { appendDelta, mergeMessage, upsertActivity, upsertSession } from "./messages";
 import {
   api,
   type ActivityItem,
@@ -93,26 +94,20 @@ export function DeskApp() {
       return;
     }
     if (event.type === "diff") {
-      setSessionId((current) => {
-        if (!current || current === event.sessionId) setFiles(event.files);
-        return current;
-      });
+      if (!sessionRef.current || sessionRef.current === event.sessionId) setFiles(event.files);
       return;
     }
-    setSessionId((current) => {
-      if (!current || ("sessionId" in event && event.sessionId !== current)) return current;
-      if (event.type === "text-delta") {
-        setMessages((list) => appendDelta(list, event.messageId, event.delta));
-        setWorking(true);
-      } else if (event.type === "activity") {
-        setMessages((list) => upsertActivity(list, event.messageId, event.item));
-        setWorking(true);
-        setInspector("work");
-      } else if (event.type === "message") {
-        setMessages((list) => mergeMessage(list, event.message));
-      }
-      return current;
-    });
+    if (!sessionRef.current || ("sessionId" in event && event.sessionId !== sessionRef.current)) return;
+    if (event.type === "text-delta") {
+      setMessages((list) => appendDelta(list, event.messageId, event.delta));
+      setWorking(true);
+    } else if (event.type === "activity") {
+      setMessages((list) => upsertActivity(list, event.messageId, event.item));
+      setWorking(true);
+      setInspector("work");
+    } else if (event.type === "message") {
+      setMessages((list) => mergeMessage(list, event.message));
+    }
   }, []);
 
   useEffect(() => {
@@ -250,6 +245,7 @@ export function DeskApp() {
   async function submit() {
     const text = draft.trim();
     if (!text || working) return;
+    if (messages.some((m) => m.pending)) return;
     if (!project) {
       setError("Add a project before starting a chat.");
       return;
@@ -265,14 +261,17 @@ export function DeskApp() {
       setSessionId(id);
       setSessions((current) => upsertSession(current, created.session));
     }
+    const tempId = `local_${Date.now()}`;
     setMessages((current) => [
       ...current,
-      { id: `local_${Date.now()}`, role: "user", text, created: Date.now(), activity: [] },
+      { id: tempId, role: "user", text, created: Date.now(), activity: [], pending: true },
     ]);
     setWorking(true);
     try {
       await api.send(id, text, model || undefined, agent || undefined);
     } catch (err) {
+      setMessages((current) => current.filter((m) => m.id !== tempId));
+      setDraft(text);
       setWorking(false);
       setError(err instanceof Error ? err.message : "Could not send that");
     }
@@ -539,6 +538,10 @@ export function DeskApp() {
                       onChange={(event) => setDraft(event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" && !event.shiftKey) {
+                          if (working || messages.some((m) => m.pending)) {
+                            event.preventDefault();
+                            return;
+                          }
                           event.preventDefault();
                           void submit();
                         }
@@ -552,7 +555,7 @@ export function DeskApp() {
                         <Square />
                       </Button>
                     ) : (
-                      <Button type="submit" size="icon" disabled={!draft.trim()} aria-label="Send">
+                      <Button type="submit" size="icon" disabled={!draft.trim() || messages.some((m) => m.pending)} aria-label="Send">
                         <ArrowUp />
                       </Button>
                     )}
@@ -614,7 +617,10 @@ function MessageView({ message }: { message: ChatMessage }) {
         <div className="flex justify-end">
           <div className="max-w-[min(100%,36rem)] rounded-2xl rounded-br-md bg-elevated px-4 py-3 shadow-[var(--shadow-border)]">
             <p className="text-sm leading-relaxed text-fg">{message.text}</p>
-            <p className="mt-1.5 text-right text-[11px] text-subtle tabular-nums">{formatTime(message.created)}</p>
+            <div className="mt-1.5 flex items-center justify-end gap-1.5">
+              {message.pending && <span className={cn("size-1.5 rounded-full bg-accent pulse-live")} style={{ opacity: 0.7 }} />}
+              <p className="text-right text-[11px] text-subtle tabular-nums">{formatTime(message.created)}</p>
+            </div>
           </div>
         </div>
       </article>
@@ -783,39 +789,6 @@ function groupByDate(sessions: SessionSummary[]): { label: string; items: Sessio
     groups.set(label, [...(groups.get(label) ?? []), session]);
   }
   return [...groups.entries()].map(([label, items]) => ({ label, items }));
-}
-
-function upsertSession(list: SessionSummary[], session: SessionSummary): SessionSummary[] {
-  return [...list.filter((item) => item.id !== session.id), session].sort((a, b) => b.updated - a.updated);
-}
-
-function appendDelta(list: ChatMessage[], messageId: string, delta: string): ChatMessage[] {
-  if (!list.some((item) => item.id === messageId)) {
-    return [...list, { id: messageId, role: "assistant", text: delta, created: Date.now(), activity: [] }];
-  }
-  return list.map((item) => (item.id === messageId ? { ...item, text: item.text + delta } : item));
-}
-
-function upsertActivity(list: ChatMessage[], messageId: string, item: ActivityItem): ChatMessage[] {
-  if (!list.some((message) => message.id === messageId)) {
-    return [...list, { id: messageId, role: "assistant", text: "", created: Date.now(), activity: [item] }];
-  }
-  return list.map((message) => {
-    if (message.id !== messageId) return message;
-    const activity = message.activity.some((entry) => entry.id === item.id)
-      ? message.activity.map((entry) => (entry.id === item.id ? item : entry))
-      : [...message.activity, item];
-    return { ...message, activity };
-  });
-}
-
-function mergeMessage(list: ChatMessage[], message: ChatMessage): ChatMessage[] {
-  if (!list.some((item) => item.id === message.id)) return [...list, message];
-  return list.map((item) =>
-    item.id === message.id
-      ? { ...item, text: message.text || item.text, error: message.error ?? item.error, activity: message.activity.length ? message.activity : item.activity }
-      : item,
-  );
 }
 
 function agentNames(payload: unknown): string[] {

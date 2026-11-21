@@ -17,11 +17,12 @@ export type ActivityItem = {
 
 export type ChatMessage = {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   text: string;
   created: number;
   error?: string;
   activity: ActivityItem[];
+  pending?: boolean;
 };
 
 export type SessionSummary = {
@@ -103,7 +104,8 @@ export function summarizeSession(session: OpenCodeSession): SessionSummary {
 }
 
 export function toChatMessage(message: OpenCodeMessage): ChatMessage {
-  const role = message.info.role === "user" ? "user" : "assistant";
+  const role =
+    message.info.role === "user" ? "user" : message.info.role === "system" ? "system" : "assistant";
   const parts = message.parts ?? [];
   const text = parts
     .filter((part) => part.type === "text" && part.text && !part.text.startsWith("<"))
@@ -153,14 +155,16 @@ export function normalizeEvent(raw: unknown): GuiEvent | null {
         return { type: "activity", sessionId, messageId, item: toActivity(part) };
       }
       if (part.type === "text" && part.text) {
+        const infoCreated = (props.info as { time?: { created?: number } } | undefined)?.time?.created;
+        const roleHint = props.role === "user" || (part as { role?: string }).role === "user" ? "user" : "assistant";
         return {
           type: "message",
           sessionId,
           message: {
             id: messageId,
-            role: "assistant",
+            role: roleHint,
             text: part.text,
-            created: Date.now(),
+            created: typeof infoCreated === "number" ? infoCreated : Date.now(),
             activity: [],
           },
         };
@@ -171,10 +175,15 @@ export function normalizeEvent(raw: unknown): GuiEvent | null {
     if (!info?.id) return null;
     const sessionId = (info as { sessionID?: string }).sessionID;
     if (!sessionId) return null;
+    const parts = Array.isArray(props.parts)
+      ? (props.parts as OpenCodePart[])
+      : Array.isArray((props.message as { parts?: unknown } | undefined)?.parts)
+        ? ((props.message as { parts: OpenCodePart[] }).parts)
+        : [];
     return {
       type: "message",
       sessionId,
-      message: toChatMessage({ info, parts: [] }),
+      message: toChatMessage({ info, parts }),
     };
   }
   if (type === "permission.asked" || type === "permission.updated" || type === "permission.v2.asked") {
