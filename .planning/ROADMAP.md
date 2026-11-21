@@ -18,8 +18,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Core Loop Correctness** - Messages, settings saves, and process exit behave without duplicates, data loss, or orphans (completed 2026-11-21)
 - [x] **Phase 3: Repository Cleanup and Honest Docs** - Delete the app-builder scaffolding, unused dependencies, and documentation for features that do not exist (completed 2026-11-21)
 - [x] **Phase 4: Trustworthy Quality Gates** - Lint passes, the full suite runs, and CI enforces both on every push and pull request (completed 2026-11-21)
-- [ ] **Phase 5: Install and Persist** - Containers keep state across restarts and the Linux/Windows installers produce a working `paddy` command
-- [ ] **Phase 6: End-to-End Verification** - The whole loop is exercised on local, container, and LAN-with-token paths and recorded in an acceptance checklist
+- [x] **Phase 5: Install and Persist** - Containers keep state across restarts and the Linux/Windows installers produce a working `paddy` command (completed 2026-11-21)
+- [x] **Phase 6: End-to-End Verification** - The whole loop is exercised on local, container, and LAN-with-token paths and recorded in an acceptance checklist (completed 2026-11-21)
 
 ## Phase Details
 
@@ -117,5 +117,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 2. Core Loop Correctness | 4/4 | Complete    | 2026-11-21 |
 | 3. Repository Cleanup and Honest Docs | 4/4 | Complete    | 2026-11-21 |
 | 4. Trustworthy Quality Gates | 1/0 | Complete    | 2026-11-21 |
-| 5. Install and Persist | 0/TBD | Not started | - |
-| 6. End-to-End Verification | 0/TBD | Not started | - |
+| 5. Install and Persist | 1/0 | Complete    | 2026-11-21 |
+| 6. End-to-End Verification | 1/0 | Complete    | 2026-11-21 |

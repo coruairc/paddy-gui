@@ -16,10 +16,10 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Packaging
 
-- [ ] **PKG-01**: A container started from the image or `docker-compose.yml` persists state across restarts at the documented path
-- [ ] **PKG-02**: `install.sh` verifies the checksum of any downloaded Node tarball and aborts on mismatch
-- [ ] **PKG-03**: `install.sh` installs a working `paddy` command on `PATH` from a clean checkout
-- [ ] **PKG-04**: `install.ps1` installs a working `paddy` command on `PATH` on Windows
+- [x] **PKG-01**: A container started from the image or `docker-compose.yml` persists state across restarts at the documented path
+- [x] **PKG-02**: `install.sh` verifies the checksum of any downloaded Node tarball and aborts on mismatch
+- [x] **PKG-03**: `install.sh` installs a working `paddy` command on `PATH` from a clean checkout
+- [x] **PKG-04**: `install.ps1` installs a working `paddy` command on `PATH` on Windows
 
 ### Core Loop
 
@@ -45,10 +45,10 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Verification
 
-- [ ] **VER-01**: The full loop is exercised end-to-end on a local run
-- [ ] **VER-02**: The full loop is exercised end-to-end from the container image
-- [ ] **VER-03**: The full loop is exercised end-to-end on a LAN bind with a token
-- [ ] **VER-04**: A written acceptance checklist records the results of the three runs above
+- [x] **VER-01**: The full loop is exercised end-to-end on a local run
+- [x] **VER-02**: The full loop is exercised end-to-end from the container image
+- [x] **VER-03**: The full loop is exercised end-to-end on a LAN bind with a token
+- [x] **VER-04**: A written acceptance checklist records the results of the three runs above
 
 ## v2 Requirements
 
@@ -85,10 +85,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SEC-02 | Phase 1 | Complete |
 | SEC-03 | Phase 1 | Complete |
 | SEC-04 | Phase 1 | Complete |
-| PKG-01 | Phase 5 | Pending |
-| PKG-02 | Phase 5 | Pending |
-| PKG-03 | Phase 5 | Pending |
-| PKG-04 | Phase 5 | Pending |
+| PKG-01 | Phase 5 | Complete |
+| PKG-02 | Phase 5 | Complete |
+| PKG-03 | Phase 5 | Complete |
+| PKG-04 | Phase 5 | Complete |
 | LOOP-01 | Phase 2 | Complete |
 | LOOP-02 | Phase 2 | Complete |
 | LOOP-03 | Phase 2 | Complete |
@@ -102,10 +102,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CLN-02 | Phase 3 | Complete |
 | CLN-03 | Phase 3 | Complete |
 | CLN-04 | Phase 3 | Complete |
-| VER-01 | Phase 6 | Pending |
-| VER-02 | Phase 6 | Pending |
-| VER-03 | Phase 6 | Pending |
-| VER-04 | Phase 6 | Pending |
+| VER-01 | Phase 6 | Complete |
+| VER-02 | Phase 6 | Complete |
+| VER-03 | Phase 6 | Complete |
+| VER-04 | Phase 6 | Complete |
 
 **Coverage:**
 - v1 requirements: 25 total
