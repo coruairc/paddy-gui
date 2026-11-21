@@ -179,6 +179,7 @@ export type Bootstrap = {
   appearance: "dark" | "light";
   connectionUrl: string;
   hasConnectionPassword: boolean;
+  deskModel: string;
   sessions: SessionSummary[];
   groups: { label: string; items: SessionSummary[] }[];
   model: string;

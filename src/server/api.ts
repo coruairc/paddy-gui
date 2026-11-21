@@ -86,6 +86,9 @@ async function bootstrap(runtime: ControllerRuntime) {
       /* config is optional on first paint */
     }
   }
+  // A saved desk default wins over the OpenCode project-config model; the config
+  // model stays the fallback for fresh installs (v2 has no remote global write).
+  if (runtime.state.deskModel) model = runtime.state.deskModel;
   return {
     status,
     ...publicState(runtime.state),
@@ -117,6 +120,7 @@ async function reset(runtime: ControllerRuntime): Promise<ApiResult> {
   runtime.state.connectionUrl = "";
   runtime.state.connectionPassword = "";
   runtime.state.ownedServerPassword = "";
+  runtime.state.deskModel = "";
   runtime.persist();
   return json(200, publicState(runtime.state));
 }
@@ -163,6 +167,7 @@ async function updateSettings(runtime: ControllerRuntime, request: Request): Pro
   }
   if (body.clearConnectionPassword === true) runtime.state.connectionPassword = "";
   else if (typeof body.connectionPassword === "string" && body.connectionPassword.trim() !== "") runtime.state.connectionPassword = body.connectionPassword;
+  if (typeof body.deskModel === "string") runtime.state.deskModel = body.deskModel;
   runtime.persist();
   return json(200, publicState(runtime.state));
 }

@@ -220,14 +220,44 @@ test("absent password preserves stored password", async () => {
   assert.equal(runtime.state.connectionPassword, "stored-pw");
 });
 
-test("reset clears ownedServerPassword and connectionPassword", async () => {
+test("desk default model persists through settings and bootstrap", async () => {
+  const { runtime } = runtimeWithProject();
+  const saved = await call(runtime, "PATCH", "/api/settings", { deskModel: "alibaba-token-plan/model-a" });
+  assert.equal(saved.status, 200);
+  assert.equal((saved.body as { deskModel: string }).deskModel, "alibaba-token-plan/model-a");
+  assert.equal(runtime.state.deskModel, "alibaba-token-plan/model-a");
+  const boot = await call(runtime, "GET", "/api/bootstrap");
+  const body = boot.body as { model: string; deskModel: string };
+  // The persisted desk default wins over the mocked OpenCode config model.
+  assert.equal(body.model, "alibaba-token-plan/model-a");
+  assert.equal(body.deskModel, "alibaba-token-plan/model-a");
+});
+
+test("bootstrap falls back to OpenCode config model when deskModel is unset", async () => {
+  const { runtime } = runtimeWithProject();
+  const boot = await call(runtime, "GET", "/api/bootstrap");
+  const body = boot.body as { model: string; deskModel: string };
+  assert.equal(body.model, "openai/gpt");
+  assert.equal(body.deskModel, "");
+});
+
+test("non-string deskModel is ignored", async () => {
+  const { runtime } = runtimeWithProject();
+  const result = await call(runtime, "PATCH", "/api/settings", { deskModel: 42 });
+  assert.equal(result.status, 200);
+  assert.equal(runtime.state.deskModel, "");
+});
+
+test("reset clears passwords and deskModel", async () => {
   const { runtime } = runtimeWithProject();
   runtime.state.connectionPassword = "stored-pw";
   runtime.state.ownedServerPassword = "owned-pw";
+  runtime.state.deskModel = "alibaba-token-plan/model-a";
   const result = await call(runtime, "POST", "/api/settings/reset", {});
   assert.equal(result.status, 200);
   assert.equal(runtime.state.connectionPassword, "");
   assert.equal(runtime.state.ownedServerPassword, "");
+  assert.equal(runtime.state.deskModel, "");
 });
 
 test("permission reply reject is forwarded", async () => {
