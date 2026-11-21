@@ -9,10 +9,10 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Security
 
-- [ ] **SEC-01**: User on a non-loopback bind must present a valid token to reach any `/api` route, regardless of the `Host` header
-- [ ] **SEC-02**: A request whose `Host` header names a host other than the bound address is not treated as local
-- [ ] **SEC-03**: Requests carrying a cross-origin `Origin` or `Referer` are rejected by the controller
-- [ ] **SEC-04**: Path allowlist and redaction still apply after the auth changes — no regression in `src/server/security.ts`
+- [x] **SEC-01**: User on a non-loopback bind must present a valid token to reach any `/api` route, regardless of the `Host` header
+- [x] **SEC-02**: A request whose `Host` header names a host other than the bound address is not treated as local
+- [x] **SEC-03**: Requests carrying a cross-origin `Origin` or `Referer` are rejected by the controller
+- [x] **SEC-04**: Path allowlist and redaction still apply after the auth changes — no regression in `src/server/security.ts`
 
 ### Packaging
 
@@ -81,10 +81,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SEC-01 | Phase 1 | Pending |
-| SEC-02 | Phase 1 | Pending |
-| SEC-03 | Phase 1 | Pending |
-| SEC-04 | Phase 1 | Pending |
+| SEC-01 | Phase 1 | Complete |
+| SEC-02 | Phase 1 | Complete |
+| SEC-03 | Phase 1 | Complete |
+| SEC-04 | Phase 1 | Complete |
 | PKG-01 | Phase 5 | Pending |
 | PKG-02 | Phase 5 | Pending |
 | PKG-03 | Phase 5 | Pending |

@@ -1,12 +1,19 @@
 ---
-gsd_state_version: '1.0'
-status: planning
+gsd_state_version: "1.0"
+milestone: v1.0
+current_phase: 1
+current_phase_name: Controller Auth Hardening
+status: verifying
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-11-21T17:09:00.809Z"
+last_activity: 2026-11-03
+last_activity_desc: Roadmap created from 25 v1 requirements (6 phases)
+state_head: ef45d104f6abd0f3ac34f1ccaf8863b164a22f1f
 progress:
   total_phases: 6
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_plans: 1
+  completed_plans: 1
 ---
 
 # Project State
@@ -21,8 +28,8 @@ See: .planning/PROJECT.md (updated 2026-11-03)
 ## Current Position
 
 Phase: 1 of 6 (Controller Auth Hardening)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
+Plan: 1 of 1 in current phase
+Status: Phase complete — ready for verification
 Last activity: 2026-11-03 — Roadmap created from 25 v1 requirements (6 phases)
 
 Progress: [░░░░░░░░░░] 0%
@@ -45,6 +52,11 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: —
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 1 P01 | 20min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -57,6 +69,12 @@ Recent decisions affecting current work:
 - [Roadmap]: Cleanup precedes quality gates because `npm run lint` and the test wiring only settle after the app-builder scaffolding and its orphaned tests are gone.
 - [Roadmap]: Packaging follows cleanup because the container's dead `PADDY_HOME` volume depends on the one state-directory variable chosen during documentation cleanup.
 - [Roadmap]: Verification is a final phase, but every earlier phase carries its own observable success criteria.
+- [Phase 1]: Anonymous trust requires loopback bind AND loopback Host header
+- [Phase 1]: Non-loopback bind never grants anonymous access
+- [Phase 1]: Origin check runs before auth and returns 403 for cross-origin
+- [Phase 1]: Referer validated when Origin absent
+- [Phase 1]: Token comparison uses timingSafeEqual
+- [Phase 1]: Container shortcut now Host-validated
 
 ### Pending Todos
 
@@ -81,6 +99,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-03
-Stopped at: Roadmap and state initialized; no phase planned yet
+Last session: 2026-11-21T17:09:00.787Z
+Stopped at: Completed 01-01-PLAN.md
 Resume file: None
