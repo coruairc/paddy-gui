@@ -38,14 +38,20 @@ created: "2026-11-21"
 
 ## Per-Task Verification Map
 
+> Revised at planning (2026-11-21) to match the committed plan set: test edits are coupled to their
+> semantic changes in the SAME task (RESEARCH Pitfalls 1-2), the redaction tracer leads (TRACER_MODE),
+> and waves are sequential per the team single-working-tree rule. Every task carries automated verify
+> (Nyquist Dimension 8) — no standalone Wave 0 is needed.
+
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 7-01-01 | 01 | 0 | V2-03 | T-7-01 | Identifier payloads byte-identical; exact secrets still redacted | unit | `node --experimental-strip-types --test src/server/security.test.ts` | ✅ (rewrite test:84-92 + new regression) | ⬜ pending |
-| 7-01-02 | 01 | 0 | V2-02 | T-7-04 | PATCH /api/config → 404; deskModel round-trip; identifier route round-trip | unit | `node --experimental-strip-types --test src/server/api.test.ts` | ✅ (replace test:138-143, add cases) | ⬜ pending |
-| 7-01-03 | 01 | 0 | V2-02 | — | Old state upgrades silently; deskModel persists; publicState exposes it | unit | `node --experimental-strip-types --test src/server/state.test.ts` | ✅ (new cases) | ⬜ pending |
-| 7-02-01 | 02 | 1 | V2-01 | T-7-05 | Spawn test hermetic via injected probe + env scrub | unit | `node --experimental-strip-types --test src/server/runtime.test.ts` | ✅ (fix test:118-150) | ⬜ pending |
-| 7-02-02 | 02 | 1 | V2-02 | T-7-04 | Dead chain deleted; Settings read-only sections typecheck | typecheck | `npm run typecheck` | ✅ | ⬜ pending |
-| 7-03-01 | 03 | 2 | V2-01 | T-7-05 | Full gate green with live server AND in isolated netns | suite | `flock -w 900 /tmp/team-build.lock npm test` + `unshare -Urn sh -c 'ip link set lo up && npm test'` | ✅ | ⬜ pending |
+| 7-01-01 | 01 | 1 | V2-03 | T-7-01, T-7-02 | Identifier payloads byte-identical (unit + GET /api/providers route); exact secrets/keys still redacted; needle boundaries pinned | unit (tracer, red-first) | `node --experimental-strip-types --test src/server/security.test.ts src/server/api.test.ts` | ✅ (rewrite test:84-92 + new regressions in the same task as the semantic change — Pitfall 1) | ⬜ pending |
+| 7-01-02 | 01 | 1 | V2-01 | T-7-05 | Spawn test hermetic via injected probe (both call sites) + three-var env scrub | unit | `node --experimental-strip-types --test src/server/runtime.test.ts` | ✅ (fix test:118-150 in place) | ⬜ pending |
+| 7-02-01 | 02 | 2 | V2-02 | T-7-03 | Old state upgrades silently; deskModel round-trips; publicState exposes it, passwords stay secret | unit | `node --experimental-strip-types --test src/server/state.test.ts` | ✅ (new case in existing file) | ⬜ pending |
+| 7-02-02 | 02 | 2 | V2-02 | T-7-03 | deskModel accepted via PATCH /settings; bootstrap precedence + config fallback; non-string ignored; reset clears | unit | `node --experimental-strip-types --test src/server/api.test.ts src/server/state.test.ts` | ✅ (new cases in existing file) | ⬜ pending |
+| 7-03-01 | 03 | 3 | V2-02 | T-7-04 | Settings Save persists via deskModel with real error surfacing; Agents/Permissions read-only; no 404s | typecheck + lint + UAT | `flock -w 900 /tmp/team-build.lock npm run typecheck` + `npm run lint` + end-of-phase human-check | ✅ (no DOM tooling per project constraint; human-check embedded in task verify) | ⬜ pending |
+| 7-03-02 | 03 | 3 | V2-02 | T-7-04 | Dead chain deleted end-to-end; PATCH /api/config → 404 regression guards reintroduction | unit | `node --experimental-strip-types --test src/server/api.test.ts src/server/opencode-client.test.ts` | ✅ (replace test:138-143 + delete mock:58 in the same task as route deletion — Pitfall 2) | ⬜ pending |
+| 7-03-03 | 03 | 3 | V2-01, V2-02, V2-03 | T-7-05 | Full gate green with live server on 4096 AND in isolated netns; typecheck + lint green | suite | `flock -w 900 /tmp/team-build.lock npm test` + `flock -w 900 /tmp/team-build.lock unshare -Urn sh -c 'ip link set lo up && npm test'` | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -53,12 +59,15 @@ created: "2026-11-21"
 
 ## Wave 0 Requirements
 
-All gaps are new/edited cases in **existing** co-located files — no new files, no framework install:
+All gaps are new/edited cases in **existing** co-located files — no new files, no framework install.
+Each gap is owned by the implementation task that changes its semantics (same-task coupling, RESEARCH
+Pitfalls 1-2), so there is no standalone Wave 0 — the tracer (7-01-01) starts red-first:
 
-- [ ] `src/server/runtime.test.ts` — fix spawn test (probe injection + env scrub) — covers V2-01
-- [ ] `src/server/security.test.ts` — rewrite test:84-92 to exact-match contract; add `alibaba-token-plan` regression — covers V2-03
-- [ ] `src/server/api.test.ts` — delete mock:58 + test:138-143; add 404 regression, deskModel round-trip, identifier route round-trip — covers V2-02/V2-03
-- [ ] `src/server/state.test.ts` — deskModel upgrade/round-trip/publicState case — covers V2-02
+- [ ] `src/server/security.test.ts` — rewrite test:84-92 to exact-match contract; add `alibaba-token-plan` regression + boundary cases — owned by 7-01-01 (V2-03)
+- [ ] `src/server/api.test.ts` — identifier route round-trip (7-01-01, V2-03); deskModel round-trip/fallback/non-string/reset cases (7-02-02, V2-02); delete mock:58 + replace test:138-143 with 404 regression (7-03-02, V2-02)
+- [ ] `src/server/state.test.ts` — deskModel upgrade/round-trip/publicState case (+ `writeFileSync` import) — owned by 7-02-01 (V2-02)
+- [ ] `src/server/runtime.test.ts` — fix spawn test (probe injection + env scrub) — owned by 7-01-02 (V2-01)
+- [ ] Manual UAT checklist: Settings model save → reload → persists; controller restart → persists; Agents/Permissions show data read-only with note; no Settings action errors — embedded as `<human-check>` in 7-03-01, harvested at end-of-phase (V2-02 UI half)
 
 ---
 

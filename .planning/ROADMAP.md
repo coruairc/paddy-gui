@@ -35,7 +35,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. No Settings action 404s or silently fails: the dead `updateConfig`/`PATCH /api/config` chain is deleted, and the Agents/Permissions sections are honestly read-only or fixed.
   3. The desk's default model persists in Paddy state (`~/.paddy/state.json`, new `deskModel` field) across browser reloads and controller restarts, and an existing state file upgrades silently on first load.
   4. An identifier-shaped payload (e.g. provider ID `alibaba-token-plan`) round-trips through the API byte-identical, proven by an exact-match redaction regression test that fails if substring replacement is reintroduced.
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 07-01-PLAN.md — Exact-match redaction tracer + byte-identical regressions; hermetic probe seam + spawn test fix (V2-03, V2-01)
+- [ ] 07-02-PLAN.md — deskModel persistence: state field + silent upgrade, settings/bootstrap surface, browser mirror (V2-02)
+- [ ] 07-03-PLAN.md — Honest Settings (deskModel Save, read-only Agents/Permissions), dead-chain deletion + 404 regression, both-environment gate (V2-02, V2-01, V2-03)
 
 ### Phase 8: Chat Model Picker
 **Goal**: Users can see and switch the model that will run their session, right from the chat UI — grouped by provider, keyboard-driven, informed by metadata — and trust that what the header shows is what actually runs.
