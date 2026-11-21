@@ -67,6 +67,15 @@ function runtimeWithProject() {
     listQuestions: async () => [],
     getVcs: async () => ({ branch: "main" }),
     getFileStatus: async () => [],
+    replyPermission: async () => {
+      calls.push("replyPermission");
+    },
+    replyQuestion: async () => {
+      calls.push("replyQuestion");
+    },
+    rejectQuestion: async () => {
+      calls.push("rejectQuestion");
+    },
   } as unknown as ControllerRuntime["client"];
   return { runtime, calls, project };
 }
@@ -195,4 +204,31 @@ test("reset clears ownedServerPassword and connectionPassword", async () => {
   assert.equal(result.status, 200);
   assert.equal(runtime.state.connectionPassword, "");
   assert.equal(runtime.state.ownedServerPassword, "");
+});
+
+test("permission reply reject is forwarded", async () => {
+  const { runtime, calls } = runtimeWithProject();
+  const result = await call(runtime, "POST", "/api/permissions/per_1/reply", { reply: "reject", sessionId: "ses_1", kind: "permission" });
+  assert.equal(result.status, 200);
+  assert.equal(calls.includes("replyPermission"), true);
+});
+
+test("question reject calls rejectQuestion", async () => {
+  const { runtime, calls } = runtimeWithProject();
+  const result = await call(runtime, "POST", "/api/permissions/q_1/reply", { reply: "reject", kind: "question" });
+  assert.equal(result.status, 200);
+  assert.equal(calls.includes("rejectQuestion"), true);
+});
+
+test("question once with answer calls replyQuestion", async () => {
+  const { runtime, calls } = runtimeWithProject();
+  const result = await call(runtime, "POST", "/api/permissions/q_1/reply", { reply: "once", kind: "question", message: "yes" });
+  assert.equal(result.status, 200);
+  assert.equal(calls.includes("replyQuestion"), true);
+});
+
+test("invalid reply value is rejected", async () => {
+  const { runtime } = runtimeWithProject();
+  const result = await call(runtime, "POST", "/api/permissions/per_1/reply", { reply: "maybe" });
+  assert.equal(result.status, 400);
 });
