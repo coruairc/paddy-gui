@@ -4,8 +4,9 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { handleApi } from "./api.ts";
-import { authorizePeer, isLoopbackAddress, originAllowed } from "./security.ts";
+import { authorizePeer, isLoopbackAddress, isLoopbackHost, originAllowed } from "./security.ts";
 import { getRuntime } from "./runtime.ts";
 
 export async function handleNode(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -15,25 +16,33 @@ export async function handleNode(req: IncomingMessage, res: ServerResponse): Pro
   const queryToken = requestUrl.searchParams.get("token");
   const cookieToken = cookie(req, "paddy_token");
   const authorization = header(req, "authorization");
+  // Origin/Referer check FIRST -> 403 for cross-origin regardless of token
+  if (!originAllowed(header(req, "origin"), host, header(req, "referer"))) {
+    sendJson(res, 403, { error: "Cross-origin request rejected" });
+    return;
+  }
   const auth = authorizePeer({
     remoteAddress: remote,
+    host,
+    bindHost: process.env.OPENCODE_WEB_HOST,
     authorization: authorization ?? (queryToken ? `Bearer ${queryToken}` : cookieToken ? `Bearer ${cookieToken}` : null),
     token: process.env.OPENCODE_WEB_TOKEN,
     // Docker maps a host-loopback port to a container interface, so the
     // socket peer is not literally loopback even though the published port
     // is local-only. Do not enable this shortcut for a non-loopback bind.
-    localOnly: isLoopbackAddress(process.env.OPENCODE_WEB_HOST) && isLocalHost(host),
+    localOnly: isLoopbackAddress(process.env.OPENCODE_WEB_HOST) && isLoopbackHost(host),
   });
   if (!auth.ok) {
     sendJson(res, auth.status, { error: auth.error });
     return;
   }
-  if (!originAllowed(header(req, "origin"), header(req, "host"))) {
-    sendJson(res, 403, { error: "Cross-origin request rejected" });
-    return;
-  }
-  if (queryToken && queryToken === process.env.OPENCODE_WEB_TOKEN?.trim()) {
-    res.setHeader("set-cookie", "paddy_token=" + encodeURIComponent(queryToken) + "; HttpOnly; SameSite=Strict; Path=/");
+  const expectedToken = process.env.OPENCODE_WEB_TOKEN?.trim() ?? "";
+  if (queryToken && expectedToken) {
+    const a = Buffer.from(queryToken, "utf8");
+    const b = Buffer.from(expectedToken, "utf8");
+    if (a.length === b.length && timingSafeEqual(a, b)) {
+      res.setHeader("set-cookie", "paddy_token=" + encodeURIComponent(queryToken) + "; HttpOnly; SameSite=Strict; Path=/");
+    }
   }
   const proto = "http";
   const request = new Request(`${proto}://${host}${req.url ?? "/"}`, {
@@ -85,11 +94,6 @@ function cookie(req: IncomingMessage, name: string): string | null {
     if (key === name) return decodeURIComponent(value.join("="));
   }
   return null;
-}
-
-function isLocalHost(host: string): boolean {
-  const hostname = host.split(":", 1)[0]?.replace(/^\[/, "").replace(/\]$/, "") ?? "";
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
 function toHeaders(req: IncomingMessage): Headers {

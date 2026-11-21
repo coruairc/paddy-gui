@@ -3,6 +3,7 @@
  * The browser is never trusted. Paths, origins, and secrets are checked here.
  */
 
+import { timingSafeEqual } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
 
@@ -14,6 +15,21 @@ export function isLoopbackAddress(address: string | undefined | null): boolean {
   return host === "127.0.0.1" || host === "::1" || host === "localhost";
 }
 
+export function isLoopbackHost(value: string | null | undefined): boolean {
+  if (!value) return false;
+  const first = value.split(",")[0]?.trim() ?? "";
+  let hostname = first;
+  if (hostname.startsWith("[")) {
+    const end = hostname.indexOf("]");
+    hostname = end >= 0 ? hostname.slice(1, end) : hostname;
+  } else {
+    const idx = hostname.lastIndexOf(":");
+    if (idx > 0) hostname = hostname.slice(0, idx);
+  }
+  const h = hostname.trim().replace(/^::ffff:/, "");
+  return h === "127.0.0.1" || h === "::1" || h === "localhost";
+}
+
 export function bearerToken(authorization: string | null | undefined): string | null {
   if (!authorization) return null;
   const match = /^Bearer\s+(\S+)$/i.exec(authorization.trim());
@@ -21,17 +37,27 @@ export function bearerToken(authorization: string | null | undefined): string | 
 }
 
 /**
- * Loopback is allowed without a token. Any other peer needs OPENCODE_WEB_TOKEN.
- * A configured token is not required for loopback, so local use stays simple.
+ * Anonymous trust is granted only when the controller is bound to a loopback
+ * address AND the request's Host header names a loopback host. The socket peer
+ * alone never grants trust; a non-loopback bind never grants anonymous trust.
  */
 export function authorizePeer(input: {
   remoteAddress?: string | null;
+  host?: string | null;
+  bindHost?: string | null;
   authorization?: string | null;
   token?: string | null;
   localOnly?: boolean;
 }): { ok: true } | { ok: false; status: 401; error: string } {
-  if (isLoopbackAddress(input.remoteAddress) || input.localOnly) return { ok: true };
-  const expected = input.token?.trim();
+  const bindLoopback = input.bindHost == null ? true : isLoopbackAddress(input.bindHost);
+  const hostLoopback = input.host == null ? true : isLoopbackHost(input.host);
+  const peerLoopback = isLoopbackAddress(input.remoteAddress);
+  const trusted =
+    bindLoopback && hostLoopback && (peerLoopback || input.localOnly === true);
+
+  if (trusted) return { ok: true };
+
+  const expected = input.token?.trim() ?? "";
   if (!expected) {
     return {
       ok: false,
@@ -40,23 +66,38 @@ export function authorizePeer(input: {
     };
   }
   const presented = bearerToken(input.authorization);
-  if (!presented || presented !== expected) {
+  if (!presented) {
+    return { ok: false, status: 401, error: "Unauthorized" };
+  }
+  const a = Buffer.from(presented, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
     return { ok: false, status: 401, error: "Unauthorized" };
   }
   return { ok: true };
 }
 
-/** Reject cross-site browser calls. Missing Origin is allowed (non-browser clients). */
-export function originAllowed(origin: string | null | undefined, host: string | null | undefined): boolean {
-  if (!origin) return true;
-  try {
-    const url = new URL(origin);
-    const expected = (host ?? "").split(",")[0]?.trim() ?? "";
-    if (!expected) return false;
-    return url.host === expected;
-  } catch {
-    return false;
-  }
+/** Reject cross-site browser calls. Missing Origin/Referer is allowed (non-browser clients). */
+export function originAllowed(
+  origin: string | null | undefined,
+  host: string | null | undefined,
+  referer?: string | null | undefined,
+): boolean {
+  const expected = (host ?? "").split(",")[0]?.trim() ?? "";
+  if (!expected) return false;
+
+  const check = (value: string): boolean => {
+    try {
+      const url = new URL(value);
+      return url.host === expected;
+    } catch {
+      return false;
+    }
+  };
+
+  if (origin) return check(origin);
+  if (referer) return check(referer);
+  return true;
 }
 
 export type PathCheck =
