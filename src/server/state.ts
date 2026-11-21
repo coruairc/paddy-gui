@@ -30,6 +30,8 @@ export type AppState = {
   /** Password this controller generated for a server it spawned, kept so a
    *  controller restart can re-attach to the still-running server. */
   ownedServerPassword: string;
+  /** Desk default provider/model id. Empty means unset — fall back to OpenCode config. */
+  deskModel: string;
 };
 
 export const EMPTY_STATE: AppState = {
@@ -40,6 +42,7 @@ export const EMPTY_STATE: AppState = {
   connectionUsername: "opencode",
   connectionPassword: "",
   ownedServerPassword: "",
+  deskModel: "",
 };
 
 export function stateFilePath(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
@@ -97,6 +100,7 @@ export function normalizeState(input: Partial<AppState> | null | undefined): App
     connectionPassword: typeof input?.connectionPassword === "string" ? input.connectionPassword : "",
     ownedServerPassword:
       typeof input?.ownedServerPassword === "string" ? input.ownedServerPassword : "",
+    deskModel: typeof input?.deskModel === "string" ? input.deskModel : "",
   };
 }
 
@@ -108,6 +112,7 @@ export function publicState(state: AppState) {
     connectionUrl: state.connectionUrl,
     connectionUsername: state.connectionUsername,
     hasConnectionPassword: Boolean(state.connectionPassword),
+    deskModel: state.deskModel,
   };
 }
 
