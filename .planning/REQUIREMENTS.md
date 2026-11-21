@@ -26,8 +26,8 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 - [x] **LOOP-01**: A sent message appears exactly once in the thread, reconciled with the server echo
 - [x] **LOOP-02**: Settings → Connection "Save" preserves an already-stored password when the field is left blank
 - [x] **LOOP-03**: Exiting Paddy terminates the spawned `opencode serve` child, leaving no orphan process
-- [ ] **LOOP-04**: Stop, retry, and session resume still work after the loop fixes
-- [ ] **LOOP-05**: Permission prompts can be allowed or denied inline and the run continues or aborts accordingly
+- [x] **LOOP-04**: Stop, retry, and session resume still work after the loop fixes
+- [x] **LOOP-05**: Permission prompts can be allowed or denied inline and the run continues or aborts accordingly
 
 ### Quality
 
@@ -92,8 +92,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | LOOP-01 | Phase 2 | Complete |
 | LOOP-02 | Phase 2 | Complete |
 | LOOP-03 | Phase 2 | Complete |
-| LOOP-04 | Phase 2 | Pending |
-| LOOP-05 | Phase 2 | Pending |
+| LOOP-04 | Phase 2 | Complete |
+| LOOP-05 | Phase 2 | Complete |
 | QUAL-01 | Phase 4 | Pending |
 | QUAL-02 | Phase 4 | Pending |
 | QUAL-03 | Phase 4 | Pending |
