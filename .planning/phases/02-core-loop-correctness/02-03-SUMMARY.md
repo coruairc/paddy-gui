@@ -150,3 +150,4 @@ None - no external service configuration required.
 ---
 *Phase: 02-core-loop-correctness*
 *Completed: 2026-11-21*
+## Self-Check: PASSED
