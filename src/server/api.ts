@@ -268,8 +268,11 @@ async function retry(runtime: ControllerRuntime, directory: string, id: string):
 async function readOpenCode(runtime: ControllerRuntime, route: string): Promise<ApiResult> {
   const project = activeProject(runtime);
   const directory = project?.path;
+  if (!runtime.status.connected) {
+    if (route === "/vcs") return json(200, { branch: null });
+    if (route === "/agents") return json(200, []);
+  }
   const client = runtime.requireClient();
-  if (route === "/config") return json(200, redactSecrets(await client.getConfig(directory), secretNeedles(runtime)));
   if (route === "/providers") {
     const [providers, auth] = await Promise.all([
       client.getProviders(directory),
