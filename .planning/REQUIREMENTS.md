@@ -70,22 +70,22 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| V2-01 | TBD | Pending |
-| V2-02 | TBD | Pending |
-| V2-03 | TBD | Pending |
-| MODEL-01 | TBD | Pending |
-| MODEL-02 | TBD | Pending |
-| MODEL-03 | TBD | Pending |
-| CMD-01 | TBD | Pending |
-| CMD-02 | TBD | Pending |
-| CMD-03 | TBD | Pending |
-| VER-05 | TBD | Pending |
-| VER-06 | TBD | Pending |
+| V2-01 | Phase 7 | Pending |
+| V2-02 | Phase 7 | Pending |
+| V2-03 | Phase 7 | Pending |
+| MODEL-01 | Phase 8 | Pending |
+| MODEL-02 | Phase 8 | Pending |
+| MODEL-03 | Phase 8 | Pending |
+| CMD-01 | Phase 9 | Pending |
+| CMD-02 | Phase 9 | Pending |
+| CMD-03 | Phase 9 | Pending |
+| VER-05 | Phase 10 | Pending |
+| VER-06 | Phase 10 | Pending |
 
 **Coverage:**
 - v1 requirements: 11 total
-- Mapped to phases: 0
-- Unmapped: 11 ⚠️
+- Mapped to phases: 11
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-11-21*

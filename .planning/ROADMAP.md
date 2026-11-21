@@ -2,120 +2,85 @@
 
 ## Overview
 
-Paddy already works; this milestone makes it trustworthy. Six phases take the app from "runs on my machine" to "can be tested, installed, and trusted on any path". The order is deliberate: the auth bypass and the core-loop defects are fixed first, because until those are true no other testing means much. Then the app-builder scaffolding and the documentation that describes a product that does not exist are removed, which is what lets lint and the test suite become real gates. With those gates green, the install and container paths are repaired and validated, and finally the whole loop is exercised end-to-end on local, container, and LAN-with-token paths and written down.
+v1.0 shipped a trustworthy desk; the controller now talks OpenCode v2 (commit `9a08c1b`). v1.1 restores and extends desk parity with the v2 API: a model picker in the chat UI, working slash commands, and a hardened v2 foundation. The order is deliberate: first the hermetic test fix (the quality gate every later phase verifies against, currently red whenever a live server holds port 4096), the durable home for the desk model default (v2 has no remote global-config write), and redaction hardening (identifier-shaped payloads flow through the new routes for the first time). Only then do the two feature verticals land — each as data path before UI, per the four-layer pattern — and finally the cross-feature trust properties (picked model is what runs; two tabs agree) are verified together in the live desk.
 
-**Milestone:** v1.0 Hardening (Phases 1-6)
+**Milestone:** v1.1 OpenCode v2 Desk (Phases 7-10)
+
+## Milestones
+
+- ✅ **v1.0 Hardening** - Phases 1-6 (shipped 2026-11-21; archived in `.planning/milestones/`)
+- 🚧 **v1.1 OpenCode v2 Desk** - Phases 7-10 (in progress)
 
 ## Phases
 
 **Phase Numbering:**
-- Integer phases (1, 2, 3): Planned milestone work
-- Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
+- Integer phases (7, 8, 9, 10): v1.1 milestone work, continuing from v1.0's Phase 6
+- Decimal phases (7.1, 7.2): Urgent insertions (marked with INSERTED)
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [x] **Phase 1: Controller Auth Hardening** - Token auth cannot be bypassed by loopback trust, a spoofed `Host`, or a cross-origin request (completed 2026-11-21)
-- [x] **Phase 2: Core Loop Correctness** - Messages, settings saves, and process exit behave without duplicates, data loss, or orphans (completed 2026-11-21)
-- [x] **Phase 3: Repository Cleanup and Honest Docs** - Delete the app-builder scaffolding, unused dependencies, and documentation for features that do not exist (completed 2026-11-21)
-- [x] **Phase 4: Trustworthy Quality Gates** - Lint passes, the full suite runs, and CI enforces both on every push and pull request (completed 2026-11-21)
-- [x] **Phase 5: Install and Persist** - Containers keep state across restarts and the Linux/Windows installers produce a working `paddy` command (completed 2026-11-21)
-- [x] **Phase 6: End-to-End Verification** - The whole loop is exercised on local, container, and LAN-with-token paths and recorded in an acceptance checklist (completed 2026-11-21)
+- [ ] **Phase 7: v2 Hardening Foundation** - Hermetic tests, a durable desk-model default, honest Settings saves, and redaction that never corrupts identifiers — the foundation every later phase builds on
+- [ ] **Phase 8: Chat Model Picker** - A provider-grouped, keyboard-driven model picker in the chat header/composer whose choice actually runs, persists, and never drifts from the session
+- [ ] **Phase 9: Slash Command Palette** - OpenCode commands discoverable and runnable from the composer, with outcomes and errors surfacing in the thread
+- [ ] **Phase 10: v1.1 End-to-End Verification** - Model switch and command execution verified live and across tabs, so the milestone's trust properties hold together, not just per-feature
 
 ## Phase Details
 
-### Phase 1: Controller Auth Hardening
-**Goal**: As an operator exposing Paddy beyond loopback, I want the controller to require a token on every API route and reject cross-origin requests, so that no anonymous or DNS-rebinding request can bypass auth.
-**Mode:** mvp
-**Depends on**: Nothing (first phase)
-**Requirements**: SEC-01, SEC-02, SEC-03, SEC-04
+### Phase 7: v2 Hardening Foundation
+**Goal**: The quality gate is trustworthy and the desk has a durable home for its model default, before any feature is built on them — `npm test` green in a clean environment, no Settings action 404s, and identifiers survive redaction byte-identically.
+**Depends on**: Nothing (first phase of v1.1; builds on the shipped v1.0 and the v2 API migration `9a08c1b`)
+**Requirements**: V2-01, V2-02, V2-03
 **Success Criteria** (what must be TRUE):
-  1. On a non-loopback bind, every `/api` route — including `/api/bootstrap` and `/api/events` — refuses an anonymous request, regardless of the `Host` header.
-  2. A request that arrives on a loopback socket carrying `Host: evil.example` and a matching `Origin` is rejected; the DNS-rebinding path no longer authenticates.
-  3. A request carrying a cross-origin `Origin` or `Referer` is rejected, while the same-origin browser desk keeps loading and chatting normally.
-  4. With a valid token a LAN client reaches the API and drives a session; the path allowlist and secret redaction still hold — no out-of-allowlist path is readable and no stored password appears in any response.
-  5. `npm test` contains a test that fails if the loopback/`Host` bypass is reintroduced.
-**Plans**: 1/1 plans complete
-Plans:
-- [x] 01-01-PLAN.md — Close the loopback/Host auth bypass (security.ts + http.ts + tests)
+  1. `npm test` is green both on a machine running a live OpenCode on port 4096 and on one with nothing listening — the runtime spawn test no longer attaches to whatever server holds the port (injectable probe seam, no hardcoded endpoint in the test path).
+  2. No Settings action 404s or silently fails: the dead `updateConfig`/`PATCH /api/config` chain is deleted, and the Agents/Permissions sections are honestly read-only or fixed.
+  3. The desk's default model persists in Paddy state (`~/.paddy/state.json`, new `deskModel` field) across browser reloads and controller restarts, and an existing state file upgrades silently on first load.
+  4. An identifier-shaped payload (e.g. provider ID `alibaba-token-plan`) round-trips through the API byte-identical, proven by an exact-match redaction regression test that fails if substring replacement is reintroduced.
+**Plans**: TBD
 
-### Phase 2: Core Loop Correctness
-**Goal**: As a user driving an OpenCode session, I want messages, settings saves, and process exit to behave without duplicates, data loss, or orphans, so that I can complete a run from first message to finish.
-**Mode:** mvp
-**Depends on**: Phase 1 (the loop is exercised against a controller that can be trusted on any bind)
-**Requirements**: LOOP-01, LOOP-02, LOOP-03, LOOP-04, LOOP-05
+### Phase 8: Chat Model Picker
+**Goal**: Users can see and switch the model that will run their session, right from the chat UI — grouped by provider, keyboard-driven, informed by metadata — and trust that what the header shows is what actually runs.
+**Depends on**: Phase 7 (persisted `deskModel` target, hermetic test gate, hardened redaction)
+**Requirements**: MODEL-01, MODEL-02, MODEL-03
 **Success Criteria** (what must be TRUE):
-  1. Sending a message shows it exactly once — the optimistic bubble is reconciled with the server echo, and a reload does not bring a second copy back.
-  2. Settings → Connection → Save with the password field left blank keeps the stored password working; entering a new password replaces it.
-  3. Ctrl+C, `docker stop`, and Settings → Reset terminate the spawned `opencode serve` child — no `opencode` process survives the controller.
-  4. Stop, retry, and resume-after-browser-restart still work on the same session after these fixes.
-  5. A permission prompt can be allowed or denied inline and the run continues or aborts accordingly.
-**Plans**: 4/4 plans complete
+  1. User can open a model picker from the chat header/composer (not only Settings) and see OpenCode v2 models grouped by provider, with live filtering, full keyboard control, and the always-visible active model.
+  2. Selecting a model sets the desk default; the next message sent in the session actually runs on that model (applied per-session on send), the choice persists across reloads, and session resume seeds from the session's actual model.
+  3. When the session's model changes (via `session.model.selected` SSE or resume), the header reconciles so it never shows a model the session is not running; a failed model switch aborts the send rather than running the wrong model.
+  4. The picker surfaces model metadata OpenCode already provides (status, context window, release date) so the user can choose informed.
+**Plans**: TBD
 **UI hint**: yes
-Plans:
-- [x] 02-01-PLAN.md — Reconcile optimistic message bubble (LOOP-01)
-- [x] 02-02-PLAN.md — Password save preserves stored password (LOOP-02)
-- [x] 02-03-PLAN.md — Process exit kills spawned child (LOOP-03)
-- [x] 02-04-PLAN.md — Inline permission prompts and session resume (LOOP-04/05)
 
-### Phase 3: Repository Cleanup and Honest Docs
-**Goal**: The repository contains only Paddy — no app-builder subsystems in the build, no dependencies nothing imports, and no documentation for commands or variables that do not exist.
-**Mode:** mvp
-**Depends on**: Phase 2 (the loop must be verified before the scaffolding around it is deleted)
-**Requirements**: CLN-01, CLN-02, CLN-03, CLN-04
+### Phase 9: Slash Command Palette
+**Goal**: Users can discover and run OpenCode commands in the desk the way they would in the TUI — a leading `/` offers the server's commands, `/name args` runs in-session, and outcomes and errors are visible in the thread.
+**Depends on**: Phase 8 (feature verticals land sequentially to keep review surface one-feature-wide; both build on Phase 7's foundation and SSE invalidation patterns)
+**Requirements**: CMD-01, CMD-02, CMD-03
 **Success Criteria** (what must be TRUE):
-  1. `vite.config.ts` mounts no Grok/PWA/preview/PGlite plugins, and dev, build, and preview still start and serve the desk.
-  2. The template subsystems are gone from `src/`, `server/`, and `scripts/`, and `npm run typecheck` and `npm test` pass with them removed.
-  3. `SELFHOST.md` and `selfhost.env.example` are either deleted or describe only the commands (`start`, `update`, `uninstall`, `doctor`, `help`, `--version`) and variables the code actually implements.
-  4. `README.md` install and run instructions match `bin/paddy.mjs` and `src/server/state.ts`, including one documented state-directory variable.
-  5. The unused heavy dependencies are gone from `package.json`, and install, build, lint, and test still pass afterwards.
+  1. Typing a leading `/` in the composer opens a filterable, keyboard-first palette of OpenCode commands (name + description) sourced from `GET /api/command` — never a client-side registry.
+  2. Submitting `/name args` runs the command via `POST /api/session/{id}/command` and its outcome is visible in the thread; unknown or failing commands surface their error as a persistent in-thread system message, not a transient toast.
+  3. When OpenCode emits `command.updated` while the desk is open, the palette reflects the new command list without a page reload.
+  4. Only a leading `/` triggers command dispatch — mid-text slashes are ordinary prompts, unknown `/name` never silently becomes prompt text, and the composer draft survives palette open/close.
 **Plans**: TBD
+**UI hint**: yes
 
-### Phase 4: Trustworthy Quality Gates
-**Goal**: A contributor can open a pull request and have lint, typecheck, and the full test suite run and pass without local guesswork.
-**Mode:** mvp
-**Depends on**: Phase 3 (lint and the test wiring only settle once the scaffolding and its orphaned tests are gone)
-**Requirements**: QUAL-01, QUAL-02, QUAL-03, QUAL-04
+### Phase 10: v1.1 End-to-End Verification
+**Goal**: The v1.1 features are verified together in the live desk, so the milestone's trust properties hold in combination — the picked model is what runs, and every open tab agrees.
+**Depends on**: Phase 9 (all v1.1 features landed)
+**Requirements**: VER-05, VER-06
 **Success Criteria** (what must be TRUE):
-  1. `npm run lint` exits 0 on a clean checkout.
-  2. `npm test` executes every test file in the repo, including the `scripts/*.test.mjs` suites, and reports the full count with no silently skipped files.
-  3. The stale root `install.sh.test.mjs` is removed or passing, and the suite is green.
-  4. Pushing a commit or opening a pull request runs lint, typecheck, and the full suite in CI, and a deliberately broken change turns the check red.
+  1. In a live run against local OpenCode v2.3.2, a model picked in the chat header is the model that actually runs the next message, and `/name args` produces visible results in the thread.
+  2. Two open tabs agree on the active model after a switch, and command outcomes fan out to both via SSE without a reload.
+  3. The full v1.1 loop passes the quality gates in a clean environment: `npm test`, `npm run lint`, and `tsc --noEmit` all green, with no `node:*` imports in the browser bundle.
+  4. Verification evidence is recorded (VERIFICATION.md / phase checklist) so milestone completion can be audited later.
 **Plans**: TBD
-
-### Phase 5: Install and Persist
-**Goal**: Paddy installs from a clean checkout on Linux and Windows and a container keeps its state across restarts.
-**Mode:** mvp
-**Depends on**: Phase 3 (state-directory variable naming), Phase 4 (the gates validate the changes)
-**Requirements**: PKG-01, PKG-02, PKG-03, PKG-04
-**Success Criteria** (what must be TRUE):
-  1. `docker compose up`, add a project and a password, `docker compose down` then `up` again — the project, appearance, and password are still there, stored at the documented path.
-  2. `install.sh` compares the downloaded Node tarball against the published `SHASUMS256.txt` and aborts with a non-zero exit and no partial install on a mismatch.
-  3. From a clean checkout on Linux, `install.sh` leaves a `paddy` command on `PATH` that starts the desk.
-  4. On a Windows host, `install.ps1` leaves a `paddy` command on `PATH` that starts the desk without a `which`/`npm` spawn failure.
-**Plans**: TBD
-
-### Phase 6: End-to-End Verification
-**Goal**: The full loop is proven on all three delivery paths and the evidence is written down where the next reader can find it.
-**Mode:** mvp
-**Depends on**: Phases 1-5
-**Requirements**: VER-01, VER-02, VER-03, VER-04
-**Success Criteria** (what must be TRUE):
-  1. On a local run the loop completes: pick a project, send a message, watch reads/edits/commands, approve a permission, inspect the diff, stop and retry, reload and resume — all recorded as passing.
-  2. The same loop completes from the container image, with state surviving a container restart.
-  3. The same loop completes on a LAN bind with a token, while an unauthenticated or cross-origin request is refused.
-  4. A written acceptance checklist in the repo records each run's date, environment, steps, and result, with every item either PASS or an explicitly filed defect.
-**Plans**: TBD
+**UI hint**: yes
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
+Phases execute in numeric order: 7 → 8 → 9 → 10 (decimal insertions, if any, appear between their surrounding integers)
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Controller Auth Hardening | 1/1 | Complete    | 2026-11-21 |
-| 2. Core Loop Correctness | 4/4 | Complete    | 2026-11-21 |
-| 3. Repository Cleanup and Honest Docs | 4/4 | Complete    | 2026-11-21 |
-| 4. Trustworthy Quality Gates | 1/0 | Complete    | 2026-11-21 |
-| 5. Install and Persist | 1/0 | Complete    | 2026-11-21 |
-| 6. End-to-End Verification | 1/0 | Complete    | 2026-11-21 |
+| 7. v2 Hardening Foundation | 0/? | Not started | - |
+| 8. Chat Model Picker | 0/? | Not started | - |
+| 9. Slash Command Palette | 0/? | Not started | - |
+| 10. v1.1 End-to-End Verification | 0/? | Not started | - |

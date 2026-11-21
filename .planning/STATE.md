@@ -3,10 +3,10 @@ gsd_state_version: "1.0"
 milestone: v1.1
 milestone_name: OpenCode v2 Desk
 status: planning
-last_updated: "2026-11-21T20:57:28.875Z"
+last_updated: "2026-11-21T21:00:00.000Z"
 last_activity: 2026-11-21
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,51 +17,41 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-11-03)
+See: .planning/PROJECT.md (updated 2026-11-21)
 
 **Core value:** A browser UI you can point at a real project and drive an OpenCode session through, start to finish, with no surprises.
-**Current focus:** Phase 1 — Controller Auth Hardening
+**Current focus:** Phase 7 — v2 Hardening Foundation
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 7 of 10 (Phase 1 of 4 in v1.1) — v2 Hardening Foundation
 Plan: —
-Status: Defining requirements
-Last activity: 2026-11-21 — Milestone v1.1 started
+Status: Ready to plan
+Last activity: 2026-11-21 — v1.1 roadmap created (phases 7-10)
 
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 12
+- Total plans completed (v1.0): 12
 - Average duration: —
-- Total execution time: 0.0 hours
+- Total execution time: — (v1.1 not started)
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1 | 1 | - | - |
-| 2 | 4 | - | - |
-| 3 | 4 | - | - |
-| 4 | 1 | - | - |
-| 5 | 1 | - | - |
-| 6 | 1 | - | - |
+| 7 | 0/? | - | - |
+| 8 | 0/? | - | - |
+| 9 | 0/? | - | - |
+| 10 | 0/? | - | - |
 
 **Recent Trend:**
 - Last 5 plans: —
 - Trend: —
 
 *Updated after each plan completion*
-**Per-Plan Metrics:**
-
-| Plan | Duration | Tasks | Files |
-|------|----------|-------|-------|
-| Phase 1 P01 | 20min | 3 tasks | 5 files |
-| Phase 2 P01 | 15m | 3 tasks | 6 files |
-| Phase 02 P02 | 0 | 3 tasks | 5 files |
-| Phase 02 P03 | 15 | 3 tasks | 4 files |
-| Phase 2 P04 | 15 | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -70,21 +60,11 @@ Last activity: 2026-11-21 — Milestone v1.1 started
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- [Roadmap]: Security and core-loop defects are sequenced first — nothing else can be tested with confidence until they are fixed.
-- [Roadmap]: Cleanup precedes quality gates because `npm run lint` and the test wiring only settle after the app-builder scaffolding and its orphaned tests are gone.
-- [Roadmap]: Packaging follows cleanup because the container's dead `PADDY_HOME` volume depends on the one state-directory variable chosen during documentation cleanup.
-- [Roadmap]: Verification is a final phase, but every earlier phase carries its own observable success criteria.
-- [Phase 1]: Anonymous trust requires loopback bind AND loopback Host header
-- [Phase 1]: Non-loopback bind never grants anonymous access
-- [Phase 1]: Origin check runs before auth and returns 403 for cross-origin
-- [Phase 1]: Referer validated when Origin absent
-- [Phase 1]: Token comparison uses timingSafeEqual
-- [Phase 1]: Container shortcut now Host-validated
-- [Phase 2]: Reconcile optimistic user bubble by (role+text+created proximity) and drop temp id (LOOP-01)
-- [Phase 02]: Blank/absent connectionPassword preserves stored password; only non-blank replaces; clearConnectionPassword===true deletes (LOOP-02)
-- [Phase 02]: Reset calls runtime.disconnect() to stop spawned child and clears ownedServerPassword (LOOP-02/LOOP-03 handoff)
-- [Phase 02]: LOOP-03: detached spawn with process-group kill and injectable seam
-- [Phase 2]: LOOP-04/05: inline PermissionCard with allow/deny; deny aborts and records denial line; question via inline Input; session resume via localStorage
+- [Roadmap v1.1]: Hardening first — the port-4096 hermetic test fix (V2-01) is the gate every later phase verifies against, and the desk-model persistence (V2-02) must exist before the picker writes to it.
+- [Roadmap v1.1]: V2-02 and the desk-default persistence are one shared work item (the `deskModel` state field lands in Phase 7; the picker that reads/writes it lands in Phase 8).
+- [Roadmap v1.1]: V2-03 redaction hardening lands in Phase 7, before any new model/command routes route identifier-shaped payloads through `redactSecrets`.
+- [Roadmap v1.1]: Feature verticals (model picker, commands) land data path before UI, per the four-layer pattern; sequentially to keep review surface one-feature-wide.
+- [Roadmap v1.1]: Zero new dependencies — both widgets are hand-built WAI-ARIA APG comboboxes (research SUMMARY.md).
 
 ### Pending Todos
 
@@ -92,9 +72,8 @@ None yet.
 
 ### Blockers/Concerns
 
-- Phase 1: `src/server/http.ts` has no test today, so the auth change must add socket-level coverage — `security.test.ts` alone does not exercise the bypass path.
-- Phase 2: `src/server/runtime.ts` (spawn/exit lifecycle) has zero direct tests; the child-termination fix needs an injectable spawn/probe seam.
-- Phase 2: `reset` also leaves the child running and the `ownedServerPassword` persisted — the same fix path as LOOP-03.
+- Phase 9: command endpoint shapes are MEDIUM confidence — published OpenAPI targets a newer server than installed v2.3.2; capture `/openapi.json` from the local server before planning Phase 9 (recommend `/gsd-plan-phase --research-phase 9`). Also settle `text` semantics (args-only vs full input) and zero-arg commands live.
+- Phase 7: open decision — Agents/Permissions Settings sections: read-only with explanatory note (research recommendation) vs removal.
 
 ## Deferred Items
 
@@ -109,10 +88,10 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-21T17:34:03.086Z
-Stopped at: Phase 6 complete — all phases complete
+Last session: 2026-11-21
+Stopped at: v1.1 roadmap created (phases 7-10); Phase 7 ready to plan
 Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Plan Phase 7 with `/gsd-plan-phase 7`
