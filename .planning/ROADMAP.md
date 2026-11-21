@@ -34,7 +34,9 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. A request carrying a cross-origin `Origin` or `Referer` is rejected, while the same-origin browser desk keeps loading and chatting normally.
   4. With a valid token a LAN client reaches the API and drives a session; the path allowlist and secret redaction still hold — no out-of-allowlist path is readable and no stored password appears in any response.
   5. `npm test` contains a test that fails if the loopback/`Host` bypass is reintroduced.
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 01-01-PLAN.md — Close the loopback/Host auth bypass (security.ts + http.ts + tests)
 
 ### Phase 2: Core Loop Correctness
 **Goal**: A user can drive one OpenCode session from first message to finished run without duplicate turns, a wiped password, or an orphaned server.
