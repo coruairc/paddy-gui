@@ -421,6 +421,7 @@ export function DeskApp() {
               projects={projects}
               appearance={boot?.appearance ?? "dark"}
               model={model}
+              hasConnectionPassword={boot?.hasConnectionPassword ?? false}
               onAppearance={(appearance) => {
                 document.documentElement.dataset.theme = appearance;
                 setBoot((current) => (current ? { ...current, appearance } : current));

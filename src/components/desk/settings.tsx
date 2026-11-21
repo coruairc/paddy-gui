@@ -29,6 +29,7 @@ export function SettingsPanel({
   projects,
   appearance,
   model,
+  hasConnectionPassword = false,
   onAppearance,
   onModelChange,
   onProjectsChange,
@@ -38,6 +39,7 @@ export function SettingsPanel({
   projects: Project[];
   appearance: "dark" | "light";
   model: string;
+  hasConnectionPassword?: boolean;
   onAppearance: (appearance: "dark" | "light") => void;
   onModelChange: (model: string) => void;
   onProjectsChange: (projects: Project[]) => void;
@@ -73,7 +75,7 @@ export function SettingsPanel({
           </div>
           <div className="mt-5">
           {section === "General" && <General status={status} />}
-          {section === "Connection" && <Connection status={status} onReconnect={onReconnect} />}
+          {section === "Connection" && <Connection status={status} onReconnect={onReconnect} hasConnectionPassword={hasConnectionPassword} />}
           {section === "Providers" && <Providers model={model} onModelChange={onModelChange} />}
           {section === "Agents" && <Agents />}
           {section === "Permissions" && <Permissions />}
@@ -115,7 +117,7 @@ function General({ status }: { status: ConnectionStatus | null }) {
   );
 }
 
-function Connection({ status, onReconnect }: { status: ConnectionStatus | null; onReconnect: () => void }) {
+function Connection({ status, onReconnect, hasConnectionPassword = false }: { status: ConnectionStatus | null; onReconnect: () => void; hasConnectionPassword?: boolean }) {
   const [url, setUrl] = useState("");
   const [username, setUsername] = useState("opencode");
   const [password, setPassword] = useState("");
@@ -125,7 +127,7 @@ function Connection({ status, onReconnect }: { status: ConnectionStatus | null; 
       <p className="text-muted">Leave the URL empty to use or start OpenCode on this computer. A password is stored only by the controller.</p>
       <Input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="http://127.0.0.1:4096" />
       <Input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Username" />
-      <Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Server password" autoComplete="off" />
+      <Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={hasConnectionPassword ? "•••• (stored)" : "Server password"} autoComplete="off" />
       <div className="flex gap-2">
         <Button
           onClick={() => {
@@ -137,6 +139,20 @@ function Connection({ status, onReconnect }: { status: ConnectionStatus | null; 
         >
           Save
         </Button>
+        {hasConnectionPassword && (
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (window.confirm("Clear the stored OpenCode password?")) {
+                void api.settings({ clearConnectionPassword: true }).then(() => {
+                  setNote("Password cleared.");
+                });
+              }
+            }}
+          >
+            Clear password
+          </Button>
+        )}
         <Button variant="outline" onClick={onReconnect}>Reconnect</Button>
       </div>
       {note && <p className="text-ok">{note}</p>}
