@@ -29,6 +29,16 @@ export type ConnectionStatus = {
   controllerVersion: string;
 };
 
+export type SpawnImpl = (command: string, args: string[], options: Record<string, unknown>) => ChildProcess;
+export type SleepImpl = (ms: number) => Promise<void>;
+export type KillImpl = (pid: number, signal: NodeJS.Signals) => void;
+export type ControllerRuntimeOptions = {
+  stateFile?: string;
+  spawn?: SpawnImpl;
+  sleep?: SleepImpl;
+  kill?: KillImpl;
+};
+
 type Listener = (event: GuiEvent | { type: "connection"; status: ConnectionStatus }) => void;
 
 export class ControllerRuntime {
@@ -48,13 +58,20 @@ export class ControllerRuntime {
   private listeners = new Set<Listener>();
   private loopAbort: AbortController | null = null;
   private connecting: Promise<ConnectionStatus> | null = null;
+  private readonly spawnImpl: SpawnImpl;
+  private readonly sleepImpl: SleepImpl;
+  private readonly killImpl: KillImpl;
 
-  constructor(stateFile = stateFilePath()) {
-    this.stateFile = stateFile;
-    this.state = readState(stateFile);
+  constructor(options: ControllerRuntimeOptions | string = {}) {
+    const opts = typeof options === "string" ? { stateFile: options } : (options ?? {});
+    this.stateFile = opts.stateFile ?? stateFilePath();
+    this.state = readState(this.stateFile);
     // A controller restart must not lose the password of a server it spawned,
     // otherwise the still-running OpenCode looks like an unknown server.
     this.ownedPassword = this.state.ownedServerPassword || "";
+    this.spawnImpl = opts.spawn ?? spawn;
+    this.sleepImpl = opts.sleep ?? sleep;
+    this.killImpl = opts.kill ?? process.kill.bind(process);
   }
 
   persist(): void {
@@ -219,7 +236,7 @@ export class ControllerRuntime {
     for (let attempt = 0; attempt < 20; attempt++) {
       const probed = await this.probe(url, auth);
       if (probed === "ok") return true;
-      await sleep(250);
+      await this.sleepImpl(250);
     }
     return false;
   }
@@ -227,29 +244,39 @@ export class ControllerRuntime {
   private spawnServer(binary: string, port: number, username: string, password: string): Promise<void> {
     if (this.child && !this.child.killed) return Promise.resolve();
     return new Promise((resolvePromise, reject) => {
-      const child = spawn(binary, ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
+      const child = this.spawnImpl(binary, ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
+        detached: true,
         env: {
           ...process.env,
           OPENCODE_SERVER_USERNAME: username,
           OPENCODE_SERVER_PASSWORD: password,
         },
         stdio: "ignore",
-      });
+      }) as ChildProcess;
       this.child = child;
       const timer = setTimeout(() => resolvePromise(), 600);
       child.once("error", (err) => {
         clearTimeout(timer);
         reject(err);
       });
-      child.once("exit", (code) => {
-        if (this.child === child) this.child = null;
+      child.once("exit", (code, signal) => {
+        if (this.child !== child) return;
+        this.child = null;
+        this.ownedPassword = "";
+        this.state.ownedServerPassword = "";
+        this.persist();
         this.setStatus({
           connected: false,
           healthy: false,
           startedByController: false,
-          error: `OpenCode exited (${code ?? "signal"})`,
+          error: `OpenCode exited (${code ?? signal ?? "signal"})`,
         });
       });
+      try {
+        child.unref?.();
+      } catch {
+        /* ignore */
+      }
     });
   }
 
@@ -280,7 +307,7 @@ export class ControllerRuntime {
           error: err instanceof Error ? err.message : "Connection lost",
         });
       }
-      await sleep(delay);
+      await this.sleepImpl(delay);
       delay = Math.min(delay * 2, 15_000);
       if (signal.aborted) return;
       try {
@@ -297,16 +324,45 @@ export class ControllerRuntime {
     this.loopAbort?.abort();
     this.client?.disconnect?.();
     this.client = null;
-    if (this.child && !this.child.killed) {
-      this.child.kill();
-      this.child = null;
-    }
+    await this.killChild();
+    this.ownedPassword = "";
+    this.state.ownedServerPassword = "";
+    this.persist();
     return this.setStatus({
       connected: false,
       healthy: false,
       startedByController: false,
       error: undefined,
     });
+  }
+
+  private async killChild(): Promise<void> {
+    const child = this.child;
+    if (!child || child.killed) {
+      this.child = null;
+      return;
+    }
+    this.child = null;
+    const pid = child.pid;
+    const killGroup = (signal: NodeJS.Signals) => {
+      if (pid && pid > 1) {
+        try {
+          this.killImpl(-pid, signal);
+          return;
+        } catch {
+          /* fall through */
+        }
+      }
+      try {
+        child.kill(signal);
+      } catch {
+        /* already gone */
+      }
+    };
+    killGroup("SIGTERM");
+    const exited = await waitForExit(child, 5000, this.sleepImpl);
+    if (!exited) killGroup("SIGKILL");
+    await waitForExit(child, 5000, this.sleepImpl).catch(() => {});
   }
 
   requireClient(): OpenCodeClient {
@@ -332,6 +388,22 @@ function which(command: string): string | null {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
+async function waitForExit(child: ChildProcess, timeoutMs: number, sleepImpl: SleepImpl): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) return true;
+  return new Promise<boolean>((resolve) => {
+    let done = false;
+    const finish = (value: boolean) => {
+      if (done) return;
+      done = true;
+      child.removeListener("exit", onExit);
+      resolve(value);
+    };
+    const onExit = () => finish(true);
+    child.on("exit", onExit);
+    void sleepImpl(timeoutMs).then(() => finish(false));
+  });
 }
 
 function freePort(preferred: number): Promise<number> {

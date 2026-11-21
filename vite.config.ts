@@ -174,9 +174,35 @@ function opencodeControllerPlugin(): Plugin {
     name: "paddy-controller",
     configureServer(server) {
       mount(server.middlewares);
+      void (async () => {
+        const { getRuntime } = await import("./src/server/runtime.ts");
+        const runtime = getRuntime();
+        const shutdown = () => {
+          void runtime.disconnect().finally(() => process.exit(0));
+        };
+        for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+          process.once(sig, shutdown);
+        }
+        process.once("beforeExit", () => {
+          void runtime.disconnect();
+        });
+      })();
     },
     configurePreviewServer(server) {
       mount(server.middlewares);
+      void (async () => {
+        const { getRuntime } = await import("./src/server/runtime.ts");
+        const runtime = getRuntime();
+        const shutdown = () => {
+          void runtime.disconnect().finally(() => process.exit(0));
+        };
+        for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+          process.once(sig, shutdown);
+        }
+        process.once("beforeExit", () => {
+          void runtime.disconnect();
+        });
+      })();
     },
   };
 }
