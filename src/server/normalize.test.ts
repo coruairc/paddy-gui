@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { groupSessionsByDate, normalizeEvent, toChatMessage, toDiffFile } from "./normalize.ts";
+import {
+  groupSessionsByDate,
+  normalizeEvent,
+  summarizeSession,
+  toChatMessage,
+  toChatMessages,
+  toDiffFile,
+} from "./normalize.ts";
 
 test("sessions group into today and yesterday", () => {
   const now = new Date("2026-09-29T15:00:00").getTime();
@@ -16,29 +23,145 @@ test("sessions group into today and yesterday", () => {
   assert.equal(groups[1].label, "Yesterday");
 });
 
-test("messages and tool activity are normalized", () => {
-  const message = toChatMessage({
-    info: { id: "msg_1", role: "assistant", time: { created: 1 } },
-    parts: [
-      { type: "text", text: "I found the issue" },
-      { id: "prt_1", type: "tool", tool: "read", state: { status: "completed", title: "Reading src/auth.ts" } },
-    ],
+test("v2 sessions summarize from location and time", () => {
+  const summary = summarizeSession({
+    id: "ses_1",
+    title: "Auth bug",
+    time: { created: 10, updated: 20, archived: 30 },
+    location: { directory: "/work/app" },
   });
-  assert.equal(message.text, "I found the issue");
-  assert.equal(message.activity[0].title, "Reading src/auth.ts");
+  assert.equal(summary.directory, "/work/app");
+  assert.equal(summary.created, 10);
+  assert.equal(summary.updated, 20);
+  assert.equal(summary.archived, true);
+  assert.equal(summary.additions, 0);
 });
 
-test("streaming, permission, and malformed events", () => {
+test("v2 messages and tool activity are normalized", () => {
+  const message = toChatMessage({
+    id: "msg_1",
+    type: "assistant",
+    time: { created: 1 },
+    content: [
+      { type: "reasoning", text: "thinking" },
+      { type: "text", text: "I found the issue" },
+      { type: "tool", id: "prt_1", name: "read", state: { status: "completed", title: "Reading src/auth.ts" } },
+    ],
+  });
+  assert.equal(message.role, "assistant");
+  assert.equal(message.text, "I found the issue");
+  assert.equal(message.activity.length, 1);
+  assert.equal(message.activity[0].title, "Reading src/auth.ts");
+  assert.equal(message.activity[0].status, "completed");
+
+  const user = toChatMessage({ id: "msg_0", type: "user", time: { created: 0 }, text: "Fix auth" });
+  assert.equal(user.role, "user");
+  assert.equal(user.text, "Fix auth");
+});
+
+test("bookkeeping messages are not chat bubbles", () => {
+  const messages = toChatMessages([
+    { id: "u1", type: "user", text: "hi" },
+    { id: "a1", type: "assistant", content: [{ type: "text", text: "hello" }] },
+    { id: "i1", type: "idle" },
+    { id: "m1", type: "model-switched" },
+  ]);
+  assert.deepEqual(
+    messages.map((message) => message.id),
+    ["u1", "a1"],
+  );
+});
+
+test("tool events update activity and keep their label", () => {
+  const started = normalizeEvent({
+    type: "session.tool.input.started",
+    data: { sessionID: "ses_1", assistantMessageID: "msg_1", id: "call_1", name: "read" },
+  });
+  assert.equal(started?.type, "activity");
+  if (started?.type === "activity") assert.equal(started.item.status, "running");
+
+  const success = normalizeEvent({
+    type: "session.tool.success",
+    data: {
+      sessionID: "ses_1",
+      assistantMessageID: "msg_1",
+      id: "call_1",
+      content: [{ type: "text", text: "file contents" }],
+      metadata: { status: "completed" },
+    },
+  });
+  assert.equal(success?.type, "activity");
+  if (success?.type === "activity") {
+    assert.equal(success.item.status, "completed");
+    assert.equal(success.item.tool, "read");
+    assert.equal(success.item.title, "Reading");
+    assert.match(success.item.detail ?? "", /file contents/);
+  }
+});
+
+test("streaming, permission, form, and malformed events", () => {
   const delta = normalizeEvent({
-    payload: { type: "message.part.updated", properties: { delta: "Hi", part: { type: "text", sessionID: "ses_1", messageID: "msg_1" } } },
+    type: "session.text.delta",
+    data: { sessionID: "ses_1", assistantMessageID: "msg_1", ordinal: 0, delta: "Hi" },
   });
   assert.equal(delta?.type, "text-delta");
+
   const permission = normalizeEvent({
     type: "permission.asked",
-    properties: { id: "per_1", sessionID: "ses_1", permission: "bash", patterns: ["rm *"], metadata: {} },
+    data: {
+      id: "per_1",
+      sessionID: "ses_1",
+      action: "bash",
+      resources: ["rm *"],
+      save: [],
+      metadata: { command: "rm -rf build" },
+      message: "Run rm -rf build",
+    },
   });
   assert.equal(permission?.type, "permission");
-  if (permission?.type === "permission") assert.match(permission.prompt.detail, /rm/);
+  if (permission?.type === "permission") {
+    assert.equal(permission.prompt.kind, "permission");
+    assert.equal(permission.prompt.title, "bash");
+    assert.match(permission.prompt.detail, /rm/);
+  }
+
+  const form = normalizeEvent({
+    type: "form.created",
+    data: {
+      id: "form_1",
+      sessionID: "ses_1",
+      title: "Choose",
+      fields: [{ key: "answer", type: "string", title: "Deploy?", description: "Ship it now?" }],
+    },
+  });
+  assert.equal(form?.type, "permission");
+  if (form?.type === "permission") {
+    assert.equal(form.prompt.kind, "question");
+    assert.equal(form.prompt.title, "Choose");
+    assert.match(form.prompt.detail, /Deploy/);
+  }
+
+  const failed = normalizeEvent({
+    type: "session.execution.failed",
+    data: { sessionID: "ses_1", error: { type: "provider", message: "quota exceeded" } },
+  });
+  assert.deepEqual(failed, {
+    type: "status",
+    sessionId: "ses_1",
+    state: "error",
+    detail: "quota exceeded",
+  });
+
+  const created = normalizeEvent({
+    type: "session.created",
+    data: { sessionID: "ses_1", title: "New work", location: { directory: "/work/app" } },
+  });
+  assert.equal(created?.type, "session");
+  if (created?.type === "session") {
+    assert.equal(created.session.id, "ses_1");
+    assert.equal(created.session.directory, "/work/app");
+  }
+
   const bad = normalizeEvent("nope");
   assert.equal(bad?.type, "malformed");
 });
@@ -47,4 +170,9 @@ test("diffs keep added and removed counts", () => {
   const file = toDiffFile({ file: "src/auth.ts", before: "a\n", after: "b\n", additions: 1, deletions: 1 });
   assert.equal(file.additions, 1);
   assert.match(file.patch, /\+b/);
+
+  const v2 = toDiffFile({ file: "src/auth.ts", patch: "--- a\n+++ b\n+x", additions: 3, deletions: 2, status: "modified" });
+  assert.equal(v2.file, "src/auth.ts");
+  assert.equal(v2.additions, 3);
+  assert.equal(v2.deletions, 2);
 });

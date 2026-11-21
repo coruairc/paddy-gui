@@ -7,7 +7,7 @@ import { OpenCodeError } from "./opencode-client.ts";
 import {
   groupSessionsByDate,
   summarizeSession,
-  toChatMessage,
+  toChatMessages,
   toDiffFile,
   type DiffFile,
   type SessionSummary,
@@ -197,7 +197,7 @@ async function sessionRoute(runtime: ControllerRuntime, request: Request, id: st
     ]);
     return json(200, {
       session: summarizeSession(session),
-      messages: messages.map(toChatMessage),
+      messages: toChatMessages(messages),
       files: Array.isArray(diff) ? diff.map(toDiffFile) : [],
     });
   }
@@ -216,7 +216,7 @@ async function sessionRoute(runtime: ControllerRuntime, request: Request, id: st
     return json(200, { ok: true });
   }
   if (rest === "messages" && request.method === "GET") {
-    const messages = (await client.listMessages(project.path, id)).map(toChatMessage);
+    const messages = toChatMessages(await client.listMessages(project.path, id));
     return json(200, { messages });
   }
   if (rest === "messages" && request.method === "POST") return send(runtime, project.path, id, request);
@@ -250,7 +250,7 @@ async function send(runtime: ControllerRuntime, directory: string, id: string, r
 
 async function retry(runtime: ControllerRuntime, directory: string, id: string): Promise<ApiResult> {
   const client = runtime.requireClient();
-  const messages = (await client.listMessages(directory, id)).map(toChatMessage);
+  const messages = toChatMessages(await client.listMessages(directory, id));
   const lastUser = [...messages].reverse().find((item) => item.role === "user" && item.text);
   if (!lastUser) return json(400, { error: "Nothing to retry" });
   const lastAssistant = [...messages].reverse().find((item) => item.role === "assistant");
@@ -278,7 +278,12 @@ async function readOpenCode(runtime: ControllerRuntime, route: string): Promise<
       client.getProviders(directory),
       client.getProviderAuth(directory).catch(() => ({})),
     ]);
-    return json(200, redactSecrets({ providers, auth }, secretNeedles(runtime)));
+    // Redact the provider list (it can carry headers/settings), but NOT the auth
+    // map: its keys are provider IDs (e.g. "alibaba-token-plan"), and key-based
+    // redaction would clobber any ID containing "token"/"key"/"secret" into a
+    // string, breaking `authMethods.some(...)`. getProviderAuth already strips
+    // credentials down to {type,label}, so the values are safe as-is.
+    return json(200, { providers: redactSecrets(providers, secretNeedles(runtime)), auth });
   }
   if (route === "/agents") return json(200, redactSecrets(await client.getAgents(directory), secretNeedles(runtime)));
   if (route === "/mcp") return json(200, redactSecrets(await client.getMcp(directory), secretNeedles(runtime)));
@@ -332,9 +337,6 @@ async function addMcp(runtime: ControllerRuntime, request: Request): Promise<Api
   if (record.type === "local" && !Array.isArray(record.command)) return json(400, { error: "Local MCP requires a command array" });
   if (record.type === "remote" && typeof record.url !== "string") return json(400, { error: "Remote MCP requires a url" });
   const status = await runtime.requireClient().addMcp(project?.path, name, record);
-  const current = await runtime.requireClient().getConfig(project?.path);
-  const mcp = { ...((current.mcp as Record<string, unknown> | undefined) ?? {}), [name]: record };
-  await runtime.requireClient().updateConfig({ mcp }, project?.path).catch(() => undefined);
   return json(200, redactSecrets(status, secretNeedles(runtime)));
 }
 
@@ -343,13 +345,6 @@ async function mcpAction(runtime: ControllerRuntime, name: string, action: strin
   const client = runtime.requireClient();
   if (action === "connect") await client.connectMcp(project?.path, name);
   if (action === "disconnect" || action === "disable") await client.disconnectMcp(project?.path, name);
-  if (action === "disable") {
-    const current = await client.getConfig(project?.path);
-    const mcp = { ...((current.mcp as Record<string, unknown> | undefined) ?? {}) };
-    const existing = (mcp[name] as Record<string, unknown> | undefined) ?? { type: "local", command: [] };
-    mcp[name] = { ...existing, enabled: false };
-    await client.updateConfig({ mcp }, project?.path);
-  }
   return json(200, { ok: true });
 }
 
@@ -360,17 +355,18 @@ async function replyPermission(runtime: ControllerRuntime, request: Request, id:
     return json(400, { error: "Reply must be once, always, or reject" });
   }
   const project = activeProject(runtime);
-  const sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
-    if (body.kind === "question") {
-      if (reply === "reject") await runtime.requireClient().rejectQuestion(project?.path, id);
-      else {
-        const answer = typeof body.message === "string" ? body.message.trim() : "";
-        if (!answer) return json(400, { error: "An answer is required" });
-        await runtime.requireClient().replyQuestion(project?.path, id, [[answer]]);
-      }
-      return json(200, { ok: true });
+  const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
+  if (!sessionId) return json(400, { error: "A sessionId is required to reply" });
+  if (body.kind === "question") {
+    if (reply === "reject") await runtime.requireClient().rejectQuestion(project?.path, sessionId, id);
+    else {
+      const answer = typeof body.message === "string" ? body.message.trim() : "";
+      if (!answer) return json(400, { error: "An answer is required" });
+      await runtime.requireClient().replyQuestion(project?.path, sessionId, id, answer);
     }
-  await runtime.requireClient().replyPermission(project?.path, id, reply, sessionId);
+    return json(200, { ok: true });
+  }
+  await runtime.requireClient().replyPermission(project?.path, sessionId, id, reply);
   return json(200, { ok: true });
 }
 

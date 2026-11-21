@@ -1,5 +1,5 @@
 /**
- * Translate OpenCode events and messages into the GUI's own shapes.
+ * Translate OpenCode v2 events and messages into the GUI's own shapes.
  * The browser should not have to understand OpenCode part types.
  */
 
@@ -77,6 +77,9 @@ const TOOL_LABELS: Record<string, string> = {
   task: "Working",
 };
 
+/** Tool calls started without final status yet, so success can keep their label. */
+const toolCache = new Map<string, ActivityItem>();
+
 export function toolTitle(tool: string, title?: string, input?: Record<string, unknown>): string {
   const verb = TOOL_LABELS[tool] ?? humanize(tool);
   if (title && !title.startsWith("{")) return title;
@@ -93,7 +96,7 @@ export function summarizeSession(session: OpenCodeSession): SessionSummary {
   return {
     id: session.id,
     title: session.title?.trim() || "New chat",
-    directory: session.directory || session.path,
+    directory: session.location?.directory || session.directory || session.path,
     created,
     updated,
     archived: Boolean(session.time?.archived),
@@ -104,158 +107,257 @@ export function summarizeSession(session: OpenCodeSession): SessionSummary {
 }
 
 export function toChatMessage(message: OpenCodeMessage): ChatMessage {
-  const role =
-    message.info.role === "user" ? "user" : message.info.role === "system" ? "system" : "assistant";
-  const parts = message.parts ?? [];
-  const text = parts
-    .filter((part) => part.type === "text" && part.text && !part.text.startsWith("<"))
-    .map((part) => part.text ?? "")
-    .join("")
-    .trim();
+  const kind = message.type ?? message.role ?? "";
+  const role = kind === "user" ? "user" : kind === "system" ? "system" : "assistant";
+  const parts = Array.isArray(message.content) ? message.content : [];
+  const text =
+    role === "assistant"
+      ? parts
+          .filter((part) => part.type === "text" && part.text && !part.text.startsWith("<"))
+          .map((part) => part.text ?? "")
+          .join("")
+          .trim()
+      : (message.text ?? "").trim();
   const activity = parts.filter((part) => part.type === "tool").map(toActivity);
-  const error = message.info.error?.data?.message || message.info.error?.name;
   return {
-    id: message.info.id,
+    id: message.id,
     role,
     text,
-    created: message.info.time?.created ?? Date.now(),
-    error,
+    created: message.time?.created ?? Date.now(),
+    error: messageError(message.error),
     activity,
   };
 }
 
+/** Only user/assistant turns become chat bubbles; v2 emits bookkeeping messages too. */
+export function toChatMessages(messages: OpenCodeMessage[]): ChatMessage[] {
+  return messages
+    .filter((message) => {
+      const kind = message.type ?? message.role;
+      return kind === "user" || kind === "assistant";
+    })
+    .map(toChatMessage);
+}
+
 export function toActivity(part: OpenCodePart): ActivityItem {
-  const status = (part.state?.status ?? "pending") as ActivityStatus;
-  const tool = part.tool || "tool";
-  return {
-    id: part.id || part.callID || tool,
+  const state = part.state ?? {};
+  const tool = part.name || part.tool || "tool";
+  const input = state.input && typeof state.input === "object" ? state.input : undefined;
+  const item: ActivityItem = {
+    id: part.id || tool,
     tool,
-    title: toolTitle(tool, part.state?.title, part.state?.input),
-    status: status === "running" || status === "pending" || status === "completed" || status === "error" ? status : "pending",
-    detail: part.state?.error || clip(part.state?.output, 4000),
+    title: toolTitle(tool, state.title, input),
+    status: activityStatus(state.status),
+    detail: stateError(state.error) || clip(contentText(state.content), 4000),
   };
+  if (item.status === "running" || item.status === "pending") toolCache.set(item.id, item);
+  return item;
 }
 
 export function normalizeEvent(raw: unknown): GuiEvent | null {
   const event = unwrap(raw);
   if (!event) return { type: "malformed", message: "Event was not an object" };
   const type = String(event.type ?? "");
-  const props = (event.properties ?? {}) as Record<string, unknown>;
   if (type === "malformed") return { type: "malformed", message: "OpenCode sent a malformed event" };
-  if (type === "message.updated" || type === "message.part.updated") {
-    if (type === "message.part.updated") {
-      const part = props.part as OpenCodePart | undefined;
-      const sessionId = part?.sessionID as string | undefined;
-      const messageId = part?.messageID as string | undefined;
-      if (!sessionId || !messageId || !part) return null;
-      if (part.type === "text" && typeof props.delta === "string" && props.delta) {
-        return { type: "text-delta", sessionId, messageId, delta: props.delta };
-      }
-      if (part.type === "tool") {
-        return { type: "activity", sessionId, messageId, item: toActivity(part) };
-      }
-      if (part.type === "text" && part.text) {
-        const infoCreated = (props.info as { time?: { created?: number } } | undefined)?.time?.created;
-        const roleHint = props.role === "user" || (part as { role?: string }).role === "user" ? "user" : "assistant";
-        return {
-          type: "message",
-          sessionId,
-          message: {
-            id: messageId,
-            role: roleHint,
-            text: part.text,
-            created: typeof infoCreated === "number" ? infoCreated : Date.now(),
-            activity: [],
-          },
-        };
-      }
-      return null;
-    }
-    const info = props.info as OpenCodeMessage["info"] | undefined;
-    if (!info?.id) return null;
-    const sessionId = (info as { sessionID?: string }).sessionID;
-    if (!sessionId) return null;
-    const parts = Array.isArray(props.parts)
-      ? (props.parts as OpenCodePart[])
-      : Array.isArray((props.message as { parts?: unknown } | undefined)?.parts)
-        ? ((props.message as { parts: OpenCodePart[] }).parts)
-        : [];
+  const data = (event.data && typeof event.data === "object" ? event.data : {}) as Record<string, unknown>;
+  const sessionId = text(data.sessionID);
+
+  if (type === "server.connected") return null;
+
+  if (type === "session.text.delta") {
+    const messageId = text(data.assistantMessageID);
+    const delta = text(data.delta);
+    return sessionId && messageId && delta
+      ? { type: "text-delta", sessionId, messageId, delta }
+      : null;
+  }
+  if (type === "session.text.ended") {
+    const messageId = text(data.assistantMessageID);
+    if (!sessionId || !messageId) return null;
     return {
       type: "message",
       sessionId,
-      message: toChatMessage({ info, parts }),
-    };
-  }
-  if (type === "permission.asked" || type === "permission.updated" || type === "permission.v2.asked") {
-    const permission = (props.permission ? props : (props as { id?: string }).id ? props : props) as Record<string, unknown>;
-    const id = String(permission.id ?? props.id ?? "");
-    const sessionId = String(permission.sessionID ?? props.sessionID ?? "");
-    if (!id || !sessionId) return null;
-    const patterns = Array.isArray(permission.patterns) ? permission.patterns.map(String) : [];
-    const metadata = permission.metadata && typeof permission.metadata === "object" ? (permission.metadata as Record<string, unknown>) : {};
-    const command = stringField(metadata, ["command", "cmd"]) || patterns.join("\n");
-    return {
-      type: "permission",
-      prompt: {
-        id,
-        sessionId,
-        kind: "permission",
-        title: String(permission.permission ?? permission.title ?? "Permission"),
-        detail: command || JSON.stringify(metadata).slice(0, 500),
+      message: {
+        id: messageId,
+        role: "assistant",
+        text: text(data.text),
+        created: numberField(data.time && (data.time as Record<string, unknown>).created) || Date.now(),
+        activity: [],
       },
     };
   }
-  if (type === "permission.replied" || type === "permission.v2.replied") {
-    const id = String(props.permissionID ?? props.requestID ?? props.id ?? "");
-    return id ? { type: "permission-cleared", id } : null;
-  }
-  if (type === "question.asked" || type === "question.v2.asked") {
-    const id = String(props.id ?? "");
-    const sessionId = String(props.sessionID ?? "");
-    const questions = Array.isArray(props.questions) ? props.questions : [];
-    const first = questions[0] as { question?: string; header?: string } | undefined;
-    if (!id || !sessionId) return null;
-    return {
-      type: "permission",
-      prompt: {
-        id,
+  if (type === "session.text.started" || type === "session.reasoning.delta") return null;
+
+  if (type.startsWith("session.execution.")) {
+    if (!sessionId) return null;
+    if (type === "session.execution.started") {
+      return { type: "status", sessionId, state: "working" };
+    }
+    if (type === "session.execution.failed") {
+      return {
+        type: "status",
         sessionId,
-        kind: "question",
-        title: first?.header || "Question",
-        detail: first?.question || "The agent is waiting for an answer.",
-      },
-    };
-  }
-  if (type === "session.status") {
-    const sessionId = String(props.sessionID ?? "");
-    const status = props.status as { type?: string; message?: string } | undefined;
-    const state = status?.type === "busy" ? "working" : status?.type === "retry" ? "retry" : "idle";
-    return { type: "status", sessionId, state, detail: status?.message };
+        state: "error",
+        detail: stateError(data.error) || "Session failed",
+      };
+    }
+    return { type: "status", sessionId, state: "idle" };
   }
   if (type === "session.idle") {
-    return { type: "status", sessionId: String(props.sessionID ?? ""), state: "idle" };
+    return sessionId ? { type: "status", sessionId, state: "idle" } : null;
   }
-  if (type === "session.error") {
-    const error = props.error as { data?: { message?: string }; name?: string } | undefined;
+
+  if (type.startsWith("session.tool.")) {
+    const messageId = text(data.assistantMessageID);
+    const id = text(data.id);
+    if (!sessionId || !messageId || !id) return null;
+    if (type === "session.tool.input.started") {
+      const item = toActivity({
+        id,
+        name: text(data.name),
+        state: { status: "running" },
+      });
+      return { type: "activity", sessionId, messageId, item };
+    }
+    if (type === "session.tool.called") {
+      const remembered = toolCache.get(id);
+      const item = toActivity({
+        id,
+        name: text(data.name) || remembered?.tool,
+        state: {
+          status: "running",
+          input: data.input && typeof data.input === "object" ? (data.input as Record<string, unknown>) : undefined,
+        },
+      });
+      return { type: "activity", sessionId, messageId, item };
+    }
+    if (type === "session.tool.progress") return null;
+    if (type === "session.tool.success") {
+      const remembered = toolCache.get(id);
+      toolCache.delete(id);
+      return {
+        type: "activity",
+        sessionId,
+        messageId,
+        item: {
+          id,
+          tool: remembered?.tool ?? "tool",
+          title: remembered?.title ?? humanize(remembered?.tool ?? "tool"),
+          status: "completed",
+          detail: clip(contentText(data.content), 4000),
+        },
+      };
+    }
+    if (type === "session.tool.failed") {
+      const remembered = toolCache.get(id);
+      toolCache.delete(id);
+      return {
+        type: "activity",
+        sessionId,
+        messageId,
+        item: {
+          id,
+          tool: remembered?.tool ?? "tool",
+          title: remembered?.title ?? humanize(remembered?.tool ?? "tool"),
+          status: "error",
+          detail: stateError(data.error),
+        },
+      };
+    }
+    return null;
+  }
+
+  if (type === "session.created") {
+    const id = text(data.sessionID) || text(data.id);
+    if (!id) return null;
     return {
-      type: "error",
-      sessionId: props.sessionID ? String(props.sessionID) : undefined,
-      message: error?.data?.message || error?.name || "Session failed",
+      type: "session",
+      session: summarizeSession({
+        id,
+        title: text(data.title),
+        location: data.location as { directory?: string } | undefined,
+        time: data.time as { created?: number; updated?: number } | undefined,
+      }),
     };
   }
-  if (type === "session.diff") {
-    const sessionId = String(props.sessionID ?? "");
-    const files = Array.isArray(props.diff) ? props.diff.map(toDiffFile) : [];
-    return { type: "diff", sessionId, files };
-  }
-  if (type === "session.created" || type === "session.updated") {
-    const info = props.info as OpenCodeSession | undefined;
-    return info?.id ? { type: "session", session: summarizeSession(info) } : null;
+  if (type === "session.renamed" || type === "session.archived" || type === "session.unarchived") {
+    const id = text(data.sessionID) || text(data.id);
+    if (!id) return null;
+    const now = Date.now();
+    return {
+      type: "session",
+      session: {
+        id,
+        title: text(data.title) || "New chat",
+        directory: (data.location as { directory?: string } | undefined)?.directory,
+        created: now,
+        updated: now,
+        archived: type === "session.archived" ? true : type === "session.unarchived" ? false : Boolean(data.archived),
+        additions: 0,
+        deletions: 0,
+        files: 0,
+      },
+    };
   }
   if (type === "session.deleted") {
-    const info = props.info as OpenCodeSession | undefined;
-    return info?.id ? { type: "session-deleted", id: info.id } : null;
+    const id = text(data.sessionID) || text(data.id);
+    return id ? { type: "session-deleted", id } : null;
   }
+  if (type === "session.error") {
+    return {
+      type: "error",
+      sessionId: sessionId || undefined,
+      message: stateError(data.error) || "Session failed",
+    };
+  }
+
+  if (type === "permission.asked") {
+    const id = text(data.id);
+    const permissionSessionId = text(data.sessionID);
+    if (!id || !permissionSessionId) return null;
+    const metadata = data.metadata && typeof data.metadata === "object" ? (data.metadata as Record<string, unknown>) : {};
+    const resources = Array.isArray(data.resources) ? data.resources.map(String) : [];
+    return {
+      type: "permission",
+      prompt: {
+        id,
+        sessionId: permissionSessionId,
+        kind: "permission",
+        title: text(data.action) || "Permission",
+        detail:
+          text(data.message) ||
+          stringField(metadata, ["command", "cmd"]) ||
+          resources.join("\n") ||
+          JSON.stringify(metadata).slice(0, 500),
+      },
+    };
+  }
+  if (type === "permission.replied") {
+    const id = text(data.requestID) || text(data.permissionID) || text(data.id);
+    return id ? { type: "permission-cleared", id } : null;
+  }
+  if (type === "form.created") {
+    const id = text(data.id);
+    const formSessionId = text(data.sessionID);
+    if (!id || !formSessionId) return null;
+    const fields = Array.isArray(data.fields) ? (data.fields as Record<string, unknown>[]) : [];
+    const first = fields.find((field) => field.hidden !== true) ?? fields[0];
+    return {
+      type: "permission",
+      prompt: {
+        id,
+        sessionId: formSessionId,
+        kind: "question",
+        title: text(data.title) || text(first?.title) || "Question",
+        detail: text(first?.title) || text(first?.description) || "The agent is waiting for an answer.",
+      },
+    };
+  }
+  if (type === "form.replied" || type === "form.cancelled") {
+    const id = text(data.formID) || text(data.id);
+    return id ? { type: "permission-cleared", id } : null;
+  }
+
   return null;
 }
 
@@ -290,13 +392,54 @@ export function groupSessionsByDate(sessions: SessionSummary[], now = Date.now()
   return [...groups.entries()].map(([label, items]) => ({ label, items }));
 }
 
-function unwrap(raw: unknown): { type?: string; properties?: Record<string, unknown> } | null {
+function unwrap(raw: unknown): { type?: string; data?: Record<string, unknown> } | null {
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Record<string, unknown>;
   if (record.payload && typeof record.payload === "object") {
-    return record.payload as { type?: string; properties?: Record<string, unknown> };
+    return record.payload as { type?: string; data?: Record<string, unknown> };
   }
-  return record as { type?: string; properties?: Record<string, unknown> };
+  return record as { type?: string; data?: Record<string, unknown> };
+}
+
+function activityStatus(status: string | undefined): ActivityStatus {
+  if (status === "completed" || status === "error" || status === "running") return status;
+  if (status === "streaming") return "running";
+  return "pending";
+}
+
+function stateError(error: unknown): string | undefined {
+  if (typeof error === "string") return error || undefined;
+  if (error && typeof error === "object") {
+    const message = (error as Record<string, unknown>).message;
+    if (typeof message === "string" && message) return message;
+  }
+  return undefined;
+}
+
+function messageError(error: OpenCodeMessage["error"]): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const record = error as Record<string, unknown>;
+  if (typeof record.message === "string" && record.message) return record.message;
+  const nested = record.data;
+  if (nested && typeof nested === "object") {
+    const message = (nested as Record<string, unknown>).message;
+    if (typeof message === "string" && message) return message;
+  }
+  return typeof record.name === "string" && record.name ? record.name : undefined;
+}
+
+function contentText(content: unknown): string | undefined {
+  if (typeof content === "string") return content || undefined;
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .map((item) => (item && typeof item === "object" ? (item as Record<string, unknown>).text : undefined))
+    .filter((item): item is string => typeof item === "string" && item.length > 0)
+    .join("\n");
+  return text || undefined;
+}
+
+function text(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function stringField(input: Record<string, unknown> | undefined, keys: string[]): string {

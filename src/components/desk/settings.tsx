@@ -305,12 +305,16 @@ function ProviderCard({
     setSavingModel(true);
     setError(null);
     setNote(null);
+    // OpenCode v2 has no remote write for the desk default model; the chosen
+    // model is applied per-session on send (POST /api/session/{id}/model).
+    // Update the desk model first so the choice always takes effect, then
+    // best-effort persist to OpenCode config (ignored when unsupported).
+    onModelChange(fullModel);
     try {
       await api.patchConfig({ model: fullModel });
-      onModelChange(fullModel);
       setNote("Desk default model saved in OpenCode.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save this model.");
+    } catch {
+      setNote("Desk default model set for this desk.");
     } finally {
       setSavingModel(false);
     }

@@ -37,7 +37,7 @@ function runtimeWithProject() {
       return { id: "ses_2", title: "New chat", time: { created: 30, updated: 30 } };
     },
     getSession: async () => ({ id: "ses_1", title: "Authentication bug", time: { created: 10, updated: 20 } }),
-    listMessages: async () => [{ info: { id: "msg_1", role: "user", time: { created: 11 } }, parts: [{ type: "text", text: "Fix auth" }] }],
+    listMessages: async () => [{ id: "msg_1", type: "user", time: { created: 11 }, text: "Fix auth" }],
     getDiff: async () => [{ file: "src/auth.ts", additions: 2, deletions: 1, before: "a", after: "b" }],
     updateSession: async (_dir: string, _id: string, patch: { title?: string }) => ({
       id: "ses_1",
@@ -144,7 +144,11 @@ test("config changes are forwarded, not reimplemented", async () => {
 
 test("question replies require an explicit answer", async () => {
   const { runtime } = runtimeWithProject();
-  const missing = await call(runtime, "POST", "/api/permissions/que_1/reply", { reply: "once", kind: "question" });
+  const missing = await call(runtime, "POST", "/api/permissions/que_1/reply", {
+    reply: "once",
+    kind: "question",
+    sessionId: "ses_1",
+  });
   assert.equal(missing.status, 400);
   assert.match((missing.body as { error: string }).error, /answer/i);
 });
@@ -215,16 +219,40 @@ test("permission reply reject is forwarded", async () => {
 
 test("question reject calls rejectQuestion", async () => {
   const { runtime, calls } = runtimeWithProject();
-  const result = await call(runtime, "POST", "/api/permissions/q_1/reply", { reply: "reject", kind: "question" });
+  const result = await call(runtime, "POST", "/api/permissions/q_1/reply", {
+    reply: "reject",
+    kind: "question",
+    sessionId: "ses_1",
+  });
   assert.equal(result.status, 200);
   assert.equal(calls.includes("rejectQuestion"), true);
 });
 
 test("question once with answer calls replyQuestion", async () => {
   const { runtime, calls } = runtimeWithProject();
-  const result = await call(runtime, "POST", "/api/permissions/q_1/reply", { reply: "once", kind: "question", message: "yes" });
+  const result = await call(runtime, "POST", "/api/permissions/q_1/reply", {
+    reply: "once",
+    kind: "question",
+    sessionId: "ses_1",
+    message: "yes",
+  });
   assert.equal(result.status, 200);
   assert.equal(calls.includes("replyQuestion"), true);
+});
+
+test("permission and question replies require a session id", async () => {
+  const { runtime } = runtimeWithProject();
+  const permission = await call(runtime, "POST", "/api/permissions/per_1/reply", {
+    reply: "once",
+    kind: "permission",
+  });
+  assert.equal(permission.status, 400);
+  const question = await call(runtime, "POST", "/api/permissions/q_1/reply", {
+    reply: "once",
+    kind: "question",
+    message: "yes",
+  });
+  assert.equal(question.status, 400);
 });
 
 test("invalid reply value is rejected", async () => {
