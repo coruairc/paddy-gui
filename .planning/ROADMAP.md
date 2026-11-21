@@ -14,7 +14,7 @@ Paddy already works; this milestone makes it trustworthy. Six phases take the ap
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Controller Auth Hardening** - Token auth cannot be bypassed by loopback trust, a spoofed `Host`, or a cross-origin request
+- [x] **Phase 1: Controller Auth Hardening** - Token auth cannot be bypassed by loopback trust, a spoofed `Host`, or a cross-origin request (completed 2026-11-21)
 - [ ] **Phase 2: Core Loop Correctness** - Messages, settings saves, and process exit behave without duplicates, data loss, or orphans
 - [ ] **Phase 3: Repository Cleanup and Honest Docs** - Delete the app-builder scaffolding, unused dependencies, and documentation for features that do not exist
 - [ ] **Phase 4: Trustworthy Quality Gates** - Lint passes, the full suite runs, and CI enforces both on every push and pull request
@@ -24,7 +24,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 ## Phase Details
 
 ### Phase 1: Controller Auth Hardening
-**Goal**: The controller can be exposed beyond loopback without a token bypass — auth no longer depends on the socket peer or the `Host` header alone.
+**Goal**: As an operator exposing Paddy beyond loopback, I want the controller to require a token on every API route and reject cross-origin requests, so that no anonymous or DNS-rebinding request can bypass auth.
 **Mode:** mvp
 **Depends on**: Nothing (first phase)
 **Requirements**: SEC-01, SEC-02, SEC-03, SEC-04
@@ -34,7 +34,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. A request carrying a cross-origin `Origin` or `Referer` is rejected, while the same-origin browser desk keeps loading and chatting normally.
   4. With a valid token a LAN client reaches the API and drives a session; the path allowlist and secret redaction still hold — no out-of-allowlist path is readable and no stored password appears in any response.
   5. `npm test` contains a test that fails if the loopback/`Host` bypass is reintroduced.
-**Plans**: 1/1 plans executed
+**Plans**: 1/1 plans complete
 Plans:
 - [x] 01-01-PLAN.md — Close the loopback/Host auth bypass (security.ts + http.ts + tests)
 
@@ -49,8 +49,13 @@ Plans:
   3. Ctrl+C, `docker stop`, and Settings → Reset terminate the spawned `opencode serve` child — no `opencode` process survives the controller.
   4. Stop, retry, and resume-after-browser-restart still work on the same session after these fixes.
   5. A permission prompt can be allowed or denied inline and the run continues or aborts accordingly.
-**Plans**: TBD
+**Plans**: 4 plans
 **UI hint**: yes
+Plans:
+- [ ] 02-01-PLAN.md — Reconcile optimistic message bubble (LOOP-01)
+- [ ] 02-02-PLAN.md — Password save preserves stored password (LOOP-02)
+- [ ] 02-03-PLAN.md — Process exit kills spawned child (LOOP-03)
+- [ ] 02-04-PLAN.md — Inline permission prompts and session resume (LOOP-04/05)
 
 ### Phase 3: Repository Cleanup and Honest Docs
 **Goal**: The repository contains only Paddy — no app-builder subsystems in the build, no dependencies nothing imports, and no documentation for commands or variables that do not exist.
@@ -108,7 +113,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Controller Auth Hardening | 1/1 | In Progress | - |
+| 1. Controller Auth Hardening | 1/1 | Complete    | 2026-11-21 |
 | 2. Core Loop Correctness | 0/TBD | Not started | - |
 | 3. Repository Cleanup and Honest Docs | 0/TBD | Not started | - |
 | 4. Trustworthy Quality Gates | 0/TBD | Not started | - |
