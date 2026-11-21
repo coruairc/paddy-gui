@@ -83,12 +83,50 @@ test("invalid workspaces never pass the allowlist", () => {
 
 test("secrets are stripped from objects and strings", () => {
   const redacted = redactSecrets(
-    { provider: { apiKey: "sk-live-secret", name: "openai" }, note: "token sk-live-secret leaked" },
+    {
+      provider: { apiKey: "sk-live-secret", name: "openai" },
+      note: "token sk-live-secret leaked",
+      exact: "sk-live-secret",
+    },
     ["sk-live-secret"],
   );
   assert.equal(redacted.provider.apiKey, "[redacted]");
-  assert.equal(redacted.note.includes("sk-live-secret"), false);
-  assert.equal(JSON.stringify(redacted).includes("sk-live-secret"), false);
+  // Whole-string equality: a string node exactly equal to a needle is redacted.
+  assert.equal(redacted.exact, "[redacted]");
+  // Locked D-04 tradeoff: prose that merely embeds a secret now survives
+  // verbatim — needles no longer scrub substrings. Dedicated credential
+  // fields stay covered by key-based redaction, exact values by equality.
+  assert.equal(redacted.note, "token sk-live-secret leaked");
+});
+
+test("identifier payloads round-trip byte-identical through redaction", () => {
+  // Needle "token" (length 5, passes the >= 4 filter) is a substring of the
+  // provider id. The old substring code produced "alibaba-[redacted]-plan";
+  // exact-match must leave the payload byte-identical (V2-03, D-04).
+  const payload = {
+    all: [{ id: "alibaba-token-plan", models: {} }],
+    connected: ["alibaba-token-plan"],
+  };
+  const out = redactSecrets(payload, ["token"]);
+  assert.deepEqual(out, payload);
+  assert.equal(JSON.stringify(out), JSON.stringify(payload));
+});
+
+test("exact needle values are still redacted", () => {
+  const out = redactSecrets({ a: "token", b: "alibaba-token-plan" }, ["token"]);
+  assert.equal(out.a, "[redacted]");
+  assert.equal(out.b, "alibaba-token-plan");
+});
+
+test("needle length filter and whole-string equality boundaries", () => {
+  // 3-char needle is filtered out by the length >= 4 rule.
+  assert.equal(redactSecrets("abc", ["abc"]), "abc");
+  // 4-char needle is kept and matches on whole-string equality.
+  assert.equal(redactSecrets("abcd", ["abcd"]), "[redacted]");
+  // A substring of the value never matches under exact equality.
+  assert.equal(redactSecrets("xabcdx", ["abcd"]), "xabcdx");
+  // A needle longer than the value never matches.
+  assert.equal(redactSecrets("abcd", ["abcdef"]), "abcd");
 });
 
 test("malformed JSON is rejected", () => {

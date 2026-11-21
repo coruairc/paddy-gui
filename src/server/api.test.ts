@@ -59,7 +59,12 @@ function runtimeWithProject() {
     setApiKey: async () => {
       calls.push("set-key");
     },
-    getProviders: async () => ({ all: [], connected: [], key: "sk-should-not-leak" }),
+    getProviders: async () => ({
+      all: [{ id: "alibaba-token-plan", models: {} }],
+      connected: ["alibaba-token-plan"],
+      default: {},
+      key: "sk-should-not-leak",
+    }),
     getProviderAuth: async () => ({ openai: [{ type: "api", label: "API key" }] }),
     getAgents: async () => [],
     getMcp: async () => ({}),
@@ -124,6 +129,21 @@ test("provider responses do not leak secrets and malformed bodies fail", async (
   assert.equal(calls.includes("set-key"), true);
   const echoed = await call(runtime, "PUT", "/api/providers/openai/key", { key: "sk-new" });
   assert.equal(JSON.stringify(echoed.body).includes("sk-new"), false);
+});
+
+test("identifier payloads survive the providers route byte-identical", async () => {
+  const { runtime } = runtimeWithProject();
+  // Registers "token" as a needle via secretNeedles; it is a substring of the
+  // provider id, so exact-match redaction must not corrupt the id (V2-03).
+  // Boundary exercised: redactSecrets(providers, ...) at api.ts:286. Values
+  // under provider-id KEYS (the default map) are intentionally not asserted —
+  // key-based redaction clobbers those and that behavior is locked unchanged.
+  runtime.state.connectionPassword = "token";
+  const result = await call(runtime, "GET", "/api/providers");
+  assert.equal(result.status, 200);
+  const body = result.body as { providers: { all: { id: string }[]; connected: string[] } };
+  assert.equal(body.providers.all[0].id, "alibaba-token-plan");
+  assert.equal(body.providers.connected[0], "alibaba-token-plan");
 });
 
 test("unavailable OpenCode becomes a recoverable error", async () => {

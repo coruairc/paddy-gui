@@ -155,16 +155,17 @@ export function safeJson(text: string): { ok: true; value: unknown } | { ok: fal
 
 const SECRET_KEY = /(^key$|api[_-]?key|token|password|secret|authorization|credential|private[_-]?key)/i;
 
-/** Remove credential-shaped fields before anything reaches the browser or logs. */
+/** Redact credential-shaped fields and exact secret values before anything reaches the browser or logs. */
 export function redactSecrets<T>(value: T, extra: readonly string[] = []): T {
   const needles = extra.filter((item) => item && item.length >= 4);
   const walk = (node: unknown): unknown => {
     if (typeof node === "string") {
-      let out = node;
-      for (const needle of needles) {
-        if (out.includes(needle)) out = out.split(needle).join("[redacted]");
-      }
-      return out;
+      // Whole-string equality only: identifier-shaped payloads (e.g. provider
+      // ids like "alibaba-token-plan") must survive byte-identical even when a
+      // needle is their substring. Prose-embedded secrets are no longer
+      // needle-scrubbed (locked D-04 tradeoff); key-based redaction below still
+      // covers dedicated credential fields.
+      return needles.some((needle) => node === needle) ? "[redacted]" : node;
     }
     if (Array.isArray(node)) return node.map(walk);
     if (node && typeof node === "object") {
