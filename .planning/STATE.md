@@ -1,19 +1,20 @@
 ---
 gsd_state_version: "1.0"
 milestone: v1.0
-current_phase: 1
-current_phase_name: Controller Auth Hardening
-status: verifying
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-11-21T17:09:00.809Z"
-last_activity: 2026-11-03
-last_activity_desc: Roadmap created from 25 v1 requirements (6 phases)
-state_head: ef45d104f6abd0f3ac34f1ccaf8863b164a22f1f
+current_phase: 2
+current_phase_name: Core Loop Correctness
+current_plan: 3
+status: executing
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-11-21T17:26:32.605Z"
+last_activity: 2026-11-21
+last_activity_desc: Phase 1 complete, transitioned to Phase 2
+state_head: 832c8de5544c115d07285fc7ac47661ce053935b
 progress:
   total_phases: 6
-  completed_phases: 0
-  total_plans: 1
-  completed_plans: 1
+  completed_phases: 1
+  total_plans: 5
+  completed_plans: 2
 ---
 
 # Project State
@@ -27,17 +28,18 @@ See: .planning/PROJECT.md (updated 2026-11-03)
 
 ## Current Position
 
-Phase: 1 of 6 (Controller Auth Hardening)
-Plan: 1 of 1 in current phase
-Status: Phase complete — ready for verification
-Last activity: 2026-11-03 — Roadmap created from 25 v1 requirements (6 phases)
+Phase: 2 of 6 (Core Loop Correctness)
+Current Plan: 3
+Total Plans in Phase: 4
+Status: Ready to execute
+Last activity: 2026-11-21 — Phase 1 complete, transitioned to Phase 2
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [██░░░░░░░░] 17%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 0
+- Total plans completed: 1
 - Average duration: —
 - Total execution time: 0.0 hours
 
@@ -45,7 +47,7 @@ Progress: [░░░░░░░░░░] 0%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 1 | 1 | - | - |
 
 **Recent Trend:**
 - Last 5 plans: —
@@ -57,6 +59,7 @@ Progress: [░░░░░░░░░░] 0%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 1 P01 | 20min | 3 tasks | 5 files |
+| Phase 2 P01 | 15m | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -75,6 +78,7 @@ Recent decisions affecting current work:
 - [Phase 1]: Referer validated when Origin absent
 - [Phase 1]: Token comparison uses timingSafeEqual
 - [Phase 1]: Container shortcut now Host-validated
+- [Phase 2]: Reconcile optimistic user bubble by (role+text+created proximity) and drop temp id (LOOP-01)
 
 ### Pending Todos
 
@@ -99,6 +103,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-21T17:09:00.787Z
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-11-21T17:26:31.135Z
+Stopped at: Completed 02-01-PLAN.md
 Resume file: None

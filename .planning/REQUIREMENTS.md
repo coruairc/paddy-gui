@@ -23,7 +23,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Core Loop
 
-- [ ] **LOOP-01**: A sent message appears exactly once in the thread, reconciled with the server echo
+- [x] **LOOP-01**: A sent message appears exactly once in the thread, reconciled with the server echo
 - [ ] **LOOP-02**: Settings → Connection "Save" preserves an already-stored password when the field is left blank
 - [ ] **LOOP-03**: Exiting Paddy terminates the spawned `opencode serve` child, leaving no orphan process
 - [ ] **LOOP-04**: Stop, retry, and session resume still work after the loop fixes
@@ -89,7 +89,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PKG-02 | Phase 5 | Pending |
 | PKG-03 | Phase 5 | Pending |
 | PKG-04 | Phase 5 | Pending |
-| LOOP-01 | Phase 2 | Pending |
+| LOOP-01 | Phase 2 | Complete |
 | LOOP-02 | Phase 2 | Pending |
 | LOOP-03 | Phase 2 | Pending |
 | LOOP-04 | Phase 2 | Pending |
