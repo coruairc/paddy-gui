@@ -12,38 +12,56 @@ A browser UI you can point at a real project and drive an OpenCode session throu
 
 Everything else — settings depth, theming, packaging — is secondary to that loop working and being trustworthy.
 
+## Current Milestone: v1.1 OpenCode v2 Desk
+
+**Goal:** Restore and extend desk parity with OpenCode v2 — a model picker in the chat UI, working slash commands, and a hardened v2 foundation.
+
+**Target features:**
+- Model picker in the chat header/composer (not only Settings), grouped by provider, applied per-session on send
+- Slash commands: `/` offers OpenCode commands; `/name args` runs in-session; errors surface in the thread
+- v2 hardening: hermetic test suite, no global-config 404s
+
+**Key context:** The controller was already migrated to the OpenCode v2 API (commit `9a08c1b`); that migration is the foundation, not a milestone phase. The v2 contract is grounded in `.planning/V2-MIGRATION-SPEC.md`.
+
 ## Requirements
 
 ### Validated
 
-<!-- Shipped and confirmed valuable. Inferred from the existing codebase during onboarding (see `.planning/codebase/`). -->
+<!-- Shipped and confirmed valuable. v1.0 shipped 2026-11-21; v2 API migration shipped as foundation for v1.1. -->
 
 - ✓ Pick a local project and chat in that directory — existing
 - ✓ Watch the agent work: reads, edits, and command runs surface in the thread — existing
-- ✓ Allow or deny permission prompts inline in the conversation — existing
+- ✓ Allow or deny permission prompts inline in the conversation — v1.0 Phase 2
 - ✓ See changed files and diffs for a run — existing
-- ✓ Stop a run, then retry it — existing
-- ✓ Close the browser and resume the same OpenCode session later — existing
+- ✓ Stop a run, then retry it — v1.0 Phase 2
+- ✓ Close the browser and resume the same OpenCode session later — v1.0 Phase 2
 - ✓ Configure providers, models, agents, and MCP from Settings — existing
-- ✓ Controller-as-security-boundary: browser has no shell or filesystem access — existing
+- ✓ Controller-as-security-boundary: browser has no shell or filesystem access — v1.0 Phase 1
 - ✓ GUI state confined to `~/.paddy/state.json`, overridable via `PADDY_HOME` — existing
-- ✓ One-command install from source (`install.sh`, `install.ps1`) and a container image — existing
+- ✓ One-command install from source (`install.sh`, `install.ps1`) and a container image — v1.0 Phase 5
+- ✓ Token auth cannot be bypassed via loopback trust or a spoofed `Host` header — v1.0 Phase 1
+- ✓ The documented container/Compose path actually persists state — v1.0 Phase 5
+- ✓ App-builder template scaffolding removed from the build — v1.0 Phase 3
+- ✓ Documentation describes only the product that exists — v1.0 Phase 3
+- ✓ `install.sh` verifies the checksum of any downloaded Node tarball — v1.0 Phase 5
+- ✓ Tests and lint run in CI; `npm run lint` passes — v1.0 Phase 4
+- ✓ Exiting Paddy terminates the spawned `opencode serve` child — v1.0 Phase 2
+- ✓ A sent user message reconciles with the server echo — v1.0 Phase 2
+- ✓ Settings → Connection "Save" preserves an already-stored password — v1.0 Phase 2
+- ✓ Unused heavy dependencies removed from `package.json` — v1.0 Phase 3
+- ✓ The full loop is exercised end-to-end on local, container, and LAN-with-token paths — v1.0 Phase 6
+- ✓ Controller talks to OpenCode v2 (v2.3.2) over its `/api` surface — v1.1 foundation (`9a08c1b`)
 
 ### Active
 
 <!-- Current scope. Building toward these. All are hypotheses until shipped and validated. -->
 
-- [ ] Token auth cannot be bypassed via loopback trust or a spoofed `Host` header (DNS rebinding, reverse proxy)
-- [ ] The documented container/Compose path actually persists state (fix the dead `PADDY_HOME` volume)
-- [ ] Remove the ~3,500 lines of app-builder template scaffolding that is still wired into the build
-- [ ] Documentation describes only the product that exists (`SELFHOST.md`, `selfhost.env.example`)
-- [ ] `install.sh` verifies the checksum of any downloaded Node tarball
-- [ ] Tests and lint run in CI; `npm run lint` passes; the stale committed test is fixed or removed
-- [ ] Exiting Paddy terminates the spawned `opencode serve` child instead of orphaning it
-- [ ] A sent user message reconciles with the server echo instead of appearing twice
-- [ ] Settings → Connection "Save" preserves an already-stored password
-- [ ] Unused heavy dependencies (~37 packages) are removed from `package.json`
-- [ ] The full loop is exercised end-to-end on local, container, and LAN-with-token paths
+- [ ] MODEL-01: The desk offers a model picker in the chat header/composer (not only Settings), listing OpenCode v2 models grouped by provider
+- [ ] MODEL-02: Selecting a model sets the desk default applied per-session on send (`POST /api/session/{id}/model`) and persists across reloads
+- [ ] CMD-01: The desk lists OpenCode commands (`GET /api/command`) and offers them when the user types `/` in the composer
+- [ ] CMD-02: Submitting `/name args` runs the command via `POST /api/session/{id}/command`; command errors surface in the thread
+- [ ] V2-01: `npm test` is green in a clean environment (runtime.test.ts spawn test must not depend on a live server on port 4096)
+- [ ] V2-02: Resolve the v2 `PATCH /api/config` 404: drop global-config writes and persist the desk model in Paddy state, so Settings saves never 404
 
 ### Out of Scope
 
@@ -52,6 +70,9 @@ Everything else — settings depth, theming, packaging — is secondary to that 
 - Scraping CLI output instead of the HTTP API — the controller talks to `opencode serve` only
 - Integration with the Paddy/OpenClaw agent runtime — this repo is explicitly standalone
 - Scoping sessions, messages, models, or file state in Paddy — OpenCode remains the authority
+- TUI parity beyond commands (interactive TUI panes) — the desk is a web UI, not a terminal emulator
+- Multi-desk model profiles — one desk default, applied per-session, is enough for v1.1
+- New credential/provider key-entry UX — v2 `/api/credential` exposes raw keys; keep them redacted, no new key UI this milestone
 
 ## Context
 
@@ -59,9 +80,9 @@ Everything else — settings depth, theming, packaging — is secondary to that 
 
 **Architecture.** Single process, two halves: the React/SSR UI in `src/` and the controller in `src/server/`. The controller is mounted as Vite middleware in dev/preview and as Nitro middleware in a build. `src/server/opencode-client.ts` is the only adapter to OpenCode; `src/server/runtime.ts` supervises the child process and fans out events; `src/server/normalize.ts` maps OpenCode events into GUI shapes.
 
-**Known state at onboarding.** The codebase map (`.planning/codebase/`, mapped 2026-10-29 at `d358aee`) records ten open concerns: five High (auth bypass, dead Docker volume, dead template scaffolding, stale `SELFHOST.md`, unverified installer download) and five Medium (no CI, orphaned child process, duplicate chat bubbles, password-wiping Save, unused dependencies).
+**Known state at v1.1 start.** OpenCode on this machine is **v2.3.2**; its v1 HTTP surface is gone. The controller was migrated to the v2 `/api` surface (commit `9a08c1b`, untracked spec at `.planning/V2-MIGRATION-SPEC.md`): `/api` prefix, `{data}` envelope, `location[directory]` scoping, `/api/event` SSE, session-scoped permission/form replies, per-session model+agent+prompt split. v2 has **no remote global-config write** (`PATCH /api/config` → 404; `/api/experimental/config` only accepts `{shell}`). `npm test` is 79/80 — the one failure is `runtime.test.ts` "spawn uses detached:true", which attaches to whatever live server holds port 4096 instead of spawning (V2-01).
 
-**Prior work.** No ADR/PRD/SPEC/RFC documents exist in the repo, so no external decision record constrains this milestone.
+**Prior work.** v1.0 (6 phases) shipped 2026-11-21: auth hardening, core-loop correctness, repo cleanup, quality gates, install/persistence, end-to-end verification. No ADR/PRD/SPEC/RFC documents exist in the repo beyond the GSD `.planning/` artifacts and the untracked v2 migration spec.
 
 ## Constraints
 
@@ -79,7 +100,9 @@ Everything else — settings depth, theming, packaging — is secondary to that 
 | Keep only GUI metadata in `~/.paddy/state.json` | Avoid duplicating state OpenCode already owns, which would drift | ✓ Good |
 | Treat the controller as the security boundary | The browser must never gain shell or filesystem access | ✓ Good |
 | Close the auth bypass by not trusting loopback or `Host` for `localOnly` | A spoofed `Host` defeats the current check; LAN mode cannot be trusted until this is fixed | — Pending |
-| Delete the app-builder scaffolding rather than leave it dormant | Dead code wired into the build is a maintenance and review hazard | — Pending |
+| Delete the app-builder scaffolding rather than leave it dormant | Dead code wired into the build is a maintenance and review hazard | ✓ Good |
+| Migrate the controller to the OpenCode v2 `/api` surface in place (no compatibility shim) | OpenCode v2.3.2 removed the v1 endpoints; the v1 client got HTML fallbacks and constant offline flicker | ✓ Good |
+| Apply the chosen model per-session on send instead of persisting it into OpenCode global config | v2 has no remote global-config write (`PATCH /api/config` → 404); per-session `POST /api/session/{id}/model` is the supported path | — Pending |
 
 ## Evolution
 
@@ -99,4 +122,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-11-03 after initialization*
+*Last updated: 2026-11-21 after v1.1 milestone start*
