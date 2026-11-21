@@ -31,10 +31,10 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Quality
 
-- [ ] **QUAL-01**: `npm run lint` passes on a clean checkout
-- [ ] **QUAL-02**: CI runs lint and the full test suite on push and pull request
-- [ ] **QUAL-03**: `npm test` executes every test file in the repo, including the `scripts/*.test.mjs` suites
-- [ ] **QUAL-04**: The stale committed test is fixed or removed; the suite is green
+- [x] **QUAL-01**: `npm run lint` passes on a clean checkout
+- [x] **QUAL-02**: CI runs lint and the full test suite on push and pull request
+- [x] **QUAL-03**: `npm test` executes every test file in the repo, including the `scripts/*.test.mjs` suites
+- [x] **QUAL-04**: The stale committed test is fixed or removed; the suite is green
 
 ### Cleanup
 
@@ -94,10 +94,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | LOOP-03 | Phase 2 | Complete |
 | LOOP-04 | Phase 2 | Complete |
 | LOOP-05 | Phase 2 | Complete |
-| QUAL-01 | Phase 4 | Pending |
-| QUAL-02 | Phase 4 | Pending |
-| QUAL-03 | Phase 4 | Pending |
-| QUAL-04 | Phase 4 | Pending |
+| QUAL-01 | Phase 4 | Complete |
+| QUAL-02 | Phase 4 | Complete |
+| QUAL-03 | Phase 4 | Complete |
+| QUAL-04 | Phase 4 | Complete |
 | CLN-01 | Phase 3 | Complete |
 | CLN-02 | Phase 3 | Complete |
 | CLN-03 | Phase 3 | Complete |

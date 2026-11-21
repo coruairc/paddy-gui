@@ -43,6 +43,7 @@ COPY index.html* tsconfig.json vite.config.ts ./
 # process listens on the container interface, while OPENCODE_WEB_HOST tells
 # the controller whether the published application is local-only or remote.
 ENV OPENCODE_WEB_HOST=127.0.0.1 \
+    OPENCODE_WEB_HOME=/state \
     PORT=8080
 
 EXPOSE 8080

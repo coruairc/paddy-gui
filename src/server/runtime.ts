@@ -378,8 +378,9 @@ function randomPassword(): string {
 }
 
 function which(command: string): string | null {
+  const finder = process.platform === "win32" ? "where" : "which";
   try {
-    const found = execFileSync("which", [command], { encoding: "utf8" }).trim();
+    const found = execFileSync(finder, [command], { encoding: "utf8" }).trim().split(/\r?\n/)[0];
     return found || null;
   } catch {
     return null;

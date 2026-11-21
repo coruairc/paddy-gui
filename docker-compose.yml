@@ -20,7 +20,7 @@ services:
       # For LAN/remote access, change both the port binding/host and set a
       # random OPENCODE_WEB_TOKEN explicitly.
       OPENCODE_WEB_TOKEN: ${OPENCODE_WEB_TOKEN:-}
-      PADDY_HOME: /state
+      OPENCODE_WEB_HOME: /state
     volumes:
       - ./paddy-data:/state
     healthcheck:

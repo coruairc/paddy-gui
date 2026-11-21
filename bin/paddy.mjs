@@ -43,7 +43,7 @@ function readVersion() {
 }
 
 function run(cmd, args, cwd = installRoot) {
-  const child = spawn(cmd, args, { cwd, stdio: "inherit", env: process.env });
+  const child = spawn(cmd, args, { cwd, stdio: "inherit", env: process.env, shell: process.platform === "win32" });
   child.on("exit", (code, signal) => {
     if (signal) process.kill(process.pid, signal);
     else process.exit(code ?? 0);

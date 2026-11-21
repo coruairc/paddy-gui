@@ -156,6 +156,21 @@ EOF
   tarball="${tmp}/${name}"
   log "downloading ${name}"
   download "https://nodejs.org/dist/latest-v22.x/${name}" "$tarball"
+  # Verify the tarball against the published SHASUMS256.txt (PKG-02).
+  expected=$(awk -v f="$name" '$2 == f || $2 == "*"f { print $1 }' "$idx" | head -1)
+  [ -n "$expected" ] || die "no checksum listed for ${name} in SHASUMS256.txt"
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual=$(sha256sum "$tarball" | awk '{print $1}')
+  elif command -v shasum >/dev/null 2>&1; then
+    actual=$(shasum -a 256 "$tarball" | awk '{print $1}')
+  else
+    die "no sha256 tool available to verify ${name}"
+  fi
+  if [ "$actual" != "$expected" ]; then
+    rm -rf "$tmp"
+    die "checksum mismatch for ${name}: expected ${expected}, got ${actual}"
+  fi
+  log "checksum verified"
   mkdir -p "${HOME}/.local"
   tar -xz -C "${HOME}/.local" --strip-components=1 -f "$tarball"
   rm -rf "$tmp"
