@@ -119,7 +119,8 @@ test("spawn uses detached:true", async () => {
   const file = tempStateFile();
   const spawnCalls: any[] = [];
   const child = makeChild(7777);
-  // make child never ready so connect resolves quickly-ish
+  // Injected down-probe forces the spawn path regardless of what holds port
+  // 4096; make child never ready so connect resolves quickly-ish.
   const runtime = new ControllerRuntime({
     stateFile: file,
     sleep: async () => {},
@@ -128,8 +129,16 @@ test("spawn uses detached:true", async () => {
       spawnCalls.push({ cmd, args, opts });
       return child as any;
     },
+    probe: async () => "down",
   });
   const prevBin = process.env.OPENCODE_BIN;
+  // Scrub ambient redirects for the test duration (D-01): OPENCODE_URL
+  // short-circuits to attach before any probe, and an ambient password or
+  // username feeds credentials(). Save/delete/restore so the outcome is
+  // independent of the environment and of parallel runs.
+  const scrubbed = ["OPENCODE_URL", "OPENCODE_SERVER_PASSWORD", "OPENCODE_SERVER_USERNAME"] as const;
+  const prevEnv = scrubbed.map((name) => [name, process.env[name]] as const);
+  for (const name of scrubbed) delete process.env[name];
   const bin = join(tmpdir(), "fake-opencode-bin");
   writeFileSync(bin, "#!/bin/sh\nexit 0\n");
   chmodSync(bin, 0o755);
@@ -139,6 +148,10 @@ test("spawn uses detached:true", async () => {
   } finally {
     if (prevBin === undefined) delete process.env.OPENCODE_BIN;
     else process.env.OPENCODE_BIN = prevBin;
+    for (const [name, value] of prevEnv) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
     try {
       rmSync(bin, { force: true });
     } catch {

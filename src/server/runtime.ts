@@ -32,11 +32,13 @@ export type ConnectionStatus = {
 export type SpawnImpl = (command: string, args: string[], options: Record<string, unknown>) => ChildProcess;
 export type SleepImpl = (ms: number) => Promise<void>;
 export type KillImpl = (pid: number, signal: NodeJS.Signals) => void;
+export type ProbeImpl = (url: string, auth: { username: string; password: string }) => Promise<"ok" | "auth" | "down">;
 export type ControllerRuntimeOptions = {
   stateFile?: string;
   spawn?: SpawnImpl;
   sleep?: SleepImpl;
   kill?: KillImpl;
+  probe?: ProbeImpl;
 };
 
 type Listener = (event: GuiEvent | { type: "connection"; status: ConnectionStatus }) => void;
@@ -61,6 +63,7 @@ export class ControllerRuntime {
   private readonly spawnImpl: SpawnImpl;
   private readonly sleepImpl: SleepImpl;
   private readonly killImpl: KillImpl;
+  private readonly probeImpl: ProbeImpl;
 
   constructor(options: ControllerRuntimeOptions | string = {}) {
     const opts = typeof options === "string" ? { stateFile: options } : (options ?? {});
@@ -72,6 +75,7 @@ export class ControllerRuntime {
     this.spawnImpl = opts.spawn ?? spawn;
     this.sleepImpl = opts.sleep ?? sleep;
     this.killImpl = opts.kill ?? process.kill.bind(process);
+    this.probeImpl = opts.probe ?? ((url, auth) => this.probe(url, auth));
   }
 
   persist(): void {
@@ -142,7 +146,7 @@ export class ControllerRuntime {
     if (explicit) {
       return this.attach(explicit, this.credentials(), false);
     }
-    const probed = await this.probe("http://127.0.0.1:4096", this.credentials());
+    const probed = await this.probeImpl("http://127.0.0.1:4096", this.credentials());
     if (probed === "ok") return this.attach("http://127.0.0.1:4096", this.credentials(), false);
     if (probed === "auth") {
       return this.setStatus({
@@ -234,7 +238,7 @@ export class ControllerRuntime {
 
   private async waitUntilReady(url: string, auth: { username: string; password: string }): Promise<boolean> {
     for (let attempt = 0; attempt < 20; attempt++) {
-      const probed = await this.probe(url, auth);
+      const probed = await this.probeImpl(url, auth);
       if (probed === "ok") return true;
       await this.sleepImpl(250);
     }
