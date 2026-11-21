@@ -152,3 +152,47 @@ test("OpenCode errors keep a useful status", async () => {
   assert.equal(result.status, 401);
   assert.match((result.body as { error: string }).error, /Invalid API key/);
 });
+
+test("blank password save preserves stored password", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.state.connectionPassword = "stored-pw";
+  const result = await call(runtime, "PATCH", "/api/settings", { connectionUrl: "http://x", connectionUsername: "opencode", connectionPassword: "" });
+  assert.equal(result.status, 200);
+  assert.equal(runtime.state.connectionPassword, "stored-pw");
+  assert.equal((result.body as { hasConnectionPassword?: boolean }).hasConnectionPassword, true);
+});
+
+test("non-empty password replaces stored password", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.state.connectionPassword = "stored-pw";
+  const result = await call(runtime, "PATCH", "/api/settings", { connectionPassword: "new-pw" });
+  assert.equal(result.status, 200);
+  assert.equal(runtime.state.connectionPassword, "new-pw");
+});
+
+test("clear flag deletes stored password", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.state.connectionPassword = "stored-pw";
+  const result = await call(runtime, "PATCH", "/api/settings", { clearConnectionPassword: true });
+  assert.equal(result.status, 200);
+  assert.equal(runtime.state.connectionPassword, "");
+  assert.equal((result.body as { hasConnectionPassword?: boolean }).hasConnectionPassword, false);
+});
+
+test("absent password preserves stored password", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.state.connectionPassword = "stored-pw";
+  const result = await call(runtime, "PATCH", "/api/settings", { connectionUrl: "http://x" });
+  assert.equal(result.status, 200);
+  assert.equal(runtime.state.connectionPassword, "stored-pw");
+});
+
+test("reset clears ownedServerPassword and connectionPassword", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.state.connectionPassword = "stored-pw";
+  runtime.state.ownedServerPassword = "owned-pw";
+  const result = await call(runtime, "POST", "/api/settings/reset", {});
+  assert.equal(result.status, 200);
+  assert.equal(runtime.state.connectionPassword, "");
+  assert.equal(runtime.state.ownedServerPassword, "");
+});
