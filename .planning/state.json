@@ -6,7 +6,7 @@
     {
       "number": "7",
       "name": "v2 Hardening Foundation",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "number": "8",
@@ -29,5 +29,5 @@
     "label": "Advance to the next step",
     "reason": "Phase 1 of 4 · executing"
   },
-  "updated_at": "2026-11-21T22:16:33.315Z"
+  "updated_at": "2026-11-21T22:48:47.584Z"
 }
