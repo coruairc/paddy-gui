@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, FolderGit2, Plus, Search, Settings, Square } from "lucide-react";
+import { toast } from "sonner";
 import { HelixMark } from "@/components/helix-mark";
 import { Markdown } from "@/components/markdown";
 import { PaddyIdle } from "@/components/paddy-idle";
@@ -37,6 +38,7 @@ export function DeskApp() {
   const [error, setError] = useState<string | null>(null);
   const [serverPassword, setServerPassword] = useState("");
   const [prompts, setPrompts] = useState<PermissionPrompt[]>([]);
+  const [loadingSession, setLoadingSession] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [inspector, setInspector] = useState<"work" | "changes">("work");
   const [branch, setBranch] = useState<string | null>(null);
@@ -126,6 +128,21 @@ export function DeskApp() {
       if (window.location.search.includes("token=")) {
         window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
       }
+      const resumeId =
+        (data.activeProjectId ? localStorage.getItem(`paddy:lastSession:${data.activeProjectId}`) : null) ??
+        localStorage.getItem("paddy:lastSession");
+      if (resumeId && data.status.connected) {
+        setLoadingSession(true);
+        void openSession(resumeId).finally(() => {
+          try {
+            localStorage.setItem("paddy:lastSession", resumeId);
+            if (data.activeProjectId) localStorage.setItem(`paddy:lastSession:${data.activeProjectId}`, resumeId);
+          } catch {
+            /* ignore */
+          }
+          setLoadingSession(false);
+        });
+      }
       const stream = new EventSource("/api/events");
       source = stream;
       stream.onmessage = (message) => {
@@ -144,6 +161,7 @@ export function DeskApp() {
       cancelled = true;
       source?.close();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applyEvent]);
 
   useEffect(() => {
@@ -208,6 +226,12 @@ export function DeskApp() {
       setMessages(data.messages);
       setFiles(data.files);
       setSessions((current) => upsertSession(current, data.session));
+      try {
+        localStorage.setItem("paddy:lastSession", id);
+        if (activeProjectId) localStorage.setItem(`paddy:lastSession:${activeProjectId}`, id);
+      } catch {
+        /* ignore storage errors */
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not open that chat");
     }
@@ -231,6 +255,12 @@ export function DeskApp() {
       setFiles([]);
       setPrompts([]);
       setWorking(false);
+      try {
+        localStorage.setItem("paddy:lastSession", created.session.id);
+        if (activeProjectId ?? targetProject.id) localStorage.setItem(`paddy:lastSession:${targetProject.id}`, created.session.id);
+      } catch {
+        /* ignore storage errors */
+      }
       setStick(true);
       setShowJump(false);
       setInspector("work");
@@ -260,6 +290,12 @@ export function DeskApp() {
       id = created.session.id;
       setSessionId(id);
       setSessions((current) => upsertSession(current, created.session));
+      try {
+        localStorage.setItem("paddy:lastSession", id);
+        if (activeProjectId) localStorage.setItem(`paddy:lastSession:${activeProjectId}`, id);
+      } catch {
+        /* ignore storage errors */
+      }
     }
     const tempId = `local_${Date.now()}`;
     setMessages((current) => [
@@ -298,6 +334,14 @@ export function DeskApp() {
   async function reply(prompt: PermissionPrompt, decision: "once" | "always" | "reject", message?: string) {
     await api.reply(prompt.id, decision, { sessionId: prompt.sessionId, kind: prompt.kind, message });
     setPrompts((current) => current.filter((item) => item.id !== prompt.id));
+    if (decision === "reject") {
+      setMessages((current) => [
+        ...current,
+        { id: `sys_${Date.now()}`, role: "system", text: "Permission denied — run aborted.", created: Date.now(), activity: [] },
+      ]);
+      setWorking(false);
+      if (prompt.sessionId) void api.abort(prompt.sessionId).catch(() => {});
+    }
   }
 
   return (
@@ -442,7 +486,12 @@ export function DeskApp() {
                     setShowJump(distance >= 80);
                   }}
                 >
-                  {!messages.length ? (
+                  {!messages.length && loadingSession ? (
+                    <div className="flex flex-col items-center justify-center gap-3 py-12 text-muted">
+                      <HelixMark spinning className="size-8 text-accent" />
+                      <span className="text-sm">Loading session…</span>
+                    </div>
+                  ) : !messages.length ? (
                     <PaddyIdle name="Paddy" busy={working} />
                   ) : (
                     <div className="mx-auto flex max-w-2xl flex-col gap-6">
@@ -450,7 +499,7 @@ export function DeskApp() {
                         <MessageView key={message.id} message={message} />
                       ))}
                       {prompts.map((item) => (
-                        <PermissionCard key={item.id} prompt={item} onReply={(decision, message) => void reply(item, decision, message)} />
+                        <PermissionCard key={item.id} prompt={item} onReply={(decision, message) => reply(item, decision, message)} />
                       ))}
                       {working && (
                         <div className="flex items-center gap-3 text-muted">
@@ -612,6 +661,9 @@ function SectionLabel({ children }: { children: string }) {
 
 function MessageView({ message }: { message: ChatMessage }) {
   const [open, setOpen] = useState(message.activity.some((item) => item.status === "running"));
+  if (message.role === "system") {
+    return <p className="text-xs text-muted">{message.text}</p>;
+  }
   if (message.role === "user") {
     return (
       <article className="rise-in">
@@ -680,41 +732,89 @@ function PermissionCard({
   onReply,
 }: {
   prompt: PermissionPrompt;
-  onReply: (decision: "once" | "always" | "reject", message?: string) => void;
+  onReply: (decision: "once" | "always" | "reject", message?: string) => void | Promise<void>;
 }) {
+  const [pending, setPending] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const [answer, setAnswer] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const titleId = `perm-title-${prompt.id}`;
+  const isQuestion = prompt.kind === "question";
+
+  async function handle(decision: "once" | "always" | "reject", message?: string) {
+    setPending(true);
+    try {
+      await onReply(decision, message);
+    } catch {
+      toast.error("Could not reply. Try again.");
+      setPending(false);
+    }
+  }
+
+  function submitAnswer() {
+    const trimmed = answer.trim();
+    if (!trimmed) return;
+    void handle("once", trimmed);
+  }
+
   return (
-    <article className="rise-in">
+    <article className="rise-in" aria-labelledby={titleId}>
       <div className="flex gap-3">
         <HelixMark className="mt-1 size-7 shrink-0 text-accent" />
         <div className="min-w-0 flex-1 rounded-2xl bg-elevated px-4 py-3 shadow-[var(--shadow-border)]">
           <p className="font-mono text-[10px] tracking-wide text-accent uppercase">
-            {prompt.kind === "question" ? "question" : "permission"}
+            {isQuestion ? "question" : "permission"}
           </p>
-          <p className="mt-1 text-sm text-fg">
-            {prompt.kind === "question" ? "Paddy is asking" : "Paddy wants to"}
+          <p id={titleId} className="mt-1 text-sm text-fg">
+            {isQuestion ? "Paddy is asking" : "Paddy wants to"}
           </p>
           <p className="mt-0.5 text-xs text-muted">{prompt.title}</p>
-          <pre className="mt-2 overflow-auto rounded-lg bg-bg p-3 font-mono text-xs leading-relaxed text-fg">{prompt.detail}</pre>
+          <pre className="mt-2 max-h-60 overflow-auto rounded-lg bg-bg p-3 font-mono text-xs leading-relaxed text-fg">{prompt.detail}</pre>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button size="sm" variant="danger" onClick={() => onReply("reject")}>Deny</Button>
-            {prompt.kind === "permission" && (
-              <Button size="sm" variant="outline" onClick={() => onReply("always")}>Always</Button>
+            <Button size="sm" variant="danger" disabled={pending} onClick={() => void handle("reject")}>
+              {pending ? "…" : "Deny"}
+            </Button>
+            {!isQuestion && (
+              <Button size="sm" variant="outline" disabled={pending} onClick={() => void handle("always")}>
+                {pending ? "…" : "Always"}
+              </Button>
             )}
             <Button
               size="sm"
+              disabled={pending || (isQuestion && asking && !answer.trim())}
               onClick={() => {
-                if (prompt.kind !== "question") {
-                  onReply("once");
+                if (!isQuestion) {
+                  void handle("once");
                   return;
                 }
-                const answer = window.prompt("Answer");
-                if (!answer?.trim()) return;
-                onReply("once", answer.trim());
+                if (!asking) {
+                  setAsking(true);
+                  requestAnimationFrame(() => inputRef.current?.focus());
+                  return;
+                }
+                submitAnswer();
               }}
             >
-              {prompt.kind === "question" ? "Answer" : "Allow"}
+              {pending ? "…" : isQuestion ? "Answer" : "Allow"}
             </Button>
           </div>
+          {isQuestion && asking && (
+            <div className="mt-2">
+              <Input
+                ref={inputRef}
+                value={answer}
+                onChange={(event) => setAnswer(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    submitAnswer();
+                  }
+                }}
+                placeholder="Type your answer"
+                className="h-8 text-xs"
+              />
+            </div>
+          )}
         </div>
       </div>
     </article>
