@@ -1,0 +1,43 @@
+{
+  "contract": "1.0.0",
+  "flavor": "core",
+  "milestone": "v1.0",
+  "phases": [
+    {
+      "number": "1",
+      "name": "Controller Auth Hardening",
+      "status": "complete"
+    },
+    {
+      "number": "2",
+      "name": "Core Loop Correctness",
+      "status": "complete"
+    },
+    {
+      "number": "3",
+      "name": "Repository Cleanup and Honest Docs",
+      "status": "pending"
+    },
+    {
+      "number": "4",
+      "name": "Trustworthy Quality Gates",
+      "status": "pending"
+    },
+    {
+      "number": "5",
+      "name": "Install and Persist",
+      "status": "pending"
+    },
+    {
+      "number": "6",
+      "name": "End-to-End Verification",
+      "status": "pending"
+    }
+  ],
+  "next": {
+    "command": "/gsd-progress --next",
+    "label": "Advance to the next step (plan phase 3)",
+    "reason": "Phase 3 of 6 — needs a plan"
+  },
+  "updated_at": "2026-11-21T17:36:47.306Z"
+}

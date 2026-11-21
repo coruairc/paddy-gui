@@ -160,7 +160,7 @@ npm install
 npm run dev       # desk + controller at http://127.0.0.1:8080
 npm run build
 npm run preview
-npm run test
+npm test
 npm run typecheck
 ```
 

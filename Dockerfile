@@ -37,7 +37,7 @@ RUN npm ci --include=optional --no-fund --no-audit
 COPY bin ./bin
 COPY public ./public
 COPY src ./src
-COPY index.html* tsconfig.json vite.config.ts SELFHOST* ./
+COPY index.html* tsconfig.json vite.config.ts ./
 
 # The host port is intended to be published on loopback by default. The Vite
 # process listens on the container interface, while OPENCODE_WEB_HOST tells

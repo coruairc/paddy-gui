@@ -15,7 +15,7 @@ Paddy already works; this milestone makes it trustworthy. Six phases take the ap
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Controller Auth Hardening** - Token auth cannot be bypassed by loopback trust, a spoofed `Host`, or a cross-origin request (completed 2026-11-21)
-- [ ] **Phase 2: Core Loop Correctness** - Messages, settings saves, and process exit behave without duplicates, data loss, or orphans
+- [x] **Phase 2: Core Loop Correctness** - Messages, settings saves, and process exit behave without duplicates, data loss, or orphans (completed 2026-11-21)
 - [ ] **Phase 3: Repository Cleanup and Honest Docs** - Delete the app-builder scaffolding, unused dependencies, and documentation for features that do not exist
 - [ ] **Phase 4: Trustworthy Quality Gates** - Lint passes, the full suite runs, and CI enforces both on every push and pull request
 - [ ] **Phase 5: Install and Persist** - Containers keep state across restarts and the Linux/Windows installers produce a working `paddy` command
@@ -39,7 +39,7 @@ Plans:
 - [x] 01-01-PLAN.md — Close the loopback/Host auth bypass (security.ts + http.ts + tests)
 
 ### Phase 2: Core Loop Correctness
-**Goal**: A user can drive one OpenCode session from first message to finished run without duplicate turns, a wiped password, or an orphaned server.
+**Goal**: As a user driving an OpenCode session, I want messages, settings saves, and process exit to behave without duplicates, data loss, or orphans, so that I can complete a run from first message to finish.
 **Mode:** mvp
 **Depends on**: Phase 1 (the loop is exercised against a controller that can be trusted on any bind)
 **Requirements**: LOOP-01, LOOP-02, LOOP-03, LOOP-04, LOOP-05
@@ -49,7 +49,7 @@ Plans:
   3. Ctrl+C, `docker stop`, and Settings → Reset terminate the spawned `opencode serve` child — no `opencode` process survives the controller.
   4. Stop, retry, and resume-after-browser-restart still work on the same session after these fixes.
   5. A permission prompt can be allowed or denied inline and the run continues or aborts accordingly.
-**Plans**: 4/4 plans executed
+**Plans**: 4/4 plans complete
 **UI hint**: yes
 Plans:
 - [x] 02-01-PLAN.md — Reconcile optimistic message bubble (LOOP-01)
@@ -114,7 +114,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Controller Auth Hardening | 1/1 | Complete    | 2026-11-21 |
-| 2. Core Loop Correctness | 4/4 | In Progress | - |
+| 2. Core Loop Correctness | 4/4 | Complete    | 2026-11-21 |
 | 3. Repository Cleanup and Honest Docs | 0/TBD | Not started | - |
 | 4. Trustworthy Quality Gates | 0/TBD | Not started | - |
 | 5. Install and Persist | 0/TBD | Not started | - |
