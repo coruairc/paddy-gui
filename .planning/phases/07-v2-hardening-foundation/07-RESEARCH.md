@@ -635,7 +635,7 @@ try {
 | # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
 | A1 | Top-level `node:test` tests within one file run sequentially by default, making env save/restore inside the spawn test safe | Pattern 1 | LOW — even under concurrency, no other test in `runtime.test.ts` calls `connect()` or reads the scrubbed vars; the spawn test is the only connect caller [VERIFIED: full file read] |
-| A2 | "Other 79 tests" (80 total) — count taken from CONTEXT.md. The runtime file's 7 tests (6 pass / 1 fail) were verified directly this session; the FULL suite was NOT RUN at research time (team build lock held by another session's long-running gate; queued run reports lock timeout per team rules) | Validation Architecture | LOW — count is cosmetic; the suite command is authoritative; executor's Wave 0 runs it |
+| A2 | "Other 79 tests" (80 total) — count taken from CONTEXT.md. The runtime file's 7 tests (6 pass / 1 fail) were verified directly this session; the FULL suite was NOT RUN at research time (team build lock held by another session's long-running gate; the queued run confirmed a 900s lock timeout — exit 1, no test output — reported as NOT RUN per team rules, not retried) | Validation Architecture | LOW — count is cosmetic; the suite command is authoritative; executor's Wave 0 runs it |
 
 All other claims are verified against HEAD source (read this session, line-cited), live environment probes, or cited project documents. No web research was performed (per orchestrator instruction; prior milestone research is the plan of record).
 
@@ -761,7 +761,7 @@ All gaps are new/edited cases in **existing** co-located files — no new files,
 - `.planning/REQUIREMENTS.md:63` — "v2 has no remote global-config write (`PATCH /api/config` → 404)" (project authority; not re-probed live this session to avoid write attempts against the user's server)
 
 ### Tertiary (LOW confidence)
-- None load-bearing. The failing spawn test was run directly this session (output pasted in Pattern 1). The FULL `npm test` suite was NOT RUN at research time — the team build lock was held by another session; per team rules a lock timeout is reported as NOT RUN, not retried in a loop. The executor's Wave 0 must run the full suite in both environments as the V2-01 exit proof.
+- None load-bearing. The failing spawn test was run directly this session (output pasted in Pattern 1). The FULL `npm test` suite was NOT RUN at research time — the team build lock was held by another session and the queued run confirmed a 900s lock timeout (exit 1, no test output); per team rules a lock timeout is reported as NOT RUN, not retried in a loop. The executor's Wave 0 must run the full suite in both environments as the V2-01 exit proof.
 
 ## Metadata
 
