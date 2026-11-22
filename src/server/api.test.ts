@@ -841,8 +841,39 @@ test("an oversized upstream diff is a clean 502 on the diff route", async () => 
   assert.equal(result.status, 502);
   assert.deepEqual(Object.keys(result.body as object).sort(), ["error", "retryable"]);
   const open = await call(runtime, "GET", "/api/sessions/ses_1");
-  assert.equal(open.status, 200, "opening the chat still works; it just has no files");
-  assert.deepEqual((open.body as { files: unknown[] }).files, []);
+  assert.equal(open.status, 200, "opening the chat still works");
+  const body = open.body as { files: unknown[]; filesError?: string };
+  assert.deepEqual(body.files, []);
+  assert.equal(body.filesError, "The diff is too large to load (over 32 MB)", "not silently 'no changes'");
+});
+
+test("a mid-stream reset maps to 503 retryable on the diff route", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.client = {
+    ...(runtime.client as object),
+    getDiff: async () => {
+      throw new OpenCodeError(0, "socket hang up", true);
+    },
+  } as unknown as ControllerRuntime["client"];
+  const result = await call(runtime, "GET", "/api/sessions/ses_1/diff");
+  assert.equal(result.status, 503);
+  assert.equal((result.body as { retryable?: boolean }).retryable, true);
+});
+
+test("session GET omits filesError when the diff loads, and masks secrets in it when it doesn't", async () => {
+  const { runtime } = runtimeWithProject();
+  const ok = await call(runtime, "GET", "/api/sessions/ses_1");
+  assert.equal("filesError" in (ok.body as object), false);
+  const pw = "ocw_" + "E".repeat(48);
+  runtime.state.ownedServerPassword = pw;
+  runtime.client = {
+    ...(runtime.client as object),
+    getDiff: async () => {
+      throw new OpenCodeError(500, `upstream echoed ${pw}`, true);
+    },
+  } as unknown as ControllerRuntime["client"];
+  const failed = await call(runtime, "GET", "/api/sessions/ses_1");
+  assert.equal((failed.body as { filesError?: string }).filesError, "upstream echoed [redacted]");
 });
 
 test("diff route caps total patch text and keeps every file's row data", async () => {

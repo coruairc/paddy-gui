@@ -8,6 +8,7 @@ import {
   groupSessionsByDate,
   summarizeSession,
   toChatMessages,
+  maskSecrets,
   toDiffFiles,
   type DiffFile,
   type SessionSummary,
@@ -217,12 +218,19 @@ async function sessionRoute(runtime: ControllerRuntime, request: Request, id: st
     const [session, messages, diff] = await Promise.all([
       client.getSession(project.path, id),
       client.listMessages(project.path, id),
-      client.getDiff(project.path, id).catch(() => []),
+      // The chat must still open when its diff can't load, but an empty list would
+      // read as "No file changes": carry the failure so the inspector can say so.
+      client.getDiff(project.path, id).then(
+        (files) => ({ files, error: null as string | null }),
+        (err: unknown) => ({ files: [] as unknown[], error: err instanceof Error ? err.message : "Could not load changes" }),
+      ),
     ]);
+    const needles = secretNeedles(runtime);
     return json(200, {
       session: summarizeSession(session),
       messages: toChatMessages(messages),
-      files: redactSecrets(toDiffFiles(diff, secretNeedles(runtime)), secretNeedles(runtime)),
+      files: redactSecrets(toDiffFiles(diff.files, needles), needles),
+      ...(diff.error ? { filesError: redactSecrets(maskSecrets(diff.error, needles), needles) } : {}),
     });
   }
   if (!rest && request.method === "PATCH") {

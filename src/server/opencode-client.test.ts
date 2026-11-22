@@ -431,13 +431,17 @@ test("readCapped decodes multi-byte characters split across chunks", async () =>
   assert.equal(await readCapped(new Response(body), 100), "é✓");
 });
 
-test("getDiff fails cleanly (502, nothing parsed) when the upstream body passes the ceiling", async () => {
+test("getDiff fails cleanly (502, nothing parsed) when the upstream body passes the ceiling", { timeout: 30_000 }, async () => {
   let pulled = 0;
   const chunk = new TextEncoder().encode('{"data":[' + " ".repeat(1024 * 1024));
+  // Bounded at twice the ceiling: if the cap regresses the stream ends and the
+  // assertion below fails, instead of the suite hanging on an endless body.
+  const limit = Math.ceil((2 * MAX_DIFF_UPSTREAM_BYTES) / chunk.byteLength);
   const fetchImpl: typeof fetch = async () =>
     new Response(
       new ReadableStream<Uint8Array>({
         pull(controller) {
+          if (pulled >= limit) return controller.close();
           pulled += 1;
           controller.enqueue(chunk);
         },
@@ -447,4 +451,24 @@ test("getDiff fails cleanly (502, nothing parsed) when the upstream body passes 
   const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: fetchImpl });
   await assert.rejects(client.getDiff("/work/app", "ses_1"), (err: unknown) => err instanceof OpenCodeError && err.status === 502 && /too large/.test(err.message));
   assert.ok(pulled <= Math.ceil(MAX_DIFF_UPSTREAM_BYTES / chunk.byteLength) + 2, `pulled ${pulled} MB`);
+});
+
+test("a reset mid-body is a retryable transport error, not a generic failure", async () => {
+  let pulled = 0;
+  const fetchImpl: typeof fetch = async () =>
+    new Response(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulled += 1;
+          if (pulled > 3) return controller.error(new Error("socket hang up"));
+          controller.enqueue(new TextEncoder().encode('{"data":['));
+        },
+      }),
+      { status: 200 },
+    );
+  const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: fetchImpl });
+  await assert.rejects(
+    client.getDiff("/work/app", "ses_1"),
+    (err: unknown) => err instanceof OpenCodeError && err.status === 0 && err.retryable === true && /socket hang up/.test(err.message),
+  );
 });
