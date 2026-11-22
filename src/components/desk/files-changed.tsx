@@ -2,9 +2,10 @@ import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 
 import { ChevronRight, FileDiff } from "lucide-react";
 import type { DiffFile, DiffFileStatus } from "@/lib/desk/client";
 import { api } from "@/lib/desk/client";
-import { capHunks, changeCounts, languageForPath, type TurnDiffCache, middleTruncate, parsePatch, type DiffHunk, type DiffLine } from "@/components/desk/diff";
+import { capHunks, changeCounts, languageForPath, turnFilesLabel, type TurnDiffCache, middleTruncate, parsePatch, type DiffHunk, type DiffLine } from "@/components/desk/diff";
 import { MONOKAI, tokenizeLines, type Token } from "@/components/desk/highlight";
 import { createRequestGate, runLatest } from "@/components/desk/request-gate";
+import { changesPanelView, type SessionChanges } from "@/components/desk/session-changes";
 import { cn } from "@/lib/utils";
 
 /** Rows shown before "Show full diff". Keeps a 5k-line rewrite from freezing the tab. */
@@ -76,7 +77,7 @@ export function FilesChangedBlock({
   }, [open, sessionId, from, version]);
   useEffect(() => () => gate.invalidate(), [gate]);
 
-  const count = state.kind === "ready" ? state.files.length : paths.length;
+
   return (
     <section className="mt-3 overflow-hidden rounded-xl shadow-[var(--shadow-border)]" aria-label="Files changed">
       <button
@@ -88,7 +89,8 @@ export function FilesChangedBlock({
       >
         <ChevronRight aria-hidden className={cn("size-3.5 transition-transform", open && "rotate-90")} />
         <FileDiff aria-hidden className="size-3.5" />
-        <span className="font-medium">Files changed ({count})</span>
+        {/* Net diff count once loaded; before that only the snapshot's "touched" paths are known. */}
+        <span className="font-medium">{turnFilesLabel(state.kind === "ready" ? state.files.length : undefined, paths.length)}</span>
         {state.kind === "ready" && <Totals files={state.files} />}
       </button>
       {open && (
@@ -101,12 +103,22 @@ export function FilesChangedBlock({
 }
 
 /** Right-inspector "Changes" tab: the newest turn's files, same rows as the chat block. */
-export function ChangesPanel({ files, loading, error, onRetry }: { files: DiffFile[]; loading: boolean; error: string | null; onRetry: () => void }) {
-  const state: LoadState = error ? { kind: "error", message: error } : loading && !files.length ? { kind: "loading" } : { kind: "ready", files };
+export function ChangesPanel({
+  changes,
+  openSessionId,
+  onRetry,
+}: {
+  /** Raw, session-tagged state; filtered to the open chat by changesPanelView. */
+  changes: SessionChanges;
+  openSessionId: string | null;
+  onRetry: () => void;
+}) {
+  const state: LoadState = changesPanelView(changes, openSessionId);
+  const count = state.kind === "ready" ? state.files.length : 0;
   return (
     <div className="space-y-2">
       <p className="px-1 text-[11px] text-muted">
-        Latest turn{state.kind === "ready" && files.length ? ` · ${files.length} file${files.length === 1 ? "" : "s"}` : ""}
+        Latest turn{count ? ` · ${count} file${count === 1 ? "" : "s"}` : ""}
       </p>
       <FileDiffList state={state} onRetry={onRetry} pathMax={28} />
     </div>

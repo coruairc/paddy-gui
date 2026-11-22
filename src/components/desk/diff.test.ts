@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { capHunks, changeCounts, countLines, createTurnDiffCache, createTurnTracker, TURN_DIFF_CACHE_LIMIT, turnStateKey, languageForPath, latestTurnFiles, mergeStepFiles, middleTruncate, parsePatch, turnFiles } from "./diff.ts";
+import { capHunks, changeCounts, countLines, turnFilesLabel, createTurnDiffCache, createTurnTracker, TURN_DIFF_CACHE_LIMIT, turnStateKey, languageForPath, latestTurnFiles, mergeStepFiles, middleTruncate, parsePatch, turnFiles } from "./diff.ts";
 
 // Real OpenCode v2.3.2 patch shape (diff --git, index, ---/+++ headers, context=3 hunks).
 const PATCH = [
@@ -196,4 +196,11 @@ test("changeCounts leaves out zero counts", () => {
   assert.deepEqual(changeCounts(5, 0), [{ kind: "add", text: "+5" }]);
   assert.deepEqual(changeCounts(0, 92), [{ kind: "del", text: "−92" }]);
   assert.deepEqual(changeCounts(0, 0), [], "binary logo.png: nothing at all");
+});
+
+test("turnFilesLabel shows the net count once loaded, else a labelled touched estimate", () => {
+  assert.equal(turnFilesLabel(102, 138), "Files changed (102)");
+  assert.equal(turnFilesLabel(0, 3), "Files changed (0)", "a loaded empty diff is a real zero");
+  assert.equal(turnFilesLabel(undefined, 138), "~138 files touched");
+  assert.equal(turnFilesLabel(undefined, 1), "~1 file touched");
 });
