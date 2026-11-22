@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ArrowDown, ArrowUp, FolderGit2, Plus, Search, Settings, Square } from "lucide-react";
 import { toast } from "sonner";
 import { HelixMark } from "@/components/helix-mark";
@@ -9,6 +9,8 @@ import { ModelPicker } from "@/components/desk/model-picker";
 import { CommandPalette } from "@/components/desk/command-palette";
 import { filterCommands, nextCommandIndex, parseCommandInput, shouldAutoLoadCommands } from "@/components/desk/commands";
 import { modelForSend, resolveActiveSource, resolveHeaderModel } from "@/components/desk/models";
+import { ResizeHandle } from "@/components/desk/resize-handle";
+import { usePanelWidths } from "@/components/desk/use-panel-widths";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn, formatTime } from "@/lib/utils";
@@ -55,6 +57,7 @@ export function DeskApp() {
   const [prompts, setPrompts] = useState<PermissionPrompt[]>([]);
   const [loadingSession, setLoadingSession] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const panels = usePanelWidths(!settingsOpen);
   const [inspector, setInspector] = useState<"work" | "changes">("work");
   const [branch, setBranch] = useState<string | null>(null);
   const [model, setModel] = useState("");
@@ -580,7 +583,12 @@ export function DeskApp() {
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-bg text-fg">
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <nav aria-label="Paddy" className="flex w-52 shrink-0 flex-col border-r border-border bg-bg sm:w-60">
+        <nav
+          id="desk-sidebar"
+          aria-label="Paddy"
+          className="relative flex w-52 shrink-0 flex-col border-r border-border bg-bg sm:w-60 lg:w-[var(--desk-left)]"
+          style={{ "--desk-left": `${panels.left.width}px` } as CSSProperties}
+        >
           <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3">
             <HelixMark spinning={working} className="size-7 shrink-0 text-accent" />
             <div className="min-w-0">
@@ -664,6 +672,19 @@ export function DeskApp() {
               Settings
             </button>
           </div>
+          {panels.wide && (
+            <ResizeHandle
+              side="left"
+              label="Resize sidebar"
+              controls="desk-sidebar"
+              width={panels.left.width}
+              min={panels.left.min}
+              max={panels.left.max}
+              onResize={panels.left.resize}
+              onCommit={panels.left.commit}
+              onReset={panels.left.reset}
+            />
+          )}
         </nav>
 
         <div className="flex min-w-0 flex-1 flex-col">
@@ -954,7 +975,25 @@ export function DeskApp() {
                 </form>
               </section>
 
-              <aside className="hidden min-h-0 w-[22rem] shrink-0 flex-col border-l border-border bg-surface lg:flex">
+              <aside
+                id="desk-inspector"
+                aria-label="Inspector"
+                className="relative hidden min-h-0 w-[22rem] shrink-0 flex-col border-l border-border bg-surface lg:flex lg:w-[var(--desk-right)]"
+                style={{ "--desk-right": `${panels.right.width}px` } as CSSProperties}
+              >
+                {panels.wide && (
+                  <ResizeHandle
+                    side="right"
+                    label="Resize inspector"
+                    controls="desk-inspector"
+                    width={panels.right.width}
+                    min={panels.right.min}
+                    max={panels.right.max}
+                    onResize={panels.right.resize}
+                    onCommit={panels.right.commit}
+                    onReset={panels.right.reset}
+                  />
+                )}
                 <div className="flex gap-1 border-b border-border p-2">
                   {(["work", "changes"] as const).map((tab) => (
                     <button
