@@ -113,6 +113,16 @@ export type DeskEvent =
   | { type: "error"; message: string; sessionId?: string }
   | { type: "malformed"; message: string };
 
+/** A non-2xx controller response. `status` lets callers tell "gone" (404) from transient failures. */
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -123,7 +133,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   const data = (await response.json().catch(() => ({}))) as T & { error?: string };
-  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+  if (!response.ok) throw new ApiError(data.error || `Request failed (${response.status})`, response.status);
   return data;
 }
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { browserStorage, clearAllLastSessions, forgetProject } from "@/components/desk/last-session";
 import {
   api,
   type ConnectionStatus,
@@ -107,7 +108,10 @@ function General({ status }: { status: ConnectionStatus | null }) {
         variant="outline"
         onClick={() => {
           if (window.confirm("Reset local GUI settings? OpenCode configuration and chats are left alone.")) {
-            void api.reset().then(() => window.location.reload());
+            void api.reset().then(() => {
+              clearAllLastSessions(browserStorage());
+              window.location.reload();
+            });
           }
         }}
       >
@@ -527,7 +531,10 @@ function Projects({ projects, onChange }: { projects: Project[]; onChange: (proj
             size="sm"
             variant="ghost"
             onClick={() => {
-              void api.removeProject(project.id).then(() => onChange(projects.filter((item) => item.id !== project.id)));
+              void api.removeProject(project.id).then(() => {
+                forgetProject(browserStorage(), project.id);
+                onChange(projects.filter((item) => item.id !== project.id));
+              });
             }}
           >
             Remove

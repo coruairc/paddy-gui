@@ -12,6 +12,14 @@ import { modelForSend, resolveActiveSource, resolveHeaderModel } from "@/compone
 import { ResizeHandle } from "@/components/desk/resize-handle";
 import { createRequestGate } from "@/components/desk/request-gate";
 import { usePanelWidths } from "@/components/desk/use-panel-widths";
+import {
+  browserStorage,
+  forgetSession,
+  isMissingSession,
+  pickResumeId,
+  rememberSession,
+  sessionForSend,
+} from "@/components/desk/last-session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn, formatTime } from "@/lib/utils";
@@ -93,6 +101,8 @@ export function DeskApp() {
   const composer = useRef<HTMLTextAreaElement>(null);
   const sessionRef = useRef<string | null>(null);
   sessionRef.current = sessionId;
+  /** The session id the server has confirmed (opened or created); only this one may be reused by a send. */
+  const confirmedSessionRef = useRef<string | null>(null);
 
   const project = projects.find((item) => item.id === activeProjectId) ?? null;
 
@@ -140,6 +150,17 @@ export function DeskApp() {
     }
     if (event.type === "session-deleted") {
       setSessions((current) => current.filter((item) => item.id !== event.id));
+      forgetSession(browserStorage(), event.id);
+      if (sessionRef.current === event.id) {
+        // The open chat is gone: the next send must start a new one, not reuse a dead id.
+        confirmedSessionRef.current = null;
+        pendingCommandRef.current = null;
+        settledCommandRef.current = null;
+        commandTurnRef.current = false;
+        setSessionId(null);
+        setMessages([]);
+        setWorking(false);
+      }
       return;
     }
     if (event.type === "status") {
@@ -218,20 +239,12 @@ export function DeskApp() {
       if (window.location.search.includes("token=")) {
         window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
       }
-      const resumeId =
-        (data.activeProjectId ? localStorage.getItem(`paddy:lastSession:${data.activeProjectId}`) : null) ??
-        localStorage.getItem("paddy:lastSession");
-      if (resumeId && data.status.connected) {
+      // Per-project key only, and only an id the project's session list still has.
+      // openSession re-remembers it on success and forgets it on a 404.
+      const resumeId = data.status.connected ? pickResumeId(browserStorage(), data.activeProjectId, data.sessions) : null;
+      if (resumeId) {
         setLoadingSession(true);
-        void openSession(resumeId).finally(() => {
-          try {
-            localStorage.setItem("paddy:lastSession", resumeId);
-            if (data.activeProjectId) localStorage.setItem(`paddy:lastSession:${data.activeProjectId}`, resumeId);
-          } catch {
-            /* ignore */
-          }
-          setLoadingSession(false);
-        });
+        void openSession(resumeId, data.activeProjectId).finally(() => setLoadingSession(false));
       }
       const stream = new EventSource("/api/events");
       source = stream;
@@ -360,17 +373,15 @@ export function DeskApp() {
   }
 
   async function ensureSession(): Promise<string | null> {
-    if (sessionId) return sessionId;
+    const target = sessionForSend(sessionId, confirmedSessionRef.current);
+    if (target.kind === "reuse") return target.id;
+    if (target.kind === "wait") throw new Error("Still opening that chat. Try again in a moment.");
     const created = await api.createSession();
     const id = created.session.id;
+    confirmedSessionRef.current = id;
     setSessionId(id);
     setSessions((current) => upsertSession(current, created.session));
-    try {
-      localStorage.setItem("paddy:lastSession", id);
-      if (activeProjectId) localStorage.setItem(`paddy:lastSession:${activeProjectId}`, id);
-    } catch {
-      /* ignore storage errors */
-    }
+    rememberSession(browserStorage(), activeProjectId, id);
     return id;
   }
 
@@ -424,6 +435,7 @@ export function DeskApp() {
     await api.selectProject(id);
     resetCommandTurn();
     setActiveProjectId(id);
+    confirmedSessionRef.current = null;
     setSessionId(null);
     setMessages([]);
     // Commands and models are fetched per project directory. Drop any request
@@ -458,10 +470,12 @@ export function DeskApp() {
     }
   }
 
-  async function openSession(id: string) {
+  async function openSession(id: string, projectId: string | null = activeProjectId) {
     setSettingsOpen(false);
     resetCommandTurn();
     setMessages(dropPendingBubbles);
+    // Shown as selected right away, but not reusable by a send until the server confirms it.
+    confirmedSessionRef.current = null;
     setSessionId(id);
     setWorking(false);
     setError(null);
@@ -477,13 +491,16 @@ export function DeskApp() {
       } else {
         setModelSource("desk");
       }
-      try {
-        localStorage.setItem("paddy:lastSession", id);
-        if (activeProjectId) localStorage.setItem(`paddy:lastSession:${activeProjectId}`, id);
-      } catch {
-        /* ignore storage errors */
-      }
+      if (sessionRef.current === id) confirmedSessionRef.current = id;
+      rememberSession(browserStorage(), projectId, id);
     } catch (err) {
+      // Never keep (or write back) an id that failed to open; a 404 means it is gone for good.
+      if (isMissingSession(err)) forgetSession(browserStorage(), id);
+      if (sessionRef.current === id) {
+        setSessionId(null);
+        setMessages([]);
+        setFiles([]);
+      }
       setError(err instanceof Error ? err.message : "Could not open that chat");
     }
   }
@@ -502,17 +519,13 @@ export function DeskApp() {
       setSessions((current) => upsertSession(current, created.session));
       resetCommandTurn();
       setActiveProjectId(targetProject.id);
+      confirmedSessionRef.current = created.session.id;
       setSessionId(created.session.id);
       setMessages([]);
       setFiles([]);
       setPrompts([]);
       setWorking(false);
-      try {
-        localStorage.setItem("paddy:lastSession", created.session.id);
-        if (activeProjectId ?? targetProject.id) localStorage.setItem(`paddy:lastSession:${targetProject.id}`, created.session.id);
-      } catch {
-        /* ignore storage errors */
-      }
+      rememberSession(browserStorage(), targetProject.id, created.session.id);
       setStick(true);
       setShowJump(false);
       setInspector("work");
@@ -746,7 +759,7 @@ export function DeskApp() {
                     const title = window.prompt("Rename chat", active.title);
                     if (title?.trim()) void api.renameSession(active.id, title.trim()).then(() => refreshSessions());
                   }}>Rename</button>
-                  <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => void api.archiveSession(active.id, true).then(() => { resetCommandTurn(); setSessionId(null); setMessages([]); return refreshSessions(); })}>Archive</button>
+                  <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => void api.archiveSession(active.id, true).then(() => { resetCommandTurn(); forgetSession(browserStorage(), active.id); confirmedSessionRef.current = null; setSessionId(null); setMessages([]); return refreshSessions(); })}>Archive</button>
                 </div>
               )}
             </div>
