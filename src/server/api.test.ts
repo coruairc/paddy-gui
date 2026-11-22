@@ -299,6 +299,50 @@ test("command dispatch forwards args and accepts empty text", async () => {
   assert.equal(missing.status, 400);
 });
 
+test("command dispatch requires a selected project, same 400 as the prompt route", async () => {
+  const { runtime, calls } = runtimeWithProject();
+  runtime.state.activeProjectId = null;
+  const command = await call(runtime, "POST", "/api/sessions/ses_other/command", { name: "echo", text: "" });
+  const prompt = await call(runtime, "POST", "/api/sessions/ses_other/messages", { text: "hi" });
+  assert.equal(command.status, 400);
+  assert.equal(prompt.status, 400);
+  assert.deepEqual(command.body, prompt.body);
+  assert.equal((command.body as { error: string }).error, "Select a project first");
+  assert.equal(calls.some((item) => item.startsWith("command:")), false);
+});
+
+test("command dispatch rejects a project that is no longer allowlisted", async () => {
+  const { runtime, calls } = runtimeWithProject();
+  runtime.state.projects = runtime.state.projects.map((item) => ({ ...item, path: item.path + "-gone" }));
+  const command = await call(runtime, "POST", "/api/sessions/ses_1/command", { name: "echo", text: "" });
+  const prompt = await call(runtime, "POST", "/api/sessions/ses_1/messages", { text: "hi" });
+  assert.equal(command.status, 400);
+  assert.equal(command.status, prompt.status);
+  assert.deepEqual(command.body, prompt.body);
+  assert.equal(calls.some((item) => item.startsWith("command:")), false);
+});
+
+test("a malformed percent-escape in a route id is a 400, not a 500", async () => {
+  const { runtime, calls } = runtimeWithProject();
+  const routes: Array<[string, string, unknown?]> = [
+    ["POST", "/api/sessions/%E0%A4%A/command", { name: "echo" }],
+    ["GET", "/api/sessions/%E0%A4%A"],
+    ["POST", "/api/sessions/%/messages", { text: "hi" }],
+    ["POST", "/api/projects/%E0%A4%A"],
+    ["DELETE", "/api/projects/%ZZ"],
+    ["POST", "/api/mcp/%E0%A4%A/connect"],
+    ["POST", "/api/permissions/%E0%A4%A/reply", { reply: "once", sessionId: "ses_1" }],
+    ["PUT", "/api/providers/%E0%A4%A/key", { key: "k" }],
+    ["DELETE", "/api/providers/%E0%A4%A/key"],
+  ];
+  for (const [method, path, body] of routes) {
+    const result = await call(runtime, method, path, body);
+    assert.equal(result.status, 400, `${method} ${path}`);
+    assert.equal((result.body as { error: string }).error, "Malformed path parameter");
+  }
+  assert.equal(calls.some((item) => item.startsWith("command:") || item === "send" || item === "set-key"), false);
+});
+
 test("command errors surface their server message", async () => {
   const { runtime } = runtimeWithProject();
   runtime.client = {
@@ -451,11 +495,96 @@ test("bootstrap falls back to OpenCode config model when deskModel is unset", as
   assert.equal(body.deskModel, "");
 });
 
-test("non-string deskModel is ignored", async () => {
+test("deskModel rejects non-strings, oversized and malformed values with 400 and leaves state unchanged", async () => {
   const { runtime } = runtimeWithProject();
-  const result = await call(runtime, "PATCH", "/api/settings", { deskModel: 42 });
+  runtime.state.deskModel = "openai/gpt-6.2-astra";
+  runtime.state.appearance = "dark";
+  const bad: unknown[] = [
+    42,
+    true,
+    { id: "x" },
+    ["openai/gpt"],
+    "openai/" + "x".repeat(300),
+    "x".repeat(200_000),
+    "no-slash",
+    "/leading",
+    "trailing/",
+    "openai//double",
+    "open ai/gpt",
+    "openai/gpt\n",
+    "openai/<script>",
+  ];
+  for (const deskModel of bad) {
+    const result = await call(runtime, "PATCH", "/api/settings", { deskModel, appearance: "light" });
+    assert.equal(result.status, 400, `expected 400 for ${JSON.stringify(deskModel).slice(0, 40)}`);
+    assert.equal(typeof (result.body as { error: unknown }).error, "string");
+    assert.equal(runtime.state.deskModel, "openai/gpt-6.2-astra");
+    // A rejected PATCH must not half-apply the other fields either.
+    assert.equal(runtime.state.appearance, "dark");
+  }
+});
+
+test("deskModel accepts provider/model keys (model ids may contain slashes, dots, colons)", async () => {
+  const { runtime } = runtimeWithProject();
+  for (const deskModel of ["openrouter/anthropic/claude-4.5", "ollama/llama3.3:70b", "opencode-go/deepseek-v4.1-flash", "a/" + "b".repeat(254)]) {
+    const result = await call(runtime, "PATCH", "/api/settings", { deskModel });
+    assert.equal(result.status, 200, deskModel.slice(0, 40));
+    assert.equal(runtime.state.deskModel, deskModel);
+  }
+});
+
+test("deskModel null or empty string clears the desk default", async () => {
+  const { runtime } = runtimeWithProject();
+  for (const deskModel of [null, ""]) {
+    runtime.state.deskModel = "openai/gpt-6.2-astra";
+    const result = await call(runtime, "PATCH", "/api/settings", { deskModel });
+    assert.equal(result.status, 200);
+    assert.equal(runtime.state.deskModel, "");
+  }
+});
+
+test("deskModel omitted leaves the desk default alone", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.state.deskModel = "openai/gpt-6.2-astra";
+  const result = await call(runtime, "PATCH", "/api/settings", { appearance: "light" });
   assert.equal(result.status, 200);
+  assert.equal(runtime.state.deskModel, "openai/gpt-6.2-astra");
+});
+
+test("deskModel rejects a model OpenCode lists as disabled", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.client = {
+    ...(runtime.client as object),
+    listModels: async () => [
+      { id: "on", modelID: "on", providerID: "openai", name: "On", enabled: true },
+      { id: "off", modelID: "off", providerID: "openai", name: "Off", enabled: false },
+    ],
+  } as unknown as ControllerRuntime["client"];
+  const rejected = await call(runtime, "PATCH", "/api/settings", { deskModel: "openai/off" });
+  assert.equal(rejected.status, 400);
+  assert.match((rejected.body as { error: string }).error, /disabled/);
   assert.equal(runtime.state.deskModel, "");
+  const accepted = await call(runtime, "PATCH", "/api/settings", { deskModel: "openai/on" });
+  assert.equal(accepted.status, 200);
+  // A key the catalog does not list is not proof it is disabled.
+  const unknown = await call(runtime, "PATCH", "/api/settings", { deskModel: "openai/unlisted" });
+  assert.equal(unknown.status, 200);
+});
+
+test("deskModel disabled check never blocks when the catalog is unavailable", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.client = {
+    ...(runtime.client as object),
+    listModels: async () => {
+      throw new OpenCodeError(503, "down");
+    },
+  } as unknown as ControllerRuntime["client"];
+  const result = await call(runtime, "PATCH", "/api/settings", { deskModel: "openai/off" });
+  assert.equal(result.status, 200);
+  runtime.status.connected = false;
+  runtime.client = null;
+  const offline = await call(runtime, "PATCH", "/api/settings", { deskModel: "openai/other" });
+  assert.equal(offline.status, 200);
 });
 
 test("reset clears passwords and deskModel", async () => {

@@ -91,7 +91,12 @@ function cookie(req: IncomingMessage, name: string): string | null {
   if (!raw) return null;
   for (const part of raw.split(";")) {
     const [key, ...value] = part.trim().split("=");
-    if (key === name) return decodeURIComponent(value.join("="));
+    if (key !== name) continue;
+    try {
+      return decodeURIComponent(value.join("="));
+    } catch {
+      return null; // a malformed cookie is treated as absent, not a 500
+    }
   }
   return null;
 }
