@@ -26,6 +26,48 @@ test("connect reads server info", async () => {
   assert.match(calls[0].url, /\/api\/info$/);
 });
 
+test("listModels scopes by directory and unwraps the envelope", async () => {
+  const { fetchImpl, calls } = mockFetch(() => ({
+    body: {
+      data: [{ id: "gpt-6.2-astra", modelID: "gpt-6.2-astra", providerID: "openai", name: "Astra" }],
+    },
+  }));
+  const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: fetchImpl });
+  const models = await client.listModels("/work/app");
+  assert.equal(models.length, 1);
+  assert.equal(models[0].id, "gpt-6.2-astra");
+  const url = new URL(calls[0].url);
+  assert.equal(url.pathname, "/api/model");
+  assert.equal(url.searchParams.get("location[directory]"), "/work/app");
+});
+
+test("getDefaultModel tolerates a null payload", async () => {
+  const { fetchImpl } = mockFetch(() => ({ body: { data: null } }));
+  const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: fetchImpl });
+  assert.equal(await client.getDefaultModel(), null);
+});
+
+test("a rejected model switch aborts before the prompt is sent", async () => {
+  const { fetchImpl, calls } = mockFetch((url) => {
+    if (url.includes("/model")) return { status: 400, body: { message: "unknown model" } };
+    return { body: { data: { id: "msg_user" } } };
+  });
+  const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: fetchImpl });
+  await assert.rejects(
+    client.sendMessage("/work/app", "ses_1", {
+      text: "hello",
+      providerID: "openai",
+      modelID: "no-such-model",
+    }),
+    OpenCodeError,
+  );
+  assert.equal(
+    calls.some((call) => call.url.includes("/prompt")),
+    false,
+    "prompt must never be issued after a failed model switch",
+  );
+});
+
 test("session lifecycle uses v2 paths, location scope, and prompt steps", async () => {
   const { fetchImpl, calls } = mockFetch((url, init) => {
     if (new URL(url).pathname === "/api/session" && init?.method === "POST") {

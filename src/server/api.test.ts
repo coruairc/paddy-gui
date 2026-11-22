@@ -55,6 +55,38 @@ function runtimeWithProject() {
     },
     deleteMessage: async () => undefined,
     getConfig: async () => ({ model: "openai/gpt" }),
+    listModels: async () => [
+      {
+        id: "gpt-6.2-astra",
+        modelID: "gpt-6.2-astra",
+        providerID: "openai",
+        name: "GPT-6.2 Astra",
+        status: "active",
+        enabled: true,
+        limit: { context: 628000, output: 128000 },
+        time: { released: 1794960000000 },
+        capabilities: { tools: true },
+        variants: [{ id: "low" }, { id: "high" }],
+      },
+      {
+        id: "gpt-6.2-astra-fast",
+        modelID: "gpt-6.2-astra",
+        providerID: "openai",
+        name: "GPT-6.2 Astra Fast",
+      },
+      {
+        id: "qwen4-max",
+        modelID: "qwen4-max-preview",
+        providerID: "alibaba-token-plan",
+        name: "Qwen4 Max",
+      },
+    ],
+    getDefaultModel: async () => ({
+      id: "gemini-3",
+      modelID: "gemini-3-preview",
+      providerID: "google",
+      name: "Gemini 3",
+    }),
     setApiKey: async () => {
       calls.push("set-key");
     },
@@ -143,6 +175,79 @@ test("identifier payloads survive the providers route byte-identical", async () 
   const body = result.body as { providers: { all: { id: string }[]; connected: string[] } };
   assert.equal(body.providers.all[0].id, "alibaba-token-plan");
   assert.equal(body.providers.connected[0], "alibaba-token-plan");
+});
+
+test("model catalog projects a whitelisted, id-keyed payload", async () => {
+  const { runtime } = runtimeWithProject();
+  const result = await call(runtime, "GET", "/api/models");
+  assert.equal(result.status, 200);
+  const body = result.body as {
+    models: Record<string, unknown>[];
+    default: string;
+  };
+  assert.deepEqual(
+    body.models.map((model) => model.key),
+    [
+      "openai/gpt-6.2-astra",
+      "openai/gpt-6.2-astra-fast",
+      "alibaba-token-plan/qwen4-max",
+    ],
+  );
+  // Duplicate modelID entries keep distinct keys.
+  assert.equal(new Set(body.models.map((model) => model.key)).size, 3);
+  // The default key is built from entry `id`, never `modelID`.
+  assert.equal(body.default, "google/gemini-3");
+  const first = body.models[0];
+  assert.deepEqual(Object.keys(first).sort(), [
+    "context",
+    "enabled",
+    "id",
+    "key",
+    "name",
+    "providerID",
+    "released",
+    "status",
+    "tools",
+    "variantCount",
+  ]);
+  assert.equal(first.status, "active");
+  assert.equal(first.context, 628000);
+  assert.equal(first.released, 1794960000000);
+  assert.equal(first.tools, true);
+  assert.equal(first.variantCount, 2);
+  const json = JSON.stringify(body);
+  for (const banned of ["headers", "settings", "body", "package", "compatibility"]) {
+    assert.equal(json.includes(`"${banned}"`), false, `${banned} must not cross the boundary`);
+  }
+});
+
+test("model catalog degrades to an empty payload while disconnected", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.status.connected = false;
+  runtime.client = null;
+  const result = await call(runtime, "GET", "/api/models");
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, { models: [], default: "" });
+});
+
+test("model keys and default survive redaction with a registered needle", async () => {
+  const { runtime } = runtimeWithProject();
+  // "token" is a needle and a substring of the alibaba provider id; the
+  // projection must rename identifiers to `key` only AFTER redaction.
+  runtime.state.connectionPassword = "token";
+  const result = await call(runtime, "GET", "/api/models");
+  assert.equal(result.status, 200);
+  const body = result.body as { models: { key: string }[]; default: string };
+  assert.deepEqual(
+    body.models.map((model) => model.key),
+    [
+      "openai/gpt-6.2-astra",
+      "openai/gpt-6.2-astra-fast",
+      "alibaba-token-plan/qwen4-max",
+    ],
+  );
+  assert.equal(body.default, "google/gemini-3");
+  assert.equal(JSON.stringify(body).includes('"modelKey"'), false);
 });
 
 test("unavailable OpenCode becomes a recoverable error", async () => {
