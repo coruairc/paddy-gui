@@ -19,7 +19,7 @@
     "paddy": "node bin/paddy.mjs",
     "postinstall": "node scripts/link-cli.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test scripts/install.sh.test.mjs scripts/link-cli.test.mjs scripts/with-app-env.test.mjs scripts/test-list.test.mjs && node --experimental-strip-types --test src/server/security.test.ts src/server/http.test.ts src/server/opencode-client.test.ts src/server/api.test.ts src/server/runtime.test.ts src/server/normalize.test.ts src/server/state.test.ts src/components/autonomous-drink.test.ts src/components/desk/messages.test.ts src/components/desk/models.test.ts src/components/desk/commands.test.ts src/components/desk/panel-size.test.ts src/components/desk/request-gate.test.ts src/components/desk/last-session.test.ts src/components/desk/diff.test.ts src/components/desk/highlight.test.ts",
+    "test": "node --test scripts/install.sh.test.mjs scripts/link-cli.test.mjs scripts/with-app-env.test.mjs scripts/test-list.test.mjs && node --experimental-strip-types --test src/server/security.test.ts src/server/http.test.ts src/server/opencode-client.test.ts src/server/api.test.ts src/server/runtime.test.ts src/server/normalize.test.ts src/server/state.test.ts src/components/autonomous-drink.test.ts src/components/desk/messages.test.ts src/components/desk/models.test.ts src/components/desk/commands.test.ts src/components/desk/panel-size.test.ts src/components/desk/request-gate.test.ts src/components/desk/last-session.test.ts src/components/desk/diff.test.ts src/components/desk/highlight.test.ts src/styles.contrast.test.ts",
     "lint": "eslint .",
     "format": "prettier --write ."
   },
