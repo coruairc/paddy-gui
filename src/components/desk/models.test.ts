@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  canSelectModel,
   filterModels,
+  isSelectableModel,
   flattenGroups,
   groupModelsByProvider,
   humanizeProviderID,
@@ -189,4 +191,23 @@ test("resolveActiveSource keeps session truth over catalog fallback", () => {
   const deskSourced = resolveActiveSource("desk", "openai/not-in-catalog", catalog, "google/gemini-3", true);
   assert.equal(deskSourced.key, "google/gemini-3");
   assert.equal(deskSourced.isStale, true);
+});
+
+test("isSelectableModel blocks only an explicit enabled:false", () => {
+  assert.equal(isSelectableModel({ enabled: true }), true);
+  assert.equal(isSelectableModel({}), true);
+  assert.equal(isSelectableModel({ enabled: false }), false);
+});
+
+test("canSelectModel rejects a disabled catalog entry and allows unknown keys", () => {
+  const models = [
+    { key: "openai/on", enabled: true },
+    { key: "openai/off", enabled: false },
+    { key: "google/legacy" },
+  ];
+  assert.equal(canSelectModel(models, "openai/on"), true);
+  assert.equal(canSelectModel(models, "openai/off"), false);
+  assert.equal(canSelectModel(models, "google/legacy"), true);
+  assert.equal(canSelectModel(models, "openai/unlisted"), true);
+  assert.equal(canSelectModel([], "openai/off"), true);
 });

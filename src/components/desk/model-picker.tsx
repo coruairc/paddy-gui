@@ -18,6 +18,7 @@ import {
   filterModels,
   flattenGroups,
   groupModelsByProvider,
+  isSelectableModel,
   modelSlug,
   nextActiveIndex,
   type ActiveModel,
@@ -163,7 +164,7 @@ export function ModelPicker({
     } else if (event.key === "Enter") {
       event.preventDefault();
       const model = flat[activeIndex];
-      if (model) {
+      if (model && isSelectableModel(model)) {
         onSelect(model.key);
         closeToComposerOrTrigger();
       }
@@ -332,6 +333,7 @@ export function ModelPicker({
                             isDefault={model.key === defaultKey}
                             isActive={index === activeIndex}
                             onSelect={() => {
+                              if (!isSelectableModel(model)) return;
                               onSelect(model.key);
                               closeToComposerOrTrigger();
                             }}
@@ -408,27 +410,32 @@ function OptionRow({
   const context = model.context > 0 ? `${formatTokens(model.context)} context` : "context unknown";
   const released = formatRelease(model.released) ?? "release unknown";
   const deprecated = model.status === "deprecated";
+  const disabled = !isSelectableModel(model);
   return (
     <div
       role="option"
       id={`model-option-${modelSlug(model.key)}`}
       aria-selected={selected}
+      aria-disabled={disabled || undefined}
       tabIndex={-1}
       data-model-option={model.key}
       data-active={isActive ? "true" : "false"}
-      className={`flex min-h-11 cursor-pointer flex-col justify-center gap-1 border-l-2 px-3 py-2 transition-colors ${
-        isActive ? "border-accent bg-surface" : "border-transparent hover:bg-surface"
-      }`}
+      data-disabled={disabled ? "true" : undefined}
+      title={disabled ? "Disabled in OpenCode" : undefined}
+      className={`flex min-h-11 flex-col justify-center gap-1 border-l-2 px-3 py-2 transition-colors ${
+        disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+      } ${isActive ? "border-accent bg-surface" : "border-transparent hover:bg-surface"}`}
       onClick={onSelect}
       onMouseMove={onHover}
     >
       <span className="flex min-w-0 items-center gap-2">
         <span
-          className={`min-w-0 flex-1 truncate text-sm leading-normal ${deprecated ? "text-muted" : "text-fg"}`}
+          className={`min-w-0 flex-1 truncate text-sm leading-normal ${deprecated || disabled ? "text-muted" : "text-fg"}`}
           title={model.name || model.id}
         >
           {model.name || model.id}
         </span>
+        {disabled && <Badge variant="default">Disabled</Badge>}
         {isDefault && <Badge variant="default">Default</Badge>}
         {selected && <Check className="size-3.5 text-accent" aria-hidden />}
       </span>

@@ -21,6 +21,24 @@ export function parseModelKey(key: string): { providerID: string; id: string } |
   return { providerID: key.slice(0, index), id: key.slice(index + 1) };
 }
 
+/**
+ * `/api/models` projects OpenCode's `enabled` flag (absent upstream means
+ * enabled). A model explicitly reported `enabled: false` cannot be chosen.
+ */
+export function isSelectableModel(model: { enabled?: boolean }): boolean {
+  return model.enabled !== false;
+}
+
+/**
+ * Whether `key` may be applied as the desk model. Only a catalog entry that
+ * says `enabled: false` blocks it; a key the catalog does not list (or an
+ * unloaded catalog) is not proof of anything.
+ */
+export function canSelectModel(models: readonly { key: string; enabled?: boolean }[], key: string): boolean {
+  const match = models.find((model) => model.key === key);
+  return match ? isSelectableModel(match) : true;
+}
+
 /** DOM-id-safe slug for element ids (model ids may contain `/`). */
 export function modelSlug(key: string): string {
   return key.replace(/[^A-Za-z0-9_-]/g, "_");

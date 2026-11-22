@@ -8,7 +8,7 @@ import { SettingsPanel } from "@/components/desk/settings";
 import { ModelPicker } from "@/components/desk/model-picker";
 import { CommandPalette } from "@/components/desk/command-palette";
 import { filterCommands, nextCommandIndex, parseCommandInput, shouldAutoLoadCommands } from "@/components/desk/commands";
-import { modelForSend, resolveActiveSource, resolveHeaderModel } from "@/components/desk/models";
+import { canSelectModel, modelForSend, resolveActiveSource, resolveHeaderModel } from "@/components/desk/models";
 import { ResizeHandle } from "@/components/desk/resize-handle";
 import { createRequestGate } from "@/components/desk/request-gate";
 import { usePanelWidths } from "@/components/desk/use-panel-widths";
@@ -34,6 +34,7 @@ import {
   upsertSession,
 } from "./messages";
 import {
+  ApiError,
   api,
   type ActivityItem,
   type Bootstrap,
@@ -92,6 +93,7 @@ export function DeskApp() {
   // newer retry) is dropped instead of showing another project's list.
   const [modelGate] = useState(createRequestGate);
   const [commandGate] = useState(createRequestGate);
+  const [modelSaveGate] = useState(createRequestGate);
   const [agent, setAgent] = useState("");
   const [agents, setAgents] = useState<string[]>([]);
   const [stick, setStick] = useState(true);
@@ -333,10 +335,24 @@ export function DeskApp() {
   }
 
   function chooseModel(key: string) {
+    if (!canSelectModel(catalog?.models ?? [], key)) {
+      setModelNote("That model is disabled in OpenCode.");
+      return;
+    }
+    const previous = { model, source: modelSource };
+    const ticket = modelSaveGate.begin();
     setModel(key);
     setModelSource("desk");
     setModelNote(null);
-    void api.settings({ deskModel: key }).catch(() => {
+    void api.settings({ deskModel: key }).catch((err: unknown) => {
+      if (!modelSaveGate.isCurrent(ticket)) return; // a newer choice owns the header
+      if (err instanceof ApiError && err.status === 400) {
+        // The server refused the key (e.g. disabled since the catalog loaded): do not send with it.
+        setModel(previous.model);
+        setModelSource(previous.source);
+        setModelNote(err.message);
+        return;
+      }
       setModelNote("Model saved for this turn only — it will not survive a reload.");
     });
   }
