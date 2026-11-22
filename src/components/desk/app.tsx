@@ -10,6 +10,7 @@ import { CommandPalette } from "@/components/desk/command-palette";
 import { filterCommands, nextCommandIndex, parseCommandInput, shouldAutoLoadCommands } from "@/components/desk/commands";
 import { modelForSend, resolveActiveSource, resolveHeaderModel } from "@/components/desk/models";
 import { ResizeHandle } from "@/components/desk/resize-handle";
+import { createRequestGate } from "@/components/desk/request-gate";
 import { usePanelWidths } from "@/components/desk/use-panel-widths";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -79,6 +80,10 @@ export function DeskApp() {
   const commandTurnRef = useRef(false);
   const commandRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadCommandsRef = useRef<() => Promise<void>>(async () => {});
+  // Per-catalog request gates: a response from before a project switch (or a
+  // newer retry) is dropped instead of showing another project's list.
+  const [modelGate] = useState(createRequestGate);
+  const [commandGate] = useState(createRequestGate);
   const [agent, setAgent] = useState("");
   const [agents, setAgents] = useState<string[]>([]);
   const [stick, setStick] = useState(true);
@@ -298,15 +303,19 @@ export function DeskApp() {
       setModelLoading(false);
       return;
     }
+    const ticket = modelGate.begin();
     setModelLoading(true);
     try {
       const data = await api.models();
+      if (!modelGate.isCurrent(ticket)) return;
       setCatalog({ models: data.models, default: data.default, fetchedAt: Date.now() });
       setModelLoadError(null);
     } catch (err) {
+      if (!modelGate.isCurrent(ticket)) return;
       setModelLoadError(err instanceof Error ? err.message : "Could not load models");
     } finally {
-      setModelLoading(false);
+      // A stale request leaves the flag to the current one (or to the reset on switch).
+      if (modelGate.isCurrent(ticket)) setModelLoading(false);
     }
   }
 
@@ -320,15 +329,18 @@ export function DeskApp() {
   }
 
   async function loadCommands() {
+    const ticket = commandGate.begin();
     setCommandLoading(true);
     try {
       const data = await api.commands();
+      if (!commandGate.isCurrent(ticket)) return;
       setCommandCatalog(data.commands);
       setCommandLoadError(null);
     } catch (err) {
+      if (!commandGate.isCurrent(ticket)) return;
       setCommandLoadError(err instanceof Error ? err.message : "Could not load commands");
     } finally {
-      setCommandLoading(false);
+      if (commandGate.isCurrent(ticket)) setCommandLoading(false);
     }
   }
   loadCommandsRef.current = loadCommands;
@@ -414,11 +426,16 @@ export function DeskApp() {
     setActiveProjectId(id);
     setSessionId(null);
     setMessages([]);
-    // Commands and models are fetched per project directory.
+    // Commands and models are fetched per project directory. Drop any request
+    // still in flight for the old project and clear its loading flag.
+    commandGate.invalidate();
+    modelGate.invalidate();
     setCommandCatalog(null);
     setCommandLoadError(null);
+    setCommandLoading(false);
     setCatalog(null);
     setModelLoadError(null);
+    setModelLoading(false);
     setFiles([]);
     setSettingsOpen(false);
     setStick(true);
@@ -532,6 +549,7 @@ export function DeskApp() {
       return;
     }
     if (!id) return;
+    pendingCommandRef.current = null;
     settledCommandRef.current = null;
     const tempId = `local_${Date.now()}`;
     setMessages((current) => [
@@ -728,7 +746,7 @@ export function DeskApp() {
                     const title = window.prompt("Rename chat", active.title);
                     if (title?.trim()) void api.renameSession(active.id, title.trim()).then(() => refreshSessions());
                   }}>Rename</button>
-                  <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => void api.archiveSession(active.id, true).then(() => { setSessionId(null); setMessages([]); return refreshSessions(); })}>Archive</button>
+                  <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => void api.archiveSession(active.id, true).then(() => { resetCommandTurn(); setSessionId(null); setMessages([]); return refreshSessions(); })}>Archive</button>
                 </div>
               )}
             </div>

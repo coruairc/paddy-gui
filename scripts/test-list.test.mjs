@@ -9,7 +9,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 function testFiles(dir) {
   return readdirSync(join(root, dir), { recursive: true })
     .map((entry) => join(dir, String(entry)).split("\\").join("/"))
-    .filter((path) => /\.test\.(ts|mjs)$/.test(path))
+    .filter((path) => /\.test\.(ts|tsx|mjs|js)$/.test(path))
     .sort();
 }
 
@@ -18,4 +18,9 @@ test("npm test runs every test file in src/ and scripts/", () => {
   const listed = new Set(script.split(/\s+/));
   const missing = [...testFiles("src"), ...testFiles("scripts")].filter((path) => !listed.has(path));
   assert.deepEqual(missing, [], `add these to the "test" script in package.json: ${missing.join(", ")}`);
+});
+
+test("the test-list guard itself is in the npm test script", () => {
+  const script = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).scripts.test;
+  assert.ok(script.split(/\s+/).includes("scripts/test-list.test.mjs"), "keep scripts/test-list.test.mjs in the test script");
 });
