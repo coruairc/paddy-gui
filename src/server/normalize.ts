@@ -23,6 +23,8 @@ export type ChatMessage = {
   error?: string;
   activity: ActivityItem[];
   pending?: boolean;
+  /** Project-relative paths this assistant step changed (v2 `snapshot.files`). */
+  files?: string[];
 };
 
 export type SessionSummary = {
@@ -38,12 +40,22 @@ export type SessionSummary = {
   model?: string;
 };
 
+export type DiffFileStatus = "added" | "modified" | "deleted";
+
 export type DiffFile = {
   file: string;
   additions: number;
   deletions: number;
   patch: string;
+  status: DiffFileStatus;
+  /** Git reported a binary change: there are no text lines to show. */
+  binary: boolean;
+  /** The patch was cut at MAX_PATCH_CHARS (or OpenCode flagged `more`). */
+  truncated: boolean;
 };
+
+/** Per-file patch cap so one huge generated file can't stall the browser. */
+export const MAX_PATCH_CHARS = 400_000;
 
 export type PermissionPrompt = {
   id: string;
@@ -63,6 +75,7 @@ export type GuiEvent =
   | { type: "session-deleted"; id: string }
   | { type: "status"; sessionId: string; state: "idle" | "working" | "retry" | "error"; detail?: string }
   | { type: "diff"; sessionId: string; files: DiffFile[] }
+  | { type: "step-files"; sessionId: string; messageId: string; files: string[] }
   | { type: "model-selected"; sessionId: string; model: string }
   | { type: "commands-updated" }
   | { type: "error"; message: string; sessionId?: string }
@@ -125,6 +138,7 @@ export function toChatMessage(message: OpenCodeMessage): ChatMessage {
           .trim()
       : (message.text ?? "").trim();
   const activity = parts.filter((part) => part.type === "tool").map(toActivity);
+  const files = role === "assistant" ? stepFiles(message.snapshot?.files) : [];
   return {
     id: message.id,
     role,
@@ -132,6 +146,7 @@ export function toChatMessage(message: OpenCodeMessage): ChatMessage {
     created: message.time?.created ?? Date.now(),
     error: messageError(message.error),
     activity,
+    ...(files.length ? { files } : {}),
   };
 }
 
@@ -232,6 +247,12 @@ export function normalizeEvent(raw: unknown): GuiEvent | null {
     }
     return { type: "status", sessionId, state: "idle" };
   }
+  if (type === "session.step.ended") {
+    const messageId = text(data.assistantMessageID);
+    const files = stepFiles(data.files);
+    return sessionId && messageId && files.length ? { type: "step-files", sessionId, messageId, files } : null;
+  }
+
   if (type === "session.idle") {
     return sessionId ? { type: "status", sessionId, state: "idle" } : null;
   }
@@ -390,18 +411,96 @@ export function normalizeEvent(raw: unknown): GuiEvent | null {
   return null;
 }
 
-export function toDiffFile(raw: unknown): DiffFile {
-  const item = (raw ?? {}) as Record<string, unknown>;
-  const file = String(item.file ?? item.path ?? "file");
+/** Relative paths only, de-duplicated, bounded: anything else in the payload is dropped. */
+export function stepFiles(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string" || !item || item.length > 1024 || out.includes(item)) continue;
+    out.push(item);
+    if (out.length >= 500) break;
+  }
+  return out;
+}
+
+const BINARY_PATCH = /^(?:Binary files .* differ|GIT binary patch)$/m;
+
+/** Upper bound on patch text in one diff response; files past it keep counts/status only. */
+export const MAX_DIFF_TOTAL_CHARS = 5_000_000;
+/** Secrets shorter than this are not substring-masked (too likely to hit ordinary code). */
+export const MIN_MASKED_SECRET_CHARS = 16;
+/** If cutting at the last newline would drop more than this, keep the cut line, shortened. */
+const PARTIAL_LINE_MIN = 1000;
+
+/** Replace every occurrence of each long-enough secret anywhere in `text`. */
+export function maskSecrets(text: string, secrets: readonly string[]): string {
+  let out = text;
+  for (const secret of secrets) {
+    if (secret.length >= MIN_MASKED_SECRET_CHARS && out.includes(secret)) out = out.split(secret).join("[redacted]");
+  }
+  return out;
+}
+
+function capPatch(full: string): string {
+  if (full.length <= MAX_PATCH_CHARS) return full;
+  const end = full.lastIndexOf("\n", MAX_PATCH_CHARS - 1) + 1;
+  // One enormous line (minified output): show its start instead of an empty hunk.
+  if (MAX_PATCH_CHARS - end > PARTIAL_LINE_MIN) return full.slice(0, MAX_PATCH_CHARS - 2) + "…\n";
+  return full.slice(0, end);
+}
+
+/**
+ * Validate one v2 `FileDiff.Info` (file, patch, additions, deletions, status,
+ * more) at the boundary. v1-style `{before, after}` entries are still accepted.
+ * `secrets` are masked in the path and patch text before any cut, so a cap
+ * can never split one and leak its prefix.
+ */
+export function toDiffFile(raw: unknown, secrets: readonly string[] = []): DiffFile {
+  const item = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const file = clipPath(maskSecrets(String(item.file ?? item.path ?? "file"), secrets));
   const before = typeof item.before === "string" ? item.before : "";
   const after = typeof item.after === "string" ? item.after : "";
-  const patch = typeof item.patch === "string" ? item.patch : unified(before, after, file);
+  const full = maskSecrets(typeof item.patch === "string" ? item.patch : unified(before, after, file), secrets);
+  const patch = capPatch(full);
   return {
     file,
-    additions: numberField(item.additions) || countPrefix(patch, "+"),
-    deletions: numberField(item.deletions) || countPrefix(patch, "-"),
+    additions: numberField(item.additions) || countPrefix(full, "+"),
+    deletions: numberField(item.deletions) || countPrefix(full, "-"),
     patch,
+    status: diffStatus(item.status, full, before, after),
+    binary: BINARY_PATCH.test(full),
+    truncated: patch.length < full.length || item.more === true,
   };
+}
+
+/**
+ * A whole diff response: every file normalized and masked, and patch text
+ * bounded by MAX_DIFF_TOTAL_CHARS. Once the budget is spent the remaining
+ * files keep file/status/counts with an empty patch and `truncated: true`.
+ */
+export function toDiffFiles(raw: unknown, secrets: readonly string[] = []): DiffFile[] {
+  if (!Array.isArray(raw)) return [];
+  let budget = MAX_DIFF_TOTAL_CHARS;
+  return raw.map((item) => {
+    const file = toDiffFile(item, secrets);
+    if (file.patch.length <= budget) {
+      budget -= file.patch.length;
+      return file;
+    }
+    budget = 0;
+    return { ...file, patch: "", truncated: true };
+  });
+}
+
+function diffStatus(raw: unknown, patch: string, before: string, after: string): DiffFileStatus {
+  if (raw === "added" || raw === "modified" || raw === "deleted") return raw;
+  if (/^new file mode /m.test(patch) || /^--- \/dev\/null$/m.test(patch) || (!before && after)) return "added";
+  if (/^deleted file mode /m.test(patch) || /^\+\+\+ \/dev\/null$/m.test(patch) || (before && !after)) return "deleted";
+  return "modified";
+}
+
+function clipPath(path: string): string {
+  return path.length > 1024 ? path.slice(0, 1024) : path;
 }
 
 export function groupSessionsByDate(sessions: SessionSummary[], now = Date.now()): { label: string; items: SessionSummary[] }[] {
@@ -499,7 +598,8 @@ function formatDay(at: number): string {
 }
 
 function countPrefix(patch: string, prefix: string): number {
-  return patch.split("\n").filter((line) => line.startsWith(prefix) && !line.startsWith(prefix + prefix)).length;
+  // Header lines (`--- a/x`, `+++ b/x`) are not changes.
+  return patch.split("\n").filter((line) => line.startsWith(prefix) && !line.startsWith(prefix.repeat(3))).length;
 }
 
 /** Small line diff so the GUI can show changes without a second diff engine. */

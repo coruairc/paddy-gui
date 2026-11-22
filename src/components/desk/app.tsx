@@ -12,6 +12,8 @@ import { canSelectModel, modelForSend, modelSaveFailure, resolveActiveSource, re
 import { ResizeHandle } from "@/components/desk/resize-handle";
 import { createRequestGate, runLatest } from "@/components/desk/request-gate";
 import { usePanelWidths } from "@/components/desk/use-panel-widths";
+import { ChangesPanel, FilesChangedBlock } from "@/components/desk/files-changed";
+import { createTurnTracker, mergeStepFiles, turnFiles } from "@/components/desk/diff";
 import {
   belongsToProject,
   browserStorage,
@@ -110,7 +112,22 @@ export function DeskApp() {
   const [agents, setAgents] = useState<string[]>([]);
   const [stick, setStick] = useState(true);
   const [showJump, setShowJump] = useState(false);
-  const [selectedDiff, setSelectedDiff] = useState<string | null>(null);
+  /** Latest-turn diff refresh for the inspector (on idle, or Retry). */
+  const [filesGate] = useState(createRequestGate);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [filesError, setFilesError] = useState<string | null>(null);
+  /** Bumped once per finished turn, so an expanded "Files changed" block refetches its turn. */
+  const [turnEpoch, setTurnEpoch] = useState(0);
+  /** One turn end per turn, even when execution.succeeded and session.idle both arrive. */
+  const [turnTracker] = useState(createTurnTracker);
+  /** Expanded "Files changed" blocks by turn ordinal; survives re-anchoring during a live turn. */
+  const [expandedTurns, setExpandedTurns] = useState<ReadonlySet<number>>(() => new Set());
+  /** Inspector tab, readable from the event handler without re-subscribing. */
+  const inspectorRef = useRef<"work" | "changes">("work");
+  /** The latest-turn diff changed while the Changes tab was hidden: fetch when it opens. */
+  const filesStaleRef = useRef(false);
+  /** step-files can arrive before the assistant message it names; hold them until it does. */
+  const stepFilesRef = useRef(new Map<string, string[]>());
   const bottom = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const sessionRef = useRef<string | null>(null);
@@ -179,6 +196,7 @@ export function DeskApp() {
       const current = sessionRef.current;
       if (current && event.sessionId && current !== event.sessionId) return;
       setWorking(event.state === "working" || event.state === "retry");
+      if (event.state === "working" || event.state === "retry") turnTracker.busy();
       if ((event.state === "error" || event.state === "idle") && pendingCommandRef.current) {
         const tempId = pendingCommandRef.current;
         pendingCommandRef.current = null;
@@ -204,6 +222,12 @@ export function DeskApp() {
       if (event.state === "idle") {
         commandTurnRef.current = false;
         setWorking(false);
+        if (current && turnTracker.idle()) {
+          setTurnEpoch((value) => value + 1);
+          // Only pay for the latest-turn diff when someone is looking at it.
+          if (inspectorRef.current === "changes") refreshLatestFiles(current);
+          else filesStaleRef.current = true;
+        }
       }
       return;
     }
@@ -212,12 +236,21 @@ export function DeskApp() {
       return;
     }
     if (!sessionRef.current || ("sessionId" in event && event.sessionId !== sessionRef.current)) return;
+    if (event.type === "step-files") {
+      const held = stepFilesRef.current.get(event.messageId) ?? [];
+      stepFilesRef.current.set(event.messageId, [...held, ...event.files.filter((file) => !held.includes(file))]);
+      setMessages((list) => mergeStepFiles(list, event.messageId, event.files));
+      turnTracker.busy();
+      return;
+    }
     if (event.type === "text-delta") {
       setMessages((list) => appendDelta(list, event.messageId, event.delta));
       setWorking(true);
+      turnTracker.busy();
     } else if (event.type === "activity") {
       setMessages((list) => upsertActivity(list, event.messageId, event.item));
       setWorking(true);
+      turnTracker.busy();
       setInspector("work");
     } else if (event.type === "message") {
       const tempId =
@@ -230,9 +263,41 @@ export function DeskApp() {
         setMessages((list) => replacePendingEcho(list, tempId, event.message));
         return;
       }
-      setMessages((list) => mergeMessage(list, event.message));
+      const held = stepFilesRef.current.get(event.message.id);
+      setMessages((list) => {
+        const merged = mergeMessage(list, event.message);
+        return held ? mergeStepFiles(merged, event.message.id, held) : merged;
+      });
     }
+    // refreshLatestFiles only touches refs, stable setters and a stable gate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openTarget]);
+
+  // Track the visible tab for the event handler; catch up on a diff that went stale while hidden.
+  useEffect(() => {
+    inspectorRef.current = inspector;
+    if (inspector === "changes" && filesStaleRef.current && sessionId) {
+      filesStaleRef.current = false;
+      refreshLatestFiles(sessionId);
+    }
+    // refreshLatestFiles only touches refs, stable setters and a stable gate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inspector, sessionId]);
+
+  function refreshLatestFiles(id: string) {
+    filesStaleRef.current = false;
+    setFilesLoading(true);
+    setFilesError(null);
+    void runLatest(filesGate, () => api.diff(id), {
+      onData: (data) => {
+        if (sessionRef.current === id) setFiles(data.files);
+      },
+      onError: (err) => {
+        if (sessionRef.current === id) setFilesError(err instanceof Error ? err.message : "Could not load changes");
+      },
+      onSettled: () => setFilesLoading(false),
+    }).catch(() => setFilesLoading(false));
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -260,7 +325,7 @@ export function DeskApp() {
         // An id not found on a truncated first page is confirmed by the direct fetch in openSession.
         const projectPath = data.projects.find((item) => item.id === data.activeProjectId)?.path;
         setLoadingSession(true);
-        void openSession(resume.id, data.activeProjectId, resume.verify ? projectPath : undefined).finally(() =>
+        void openSessionOrReport(resume.id, data.activeProjectId, resume.verify ? projectPath : undefined).finally(() =>
           setLoadingSession(false),
         );
       }
@@ -309,6 +374,7 @@ export function DeskApp() {
       opening: openingSessionId,
     }).kind !== "go";
   const liveActivity = messages.flatMap((message) => message.activity).slice(-8);
+  const turns = useMemo(() => turnFiles(messages), [messages]);
   const catalogLoaded = catalog !== null;
   const commandQuery = draft.startsWith("/") ? draft.slice(1) : null;
   const paletteOpen = commandQuery !== null && !commandDismissed;
@@ -491,6 +557,8 @@ export function DeskApp() {
     setModelLoadError(null);
     setModelLoading(false);
     setFiles([]);
+    setExpandedTurns(new Set());
+    turnTracker.reset();
     setSettingsOpen(false);
     setStick(true);
     const data = await api.sessions();
@@ -516,6 +584,13 @@ export function DeskApp() {
     setSettingsOpen(false);
     resetCommandTurn();
     setMessages(dropPendingBubbles);
+    filesGate.invalidate();
+    setFilesLoading(false);
+    setFilesError(null);
+    stepFilesRef.current.clear();
+    turnTracker.reset();
+    filesStaleRef.current = false;
+    setExpandedTurns(new Set());
     // Shown as selected right away, but not reusable by a send until the server confirms it.
     confirmedSessionRef.current = null;
     setSessionId(id);
@@ -563,6 +638,19 @@ export function DeskApp() {
     });
   }
 
+  /**
+   * For fire-and-forget callers. runLatest lets a bug in onData reject; report it
+   * on the chat that hit it (never on one the user has moved to) so it can't sit
+   * on "Still opening…" or fail silently.
+   */
+  function openSessionOrReport(id: string, projectId?: string | null, expectDirectory?: string): Promise<void> {
+    return openSession(id, projectId === undefined ? activeProjectId : projectId, expectDirectory).catch((err: unknown) => {
+      if (sessionRef.current !== id) return;
+      setOpeningSessionId(null);
+      setError(err instanceof Error ? err.message : "Could not open that chat");
+    });
+  }
+
   async function newChat() {
     if (creatingChat) return;
     setCreatingChat(true);
@@ -581,6 +669,8 @@ export function DeskApp() {
       setSessionId(created.session.id);
       setMessages([]);
       setFiles([]);
+      setExpandedTurns(new Set());
+      turnTracker.reset();
       setPrompts([]);
       setWorking(false);
       rememberSession(browserStorage(), targetProject.id, created.session.id);
@@ -737,7 +827,7 @@ export function DeskApp() {
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => void openSession(item.id)}
+                    onClick={() => void openSessionOrReport(item.id)}
                     className={cn(
                       "flex h-9 w-full items-center rounded-xl px-2.5 text-left text-sm transition-colors",
                       item.id === sessionId && !settingsOpen ? "bg-elevated text-fg" : "text-muted hover:bg-surface hover:text-fg",
@@ -842,6 +932,9 @@ export function DeskApp() {
                         setMessages([]);
                       }
                       return refreshSessions();
+                    }).catch((err: unknown) => {
+                      // Only the chat being archived shows the failure; the user may have moved on.
+                      if (sessionRef.current === archivedId) setError(err instanceof Error ? err.message : "Could not archive that chat");
                     });
                   }}>Archive</button>
                 </div>
@@ -888,9 +981,35 @@ export function DeskApp() {
                     <PaddyIdle name="Paddy" busy={working} />
                   ) : (
                     <div className="mx-auto flex max-w-2xl flex-col gap-6">
-                      {messages.map((message) => (
-                        <MessageView key={message.id} message={message} />
-                      ))}
+                      {messages.map((message) => {
+                        const turn = sessionId ? turns.get(message.id) : undefined;
+                        const turnKey = turn?.turn ?? -1;
+                        return (
+                          <div key={message.id}>
+                            <MessageView message={message} />
+                            {turn && sessionId && (
+                              <div className="pl-10">
+                                <FilesChangedBlock
+                                  key={`${sessionId}:t${turnKey}`}
+                                  sessionId={sessionId}
+                                  from={turn.from}
+                                  paths={turn.files}
+                                  version={`${turn.files.length}:${turnEpoch}`}
+                                  open={expandedTurns.has(turnKey)}
+                                  onOpenChange={(open) =>
+                                    setExpandedTurns((current) => {
+                                      const next = new Set(current);
+                                      if (open) next.add(turnKey);
+                                      else next.delete(turnKey);
+                                      return next;
+                                    })
+                                  }
+                                />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                       {prompts.map((item) => (
                         <PermissionCard key={item.id} prompt={item} onReply={(decision, message) => reply(item, decision, message)} />
                       ))}
@@ -1128,12 +1247,12 @@ export function DeskApp() {
                   {inspector === "work" ? (
                     <WorkList items={liveActivity} working={working} />
                   ) : (
-                    <ChangesList
+                    <ChangesPanel
                       files={files}
-                      selected={selectedDiff}
-                      onSelect={(file) => {
-                        setSelectedDiff(file);
-                        setInspector("changes");
+                      loading={filesLoading}
+                      error={filesError}
+                      onRetry={() => {
+                        if (sessionId) refreshLatestFiles(sessionId);
                       }}
                     />
                   )}
@@ -1330,39 +1449,6 @@ function WorkList({ items, working }: { items: ActivityItem[]; working: boolean 
         </li>
       ))}
     </ol>
-  );
-}
-
-function ChangesList({ files, selected, onSelect }: { files: DiffFile[]; selected: string | null; onSelect: (file: string) => void }) {
-  if (!files.length) return <p className="p-2 text-sm text-muted">No file changes yet.</p>;
-  const file = files.find((item) => item.file === selected) ?? files[0];
-  return (
-    <div className="space-y-2">
-      <p className="px-1 text-[11px] text-muted">{files.length} file{files.length === 1 ? "" : "s"} changed</p>
-      {files.map((item) => (
-        <button
-          key={item.file}
-          type="button"
-          onClick={() => onSelect(item.file)}
-          className={cn("flex w-full items-center justify-between gap-2 rounded-lg bg-bg px-3 py-2 text-left", item.file === file?.file && "shadow-[var(--shadow-border)]")}
-        >
-          <span className="truncate font-mono text-xs text-fg">{item.file}</span>
-          <span className="shrink-0 font-mono text-[10px] text-subtle">+{item.additions} −{item.deletions}</span>
-        </button>
-      ))}
-      {file && (
-        <pre className="max-h-80 overflow-auto rounded-lg bg-bg p-3 font-mono text-[11px] leading-relaxed">
-          {file.patch.split("\n").map((line, index) => (
-            <div key={index} className={cn(line.startsWith("+") && "text-ok", line.startsWith("-") && "text-danger")}>{line || " "}</div>
-          ))}
-        </pre>
-      )}
-      {file && (
-        <Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(file.patch)}>
-          Copy diff
-        </Button>
-      )}
-    </div>
   );
 }
 

@@ -7,6 +7,11 @@ import {
   toChatMessage,
   toChatMessages,
   toDiffFile,
+  stepFiles,
+  maskSecrets,
+  toDiffFiles,
+  MAX_DIFF_TOTAL_CHARS,
+  MAX_PATCH_CHARS,
 } from "./normalize.ts";
 
 test("sessions group into today and yesterday", () => {
@@ -294,4 +299,118 @@ test("partial or non-user inbox events are dropped", () => {
     normalizeEvent({ ...base, data: { ...base.data, item: { type: "user", payload: {} } } }),
     null,
   );
+});
+
+// Shape copied from a real OpenCode v2.3.2 `GET /api/session/:id/diff?context=3` response.
+const V2_MODIFIED = {
+  file: "src/server/state.ts",
+  patch:
+    "diff --git a/src/server/state.ts b/src/server/state.ts\nindex ae12613..a5ce3f9 100644\n--- a/src/server/state.ts\n+++ b/src/server/state.ts\n@@ -30,6 +30,8 @@ export type AppState = {\n   connectionPassword: string;\n+  deskModel: string;\n+  extra: string;\n   ownedServerPassword: string;\n",
+  additions: 2,
+  deletions: 0,
+  status: "modified",
+};
+
+test("toDiffFile keeps the v2 FileDiff.Info fields", () => {
+  const file = toDiffFile(V2_MODIFIED);
+  assert.equal(file.file, "src/server/state.ts");
+  assert.equal(file.status, "modified");
+  assert.equal(file.additions, 2);
+  assert.equal(file.deletions, 0);
+  assert.equal(file.binary, false);
+  assert.equal(file.truncated, false);
+  assert.equal(file.patch, V2_MODIFIED.patch);
+});
+
+test("toDiffFile infers status from git headers when OpenCode omits or garbles it", () => {
+  const added = toDiffFile({ file: "a.ts", patch: "diff --git a/a.ts b/a.ts\nnew file mode 100644\n--- /dev/null\n+++ b/a.ts\n@@ -0,0 +1 @@\n+x\n", status: "weird" });
+  assert.equal(added.status, "added");
+  assert.equal(added.additions, 1, "the +++ header is not counted");
+  const deleted = toDiffFile({ file: "b.ts", patch: "deleted file mode 100644\n--- a/b.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-y\n" });
+  assert.equal(deleted.status, "deleted");
+  assert.equal(deleted.deletions, 1);
+  assert.equal(toDiffFile({ file: "c.ts", patch: "@@ -1 +1 @@\n-a\n+b\n" }).status, "modified");
+});
+
+test("toDiffFile flags binary patches and OpenCode's `more`", () => {
+  const binary = toDiffFile({ file: "logo.png", patch: "diff --git a/logo.png b/logo.png\nBinary files a/logo.png and b/logo.png differ\n", additions: 0, deletions: 0, status: "modified" });
+  assert.equal(binary.binary, true);
+  assert.equal(toDiffFile({ ...V2_MODIFIED, more: true }).truncated, true);
+});
+
+test("toDiffFile caps an oversized patch on a line boundary and marks it truncated", () => {
+  const line = "+" + "x".repeat(99) + "\n";
+  const patch = "@@ -0,0 +1,9999 @@\n" + line.repeat(Math.ceil(MAX_PATCH_CHARS / line.length) + 50);
+  const file = toDiffFile({ file: "big.txt", patch, additions: 9999, deletions: 0, status: "added" });
+  assert.equal(file.truncated, true);
+  assert.ok(file.patch.length <= MAX_PATCH_CHARS);
+  assert.ok(file.patch.endsWith("\n"));
+  assert.equal(file.additions, 9999, "counts come from OpenCode, not the cut patch");
+});
+
+test("toDiffFile survives junk input", () => {
+  const file = toDiffFile(null);
+  assert.equal(file.file, "file");
+  assert.equal(file.patch, "");
+  assert.equal(file.status, "modified");
+  assert.equal(toDiffFile({ file: "x".repeat(5000), patch: 42 }).file.length, 1024);
+});
+
+test("assistant messages carry snapshot.files; other shapes are dropped", () => {
+  const message = toChatMessage({
+    id: "msg_a",
+    type: "assistant",
+    content: [],
+    snapshot: { start: "s1", end: "s2", files: ["src/a.ts", "src/a.ts", 7, "", "src/b.ts"] },
+  });
+  assert.deepEqual(message.files, ["src/a.ts", "src/b.ts"]);
+  const none = toChatMessage({ id: "msg_b", type: "assistant", content: [], snapshot: { start: "s", end: "s", files: [] } });
+  assert.equal("files" in none, false);
+  assert.equal("files" in toChatMessage({ id: "msg_u", type: "user", text: "hi" }), false);
+  assert.deepEqual(stepFiles("src/a.ts"), []);
+});
+
+test("session.step.ended becomes step-files only when files changed", () => {
+  const event = normalizeEvent({
+    type: "session.step.ended",
+    data: { sessionID: "ses_1", assistantMessageID: "msg_a", finish: "tool-calls", files: ["src/a.ts"] },
+  });
+  assert.deepEqual(event, { type: "step-files", sessionId: "ses_1", messageId: "msg_a", files: ["src/a.ts"] });
+  assert.equal(normalizeEvent({ type: "session.step.ended", data: { sessionID: "ses_1", assistantMessageID: "msg_a", files: [] } }), null);
+});
+
+test("one enormous line is shortened, not dropped down to the hunk header", () => {
+  const patch = "@@ -1 +1 @@\n-old\n+" + "m".repeat(MAX_PATCH_CHARS * 2) + "\n";
+  const file = toDiffFile({ file: "dist/app.min.js", patch, additions: 1, deletions: 1, status: "modified" });
+  assert.equal(file.truncated, true);
+  assert.ok(file.patch.length <= MAX_PATCH_CHARS);
+  const lines = file.patch.split("\n");
+  assert.equal(lines[1], "-old");
+  assert.ok(lines[2].startsWith("+mmmm") && lines[2].endsWith("…"));
+  assert.ok(lines[2].length > MAX_PATCH_CHARS - 100);
+});
+
+test("maskSecrets replaces every occurrence of long secrets and ignores short ones", () => {
+  const pw = "ocw_" + "k".repeat(40);
+  assert.equal(maskSecrets(`a${pw}b ${pw}`, [pw]), "a[redacted]b [redacted]");
+  assert.equal(maskSecrets("token=short123", ["short123"]), "token=short123");
+  assert.equal(maskSecrets("nothing here", [pw, ""]), "nothing here");
+});
+
+test("masking happens before the per-file cap so a cut never leaks a secret prefix", () => {
+  const pw = "ocw_" + "s".repeat(60);
+  const prefix = "@@ -0,0 +1 @@\n+" + "z".repeat(MAX_PATCH_CHARS - 40);
+  const file = toDiffFile({ file: "x.txt", patch: prefix + pw + "\n", status: "added" }, [pw]);
+  assert.equal(file.patch.includes("ocw_"), false);
+  assert.equal(file.patch.includes("ssss"), false);
+});
+
+test("toDiffFiles spends the total budget in order and blanks the rest", () => {
+  const chunk = "@@ -0,0 +1 @@\n+" + "a".repeat(MAX_PATCH_CHARS - 20) + "\n";
+  const count = Math.ceil(MAX_DIFF_TOTAL_CHARS / chunk.length) + 3;
+  const files = toDiffFiles(Array.from({ length: count }, (_, i) => ({ file: `f${i}`, patch: chunk, additions: 1, deletions: 0, status: "added" })));
+  const kept = files.filter((file) => file.patch);
+  assert.equal(kept.length, Math.floor(MAX_DIFF_TOTAL_CHARS / chunk.length));
+  assert.ok(files.slice(kept.length).every((file) => file.patch === "" && file.truncated && file.additions === 1));
+  assert.deepEqual(toDiffFiles({ not: "an array" }), []);
 });

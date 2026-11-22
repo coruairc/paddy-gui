@@ -380,3 +380,18 @@ test("session list page derives truncation from page size, not cursor.next", asy
   // The array-returning wrapper still unwraps the same response.
   assert.deepEqual((await client.listSessions("/work/app")).map((item) => item.id), ["ses_only"]);
 });
+
+test("getDiff asks for hunks with context and forwards the turn range", async () => {
+  const { fetchImpl, calls } = mockFetch(() => ({
+    body: { data: [{ file: "a.ts", patch: "@@ -1 +1 @@\n-a\n+b\n", additions: 1, deletions: 1, status: "modified" }] },
+  }));
+  const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: fetchImpl });
+  const latest = await client.getDiff("/work/app", "ses_1");
+  assert.equal(latest.length, 1);
+  assert.match(calls[0].url, /\/api\/session\/ses_1\/diff\?/);
+  assert.match(calls[0].url, /context=3/);
+  assert.doesNotMatch(calls[0].url, /from=|to=/);
+  await client.getDiff("/work/app", "ses_1", { from: "msg_u1", to: "msg_u9" });
+  assert.match(calls[1].url, /from=msg_u1/);
+  assert.match(calls[1].url, /to=msg_u9/);
+});

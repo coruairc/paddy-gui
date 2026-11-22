@@ -68,9 +68,21 @@ export type ChatMessage = {
   error?: string;
   activity: ActivityItem[];
   pending?: boolean;
+  /** Paths this assistant step changed (OpenCode snapshot.files). */
+  files?: string[];
 };
 
-export type DiffFile = { file: string; additions: number; deletions: number; patch: string };
+export type DiffFileStatus = "added" | "modified" | "deleted";
+export type DiffFile = {
+  file: string;
+  additions: number;
+  deletions: number;
+  patch: string;
+  status: DiffFileStatus;
+  binary: boolean;
+  /** Server cut the patch (size cap) or OpenCode reported more. */
+  truncated: boolean;
+};
 
 /** Browser-safe slash-command catalog entry. */
 export type DeskCommand = { name: string; description: string };
@@ -108,6 +120,7 @@ export type DeskEvent =
   | { type: "session-deleted"; id: string }
   | { type: "status"; sessionId: string; state: "idle" | "working" | "retry" | "error"; detail?: string }
   | { type: "diff"; sessionId: string; files: DiffFile[] }
+  | { type: "step-files"; sessionId: string; messageId: string; files: string[] }
   | { type: "model-selected"; sessionId: string; model: string }
   | { type: "commands-updated" }
   | { type: "error"; message: string; sessionId?: string }
@@ -172,7 +185,11 @@ export const api = {
     }),
   abort: (id: string) => request("/api/sessions/" + encodeURIComponent(id) + "/abort", { method: "POST" }),
   retry: (id: string) => request("/api/sessions/" + encodeURIComponent(id) + "/retry", { method: "POST" }),
-  diff: (id: string) => request<{ files: DiffFile[] }>("/api/sessions/" + encodeURIComponent(id) + "/diff"),
+  /** One turn's changes: `from` is the user message that opened it; omitted = newest turn. */
+  diff: (id: string, from?: string) =>
+    request<{ files: DiffFile[] }>(
+      "/api/sessions/" + encodeURIComponent(id) + "/diff" + (from ? "?from=" + encodeURIComponent(from) : ""),
+    ),
   providers: () => request<ProvidersResponse>("/api/providers"),
   models: () => request<{ models: DeskModel[]; default: string }>("/api/models"),
   commands: () => request<{ commands: DeskCommand[] }>("/api/commands"),

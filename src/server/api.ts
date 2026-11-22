@@ -8,7 +8,7 @@ import {
   groupSessionsByDate,
   summarizeSession,
   toChatMessages,
-  toDiffFile,
+  toDiffFiles,
   type DiffFile,
   type SessionSummary,
 } from "./normalize.ts";
@@ -222,7 +222,7 @@ async function sessionRoute(runtime: ControllerRuntime, request: Request, id: st
     return json(200, {
       session: summarizeSession(session),
       messages: toChatMessages(messages),
-      files: Array.isArray(diff) ? diff.map(toDiffFile) : [],
+      files: redactSecrets(toDiffFiles(diff, secretNeedles(runtime)), secretNeedles(runtime)),
     });
   }
   if (!rest && request.method === "PATCH") {
@@ -250,9 +250,13 @@ async function sessionRoute(runtime: ControllerRuntime, request: Request, id: st
   }
   if (rest === "retry" && request.method === "POST") return retry(runtime, project.path, id);
   if (rest === "diff" && request.method === "GET") {
-    const diff = await client.getDiff(project.path, id);
-    const files: DiffFile[] = Array.isArray(diff) ? diff.map(toDiffFile) : [];
-    return json(200, { files });
+    const range = diffRange(new URL(request.url).searchParams);
+    if (!range.ok) return json(400, { error: range.error });
+    const diff = await client.getDiff(project.path, id, range.value);
+    // Known secrets (>= 16 chars) are masked anywhere in the patch text, e.g. a
+    // `+OPENCODE_SERVER_PASSWORD=<pw>` line; total patch text is capped.
+    const files: DiffFile[] = toDiffFiles(diff, secretNeedles(runtime));
+    return json(200, { files: redactSecrets(files, secretNeedles(runtime)) });
   }
   return json(404, { error: "Not found" });
 }
@@ -527,6 +531,20 @@ async function isDisabledModel(runtime: ControllerRuntime, key: string): Promise
   } catch {
     return false;
   }
+}
+
+// Session.Message.ID in the v2.3.2 openapi is `{"type":"string","pattern":"^msg_"}`.
+const MESSAGE_ID = /^msg_[A-Za-z0-9_-]{1,124}$/;
+
+function diffRange(params: URLSearchParams): { ok: true; value: { from?: string; to?: string } } | { ok: false; error: string } {
+  const value: { from?: string; to?: string } = {};
+  for (const key of ["from", "to"] as const) {
+    const raw = params.get(key);
+    if (raw === null || raw === "") continue;
+    if (!MESSAGE_ID.test(raw)) return { ok: false, error: `Invalid ${key} message id` };
+    value[key] = raw;
+  }
+  return { ok: true, value };
 }
 
 function splitModel(model: string): [string | undefined, string | undefined] {
