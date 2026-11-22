@@ -9,9 +9,9 @@ Requirements for milestone v1.1 (OpenCode v2 Desk). Each maps to exactly one roa
 
 ### Model Picker
 
-- [ ] **MODEL-01**: User can pick a model from the chat header/composer (not only Settings) via a popup grouped by provider, with live filtering, full keyboard control, and the always-visible active model
-- [ ] **MODEL-02**: The chosen desk default persists in Paddy state across browser reloads, seeds session resume, and the header reconciles against OpenCode's `session.model.selected` events so it never drifts from what actually runs
-- [ ] **MODEL-03**: The picker surfaces model metadata OpenCode already provides (status, context window, release date) so the user can choose informed
+- [x] **MODEL-01**: User can pick a model from the chat header/composer (not only Settings) via a popup grouped by provider, with live filtering, full keyboard control, and the always-visible active model
+- [x] **MODEL-02**: The chosen desk default persists in Paddy state across browser reloads, seeds session resume, and the header reconciles against OpenCode's `session.model.selected` events so it never drifts from what actually runs
+- [x] **MODEL-03**: The picker surfaces model metadata OpenCode already provides (status, context window, release date) so the user can choose informed
 
 ### Slash Commands
 
@@ -73,9 +73,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | V2-01 | Phase 7 | Complete |
 | V2-02 | Phase 7 | Complete |
 | V2-03 | Phase 7 | Complete |
-| MODEL-01 | Phase 8 | Pending |
-| MODEL-02 | Phase 8 | Pending |
-| MODEL-03 | Phase 8 | Pending |
+| MODEL-01 | Phase 8 | Complete |
+| MODEL-02 | Phase 8 | Complete |
+| MODEL-03 | Phase 8 | Complete |
 | CMD-01 | Phase 9 | Pending |
 | CMD-02 | Phase 9 | Pending |
 | CMD-03 | Phase 9 | Pending |

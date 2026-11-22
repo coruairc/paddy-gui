@@ -20,7 +20,7 @@ v1.0 shipped a trustworthy desk; the controller now talks OpenCode v2 (commit `9
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 7: v2 Hardening Foundation** - Hermetic tests, a durable desk-model default, honest Settings saves, and redaction that never corrupts identifiers — the foundation every later phase builds on (completed 2026-11-22)
-- [ ] **Phase 8: Chat Model Picker** - A provider-grouped, keyboard-driven model picker in the chat header/composer whose choice actually runs, persists, and never drifts from the session
+- [x] **Phase 8: Chat Model Picker** - A provider-grouped, keyboard-driven model picker in the chat header/composer whose choice actually runs, persists, and never drifts from the session (completed 2026-11-22)
 - [ ] **Phase 9: Slash Command Palette** - OpenCode commands discoverable and runnable from the composer, with outcomes and errors surfacing in the thread
 - [ ] **Phase 10: v1.1 End-to-End Verification** - Model switch and command execution verified live and across tabs, so the milestone's trust properties hold together, not just per-feature
 
@@ -56,7 +56,7 @@ Plans:
   2. Selecting a model sets the desk default; the next message sent in the session actually runs on that model (applied per-session on send), the choice persists across reloads, and session resume seeds from the session's actual model.
   3. When the session's model changes (via `session.model.selected` SSE or resume), the header reconciles so it never shows a model the session is not running; a failed model switch aborts the send rather than running the wrong model.
   4. The picker surfaces model metadata OpenCode already provides (status, context window, release date) so the user can choose informed.
-**Plans**: 3/3 plans executed
+**Plans**: 3/3 plans complete
 **Wave 1**
 - [x] 08-01-PLAN.md — Model catalog data path + header trigger tracer: listModels/getDefaultModel, projected `/api/models`, `DeskModel` + `api.models()`, pure `models.ts` helpers, pick persists `deskModel` (MODEL-01, MODEL-02, MODEL-03)
 
@@ -99,6 +99,6 @@ Phases execute in numeric order: 7 → 8 → 9 → 10 (decimal insertions, if an
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 7. v2 Hardening Foundation | 3/3 | Complete    | 2026-11-22 |
-| 8. Chat Model Picker | 3/3 | In Progress | - |
+| 8. Chat Model Picker | 3/3 | Complete    | 2026-11-22 |
 | 9. Slash Command Palette | 0/? | Not started | - |
 | 10. v1.1 End-to-End Verification | 0/? | Not started | - |

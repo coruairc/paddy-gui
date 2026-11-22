@@ -11,7 +11,7 @@
     {
       "number": "8",
       "name": "Chat Model Picker",
-      "status": "in_progress"
+      "status": "complete"
     },
     {
       "number": "9",
@@ -26,8 +26,8 @@
   ],
   "next": {
     "command": "/gsd-progress --next",
-    "label": "Advance to the next step",
-    "reason": "Phase 2 of 4 · executing"
+    "label": "Advance to the next step (plan phase 09)",
+    "reason": "Phase 3 of 4 — needs a plan"
   },
-  "updated_at": "2026-11-22T05:10:49.495Z"
+  "updated_at": "2026-11-22T05:15:47.100Z"
 }
