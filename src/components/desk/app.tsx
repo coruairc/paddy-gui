@@ -6,6 +6,8 @@ import { Markdown } from "@/components/markdown";
 import { PaddyIdle } from "@/components/paddy-idle";
 import { SettingsPanel } from "@/components/desk/settings";
 import { ModelPicker } from "@/components/desk/model-picker";
+import { CommandPalette } from "@/components/desk/command-palette";
+import { filterCommands, nextCommandIndex, parseCommandInput } from "@/components/desk/commands";
 import { modelForSend, resolveActiveSource, resolveHeaderModel } from "@/components/desk/models";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +19,7 @@ import {
   type Bootstrap,
   type ChatMessage,
   type ConnectionStatus,
+  type DeskCommand,
   type DeskEvent,
   type DeskModel,
   type DiffFile,
@@ -52,6 +55,13 @@ export function DeskApp() {
   const [modelLoadError, setModelLoadError] = useState<string | null>(null);
   const [modelNote, setModelNote] = useState<string | null>(null);
   const [modelSource, setModelSource] = useState<"desk" | "session">("desk");
+  const [commandCatalog, setCommandCatalog] = useState<DeskCommand[] | null>(null);
+  const [commandLoading, setCommandLoading] = useState(false);
+  const [commandLoadError, setCommandLoadError] = useState<string | null>(null);
+  const [commandIndex, setCommandIndex] = useState(0);
+  const [commandDismissed, setCommandDismissed] = useState(false);
+  const pendingCommandRef = useRef<string | null>(null);
+  const commandTurnRef = useRef(false);
   const [agent, setAgent] = useState("");
   const [agents, setAgents] = useState<string[]>([]);
   const [stick, setStick] = useState(true);
@@ -196,6 +206,10 @@ export function DeskApp() {
   const active = sessions.find((item) => item.id === sessionId) ?? null;
   const liveActivity = messages.flatMap((message) => message.activity).slice(-8);
   const catalogLoaded = catalog !== null;
+  const commandQuery = draft.startsWith("/") ? draft.slice(1) : null;
+  const paletteOpen = commandQuery !== null && !commandDismissed;
+  const visibleCommands = filterCommands(commandCatalog ?? [], commandQuery ?? "");
+  const activeCommand = visibleCommands[commandIndex] ?? visibleCommands[0] ?? null;
   const effective = resolveActiveSource(
     modelSource,
     model,
@@ -228,6 +242,81 @@ export function DeskApp() {
     void api.settings({ deskModel: key }).catch(() => {
       setModelNote("Model saved for this turn only — it will not survive a reload.");
     });
+  }
+
+  async function loadCommands() {
+    setCommandLoading(true);
+    try {
+      const data = await api.commands();
+      setCommandCatalog(data.commands);
+      setCommandLoadError(null);
+    } catch (err) {
+      setCommandLoadError(err instanceof Error ? err.message : "Could not load commands");
+    } finally {
+      setCommandLoading(false);
+    }
+  }
+
+  function appendSystem(text: string) {
+    setMessages((current) => [
+      ...current,
+      { id: `sys_${Date.now()}`, role: "system", text, created: Date.now(), activity: [] },
+    ]);
+  }
+
+  async function ensureSession(): Promise<string | null> {
+    if (sessionId) return sessionId;
+    const created = await api.createSession();
+    const id = created.session.id;
+    setSessionId(id);
+    setSessions((current) => upsertSession(current, created.session));
+    try {
+      localStorage.setItem("paddy:lastSession", id);
+      if (activeProjectId) localStorage.setItem(`paddy:lastSession:${activeProjectId}`, id);
+    } catch {
+      /* ignore storage errors */
+    }
+    return id;
+  }
+
+  async function dispatchCommand(name: string, args: string) {
+    if (working || messages.some((m) => m.pending)) return;
+    if (!project) {
+      setError("Add a project before running a command.");
+      return;
+    }
+    const echo = `/${name}${args ? ` ${args}` : ""}`;
+    setCommandDismissed(false);
+    setCommandIndex(0);
+    setStick(true);
+    setSettingsOpen(false);
+    let id: string | null = null;
+    try {
+      id = await ensureSession();
+    } catch (err) {
+      appendSystem(err instanceof Error ? err.message : "Could not start a chat");
+      return;
+    }
+    if (!id) return;
+    setDraft("");
+    const tempId = `local_${Date.now()}`;
+    pendingCommandRef.current = tempId;
+    commandTurnRef.current = true;
+    setMessages((current) => [
+      ...current,
+      { id: tempId, role: "user", text: echo, created: Date.now(), activity: [], pending: true },
+    ]);
+    setWorking(true);
+    try {
+      await api.runCommand(id, name, args);
+    } catch (err) {
+      pendingCommandRef.current = null;
+      commandTurnRef.current = false;
+      setMessages((current) => current.filter((m) => m.id !== tempId));
+      setDraft(echo);
+      setWorking(false);
+      appendSystem(err instanceof Error ? err.message : "Command could not run");
+    }
   }
 
   async function refreshSessions() {
@@ -333,23 +422,23 @@ export function DeskApp() {
       setError("Add a project before starting a chat.");
       return;
     }
+    const parsed = parseCommandInput(text);
+    if (parsed) {
+      await dispatchCommand(parsed.name, parsed.args);
+      return;
+    }
     setDraft("");
     setError(null);
     setStick(true);
     setSettingsOpen(false);
-    let id = sessionId;
-    if (!id) {
-      const created = await api.createSession();
-      id = created.session.id;
-      setSessionId(id);
-      setSessions((current) => upsertSession(current, created.session));
-      try {
-        localStorage.setItem("paddy:lastSession", id);
-        if (activeProjectId) localStorage.setItem(`paddy:lastSession:${activeProjectId}`, id);
-      } catch {
-        /* ignore storage errors */
-      }
+    let id: string | null = null;
+    try {
+      id = await ensureSession();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start a chat");
+      return;
     }
+    if (!id) return;
     const tempId = `local_${Date.now()}`;
     setMessages((current) => [
       ...current,
@@ -658,13 +747,89 @@ export function DeskApp() {
                     void submit();
                   }}
                 >
-                  <div className="mx-auto flex max-w-2xl items-end gap-2 rounded-2xl bg-elevated p-2 shadow-[var(--shadow-border)]">
+                  <div className="relative mx-auto max-w-2xl">
+                    <CommandPalette
+                      open={paletteOpen}
+                      commands={visibleCommands}
+                      hasCatalog={(commandCatalog?.length ?? 0) > 0}
+                      query={commandQuery ?? ""}
+                      activeIndex={commandIndex}
+                      connected={Boolean(status?.connected)}
+                      loading={commandLoading}
+                      loadError={commandLoadError}
+                      onSelect={(name) => {
+                        const args = parseCommandInput(draft)?.args ?? "";
+                        setDraft(`/${name}${args ? ` ${args}` : " "}`);
+                        composer.current?.focus();
+                      }}
+                      onRetry={() => void loadCommands()}
+                      onClear={() => {
+                        setDraft("/");
+                        setCommandIndex(0);
+                        composer.current?.focus();
+                      }}
+                    />
+                    <div className="flex items-end gap-2 rounded-2xl bg-elevated p-2 shadow-[var(--shadow-border)]">
                     <textarea
                       ref={composer}
                       data-composer
+                      role={paletteOpen ? "combobox" : undefined}
+                      aria-expanded={paletteOpen ? true : undefined}
+                      aria-controls={paletteOpen ? "command-listbox" : undefined}
+                      aria-activedescendant={
+                        paletteOpen && activeCommand
+                          ? `command-option-${activeCommand.name.replace(/[^A-Za-z0-9_-]/g, "_")}`
+                          : undefined
+                      }
+                      aria-autocomplete={paletteOpen ? "list" : undefined}
+                      aria-label="Message Paddy"
                       value={draft}
-                      onChange={(event) => setDraft(event.target.value)}
+                      onChange={(event) => {
+                        setDraft(event.target.value);
+                        setCommandDismissed(false);
+                        setCommandIndex(0);
+                      }}
                       onKeyDown={(event) => {
+                        if (paletteOpen) {
+                          if (
+                            event.key === "ArrowDown" ||
+                            event.key === "ArrowUp" ||
+                            event.key === "Home" ||
+                            event.key === "End"
+                          ) {
+                            event.preventDefault();
+                            const next = nextCommandIndex(commandIndex, visibleCommands.length, event.key);
+                            setCommandIndex(next);
+                            const target = visibleCommands[next];
+                            if (target) {
+                              requestAnimationFrame(() => {
+                                document
+                                  .getElementById(`command-option-${target.name.replace(/[^A-Za-z0-9_-]/g, "_")}`)
+                                  ?.scrollIntoView({ block: "nearest" });
+                              });
+                            }
+                            return;
+                          }
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            setCommandDismissed(true);
+                            return;
+                          }
+                          if (event.key === "Tab" && !event.shiftKey && activeCommand) {
+                            event.preventDefault();
+                            const parsed = parseCommandInput(draft);
+                            setDraft(`/${activeCommand.name}${parsed?.args ? ` ${parsed.args}` : " "}`);
+                            return;
+                          }
+                          if (event.key === "Enter" && !event.shiftKey) {
+                            event.preventDefault();
+                            if (working || messages.some((m) => m.pending)) return;
+                            const parsed = parseCommandInput(draft);
+                            if (activeCommand) void dispatchCommand(activeCommand.name, parsed?.args ?? "");
+                            else if (parsed) void dispatchCommand(parsed.name, parsed.args);
+                            return;
+                          }
+                        }
                         if (event.key === "Enter" && !event.shiftKey) {
                           if (working || messages.some((m) => m.pending)) {
                             event.preventDefault();
@@ -687,6 +852,7 @@ export function DeskApp() {
                         <ArrowUp />
                       </Button>
                     )}
+                    </div>
                   </div>
                   {modelNote && (
                     <p className="mx-auto mt-2 max-w-2xl px-2 text-[11px] text-warn">{modelNote}</p>

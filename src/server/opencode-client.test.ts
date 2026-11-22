@@ -68,6 +68,43 @@ test("a rejected model switch aborts before the prompt is sent", async () => {
   );
 });
 
+test("listCommands scopes by directory and unwraps the envelope", async () => {
+  const { fetchImpl, calls } = mockFetch(() => ({
+    body: { data: [{ name: "echo", description: "Repeat" }] },
+  }));
+  const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: fetchImpl });
+  const commands = await client.listCommands("/work/app");
+  assert.deepEqual(commands, [{ name: "echo", description: "Repeat" }]);
+  const url = new URL(calls[0].url);
+  assert.equal(url.pathname, "/api/command");
+  assert.equal(url.searchParams.get("location[directory]"), "/work/app");
+});
+
+test("runCommand posts name and args text to the session command route", async () => {
+  const { fetchImpl, calls } = mockFetch(() => ({ status: 204 }));
+  const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: fetchImpl });
+  await client.runCommand("/work/app", "ses_1", { name: "echo", text: "hello" });
+  const url = new URL(calls[0].url);
+  assert.equal(url.pathname, "/api/session/ses_1/command");
+  assert.equal(url.searchParams.get("location[directory]"), null);
+  assert.deepEqual(JSON.parse(String(calls[0].init?.body)), { name: "echo", text: "hello" });
+});
+
+test("a command 404 surfaces its _tag message", async () => {
+  const { fetchImpl } = mockFetch(() => ({
+    status: 404,
+    body: { _tag: "CommandNotFoundError", command: "nope", message: "Command not found: nope" },
+  }));
+  const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: fetchImpl });
+  await assert.rejects(
+    client.runCommand("/work/app", "ses_1", { name: "nope", text: "" }),
+    (err: unknown) =>
+      err instanceof OpenCodeError &&
+      err.status === 404 &&
+      err.message === "Command not found: nope",
+  );
+});
+
 test("session lifecycle uses v2 paths, location scope, and prompt steps", async () => {
   const { fetchImpl, calls } = mockFetch((url, init) => {
     if (new URL(url).pathname === "/api/session" && init?.method === "POST") {

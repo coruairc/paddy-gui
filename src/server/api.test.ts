@@ -87,6 +87,14 @@ function runtimeWithProject() {
       providerID: "google",
       name: "Gemini 3",
     }),
+    listCommands: async () => [
+      { name: "echo", description: "Repeat the arguments" },
+      { name: "noargs" },
+      { description: "nameless" },
+    ],
+    runCommand: async (_dir: string, _id: string, input: { name: string; text: string }) => {
+      calls.push(`command:${input.name}:${input.text}`);
+    },
     setApiKey: async () => {
       calls.push("set-key");
     },
@@ -248,6 +256,60 @@ test("model keys and default survive redaction with a registered needle", async 
   );
   assert.equal(body.default, "google/gemini-3");
   assert.equal(JSON.stringify(body).includes('"modelKey"'), false);
+});
+
+test("command catalog projects name and description only", async () => {
+  const { runtime } = runtimeWithProject();
+  const result = await call(runtime, "GET", "/api/commands");
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, {
+    commands: [
+      { name: "echo", description: "Repeat the arguments" },
+      { name: "noargs", description: "" },
+    ],
+  });
+});
+
+test("command catalog degrades while disconnected", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.status.connected = false;
+  runtime.client = null;
+  const result = await call(runtime, "GET", "/api/commands");
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, { commands: [] });
+});
+
+test("command dispatch forwards args and accepts empty text", async () => {
+  const { runtime, calls } = runtimeWithProject();
+  const run = await call(runtime, "POST", "/api/sessions/ses_1/command", {
+    name: "echo",
+    text: "hello world",
+  });
+  assert.equal(run.status, 202);
+  assert.equal(calls.includes("command:echo:hello world"), true);
+
+  const noArgs = await call(runtime, "POST", "/api/sessions/ses_1/command", {
+    name: "noargs",
+    text: "",
+  });
+  assert.equal(noArgs.status, 202);
+  assert.equal(calls.includes("command:noargs:"), true);
+
+  const missing = await call(runtime, "POST", "/api/sessions/ses_1/command", { text: "x" });
+  assert.equal(missing.status, 400);
+});
+
+test("command errors surface their server message", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.client = {
+    ...(runtime.client as object),
+    runCommand: async () => {
+      throw new OpenCodeError(404, "Command not found: nope");
+    },
+  } as unknown as ControllerRuntime["client"];
+  const result = await call(runtime, "POST", "/api/sessions/ses_1/command", { name: "nope", text: "" });
+  assert.equal(result.status, 404);
+  assert.equal((result.body as { error: string }).error, "Command not found: nope");
 });
 
 test("unavailable OpenCode becomes a recoverable error", async () => {

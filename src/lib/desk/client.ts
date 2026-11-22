@@ -72,6 +72,9 @@ export type ChatMessage = {
 
 export type DiffFile = { file: string; additions: number; deletions: number; patch: string };
 
+/** Browser-safe slash-command catalog entry. */
+export type DeskCommand = { name: string; description: string };
+
 /** Browser-safe projection of an OpenCode v2 model catalog entry. */
 export type DeskModel = {
   key: string;
@@ -161,6 +164,12 @@ export const api = {
   diff: (id: string) => request<{ files: DiffFile[] }>("/api/sessions/" + encodeURIComponent(id) + "/diff"),
   providers: () => request<ProvidersResponse>("/api/providers"),
   models: () => request<{ models: DeskModel[]; default: string }>("/api/models"),
+  commands: () => request<{ commands: DeskCommand[] }>("/api/commands"),
+  runCommand: (id: string, name: string, text: string) =>
+    request("/api/sessions/" + encodeURIComponent(id) + "/command", {
+      method: "POST",
+      body: JSON.stringify({ name, text }),
+    }),
   agents: () => request<unknown>("/api/agents"),
   mcp: () => request<unknown>("/api/mcp"),
   config: () => request<Record<string, unknown>>("/api/config"),

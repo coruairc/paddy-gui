@@ -40,9 +40,12 @@ export async function handleApi(runtime: ControllerRuntime, request: Request): P
     if (request.method === "PATCH" && route === "/settings") return updateSettings(runtime, request);
     if (request.method === "GET" && route === "/sessions") return await listSessions(runtime);
     if (request.method === "POST" && route === "/sessions") return await createSession(runtime, request);
+    const command = route.match(/^\/sessions\/([^/]+)\/command$/);
+    if (command && request.method === "POST") return await runCommand(runtime, decodeURIComponent(command[1]), request);
     const session = route.match(/^\/sessions\/([^/]+)(?:\/(.+))?$/);
     if (session) return await sessionRoute(runtime, request, decodeURIComponent(session[1]), session[2]);
     if (request.method === "GET" && (route === "/models")) return await listModels(runtime);
+    if (request.method === "GET" && route === "/commands") return await listCommands(runtime);
     if (request.method === "GET" && (route === "/config" || route === "/providers" || route === "/agents" || route === "/mcp" || route === "/vcs" || route === "/files/status" || route === "/permissions")) {
       return await readOpenCode(runtime, route);
     }
@@ -314,6 +317,34 @@ async function listModels(runtime: ControllerRuntime): Promise<ApiResult> {
     models: safe.models.map(({ modelKey, ...rest }) => ({ key: modelKey, ...rest })),
     default: safe.default,
   });
+}
+
+async function listCommands(runtime: ControllerRuntime): Promise<ApiResult> {
+  if (!runtime.status.connected) return json(200, { commands: [] });
+  const directory = activeProject(runtime)?.path;
+  const client = runtime.requireClient();
+  const catalog = await client.listCommands(directory);
+  const projected = catalog
+    .filter((entry) => typeof entry?.name === "string" && entry.name.trim() !== "")
+    .map((entry) => ({
+      name: entry.name,
+      description: typeof entry.description === "string" ? entry.description : "",
+    }));
+  return json(200, { commands: redactSecrets(projected, secretNeedles(runtime)) });
+}
+
+async function runCommand(
+  runtime: ControllerRuntime,
+  sessionId: string,
+  request: Request,
+): Promise<ApiResult> {
+  const body = await readBody(request);
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  const text = typeof body.text === "string" ? body.text : "";
+  if (!name) return json(400, { error: "Command name is required" });
+  const directory = activeProject(runtime)?.path ?? "";
+  await runtime.requireClient().runCommand(directory, sessionId, { name, text });
+  return json(202, { ok: true });
 }
 
 async function readOpenCode(runtime: ControllerRuntime, route: string): Promise<ApiResult> {

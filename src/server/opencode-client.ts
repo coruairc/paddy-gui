@@ -83,6 +83,12 @@ export type OpenCodeModelInfo = {
   variants?: Array<{ id?: string }>;
 };
 
+/** v2 slash-command catalog entry from `GET /api/command`. */
+export type OpenCodeCommand = {
+  name: string;
+  description?: string;
+};
+
 export type OpenCodeFormField = {
   key?: string;
   type?: string;
@@ -292,6 +298,21 @@ export class OpenCodeClient {
       query: locationQuery(directory),
     });
     return data && typeof data === "object" ? (data as OpenCodeModelInfo) : null;
+  }
+
+  async listCommands(directory?: string): Promise<OpenCodeCommand[]> {
+    const data = await this.request("GET", "/api/command", { query: locationQuery(directory) });
+    return asArray<OpenCodeCommand>(data);
+  }
+
+  async runCommand(
+    _directory: string,
+    sessionId: string,
+    input: { name: string; text: string },
+  ): Promise<void> {
+    await this.request("POST", `/api/session/${encodeURIComponent(sessionId)}/command`, {
+      body: { name: input.name, text: input.text },
+    });
   }
 
   async getProviders(directory?: string): Promise<unknown> {
