@@ -10,7 +10,7 @@ import { CommandPalette } from "@/components/desk/command-palette";
 import { filterCommands, nextCommandIndex, parseCommandInput, shouldAutoLoadCommands } from "@/components/desk/commands";
 import { canSelectModel, modelForSend, modelSaveFailure, resolveActiveSource, resolveHeaderModel } from "@/components/desk/models";
 import { ResizeHandle } from "@/components/desk/resize-handle";
-import { createRequestGate } from "@/components/desk/request-gate";
+import { createRequestGate, runLatest } from "@/components/desk/request-gate";
 import { usePanelWidths } from "@/components/desk/use-panel-widths";
 import {
   belongsToProject,
@@ -99,6 +99,8 @@ export function DeskApp() {
   const [modelGate] = useState(createRequestGate);
   const [commandGate] = useState(createRequestGate);
   const [modelSaveGate] = useState(createRequestGate);
+  /** One ticket per openSession call; newChat/chooseProject/Archive/session-deleted invalidate it. */
+  const [openGate] = useState(createRequestGate);
   const [agent, setAgent] = useState("");
   const [agents, setAgents] = useState<string[]>([]);
   const [stick, setStick] = useState(true);
@@ -161,6 +163,7 @@ export function DeskApp() {
       if (sessionRef.current === event.id) {
         // The open chat is gone: the next send must start a new one, not reuse a dead id.
         confirmedSessionRef.current = null;
+        openGate.invalidate();
         setOpeningSessionId(null);
         pendingCommandRef.current = null;
         settledCommandRef.current = null;
@@ -228,7 +231,7 @@ export function DeskApp() {
       }
       setMessages((list) => mergeMessage(list, event.message));
     }
-  }, []);
+  }, [openGate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -474,6 +477,7 @@ export function DeskApp() {
     resetCommandTurn();
     setActiveProjectId(id);
     confirmedSessionRef.current = null;
+    openGate.invalidate();
     setOpeningSessionId(null);
     setSessionId(null);
     setMessages([]);
@@ -521,41 +525,43 @@ export function DeskApp() {
     setWorking(false);
     setError(null);
     setStick(true);
-    try {
-      const data = await api.openSession(id);
-      if (expectDirectory !== undefined && !belongsToProject(data.session.directory, expectDirectory)) {
-        // A remembered id that turned out to be another project's chat: forget it, show nothing.
-        forgetSession(browserStorage(), id);
-        if (sessionRef.current === id) {
+    // Latest open wins: a late response for a chat the user has left (or an
+    // older request for the same id) must not touch the view or the opening flag.
+    await runLatest(openGate, () => api.openSession(id), {
+      onData: (data) => {
+        if (expectDirectory !== undefined && !belongsToProject(data.session.directory, expectDirectory)) {
+          // A remembered id that turned out to be another project's chat: forget it, show nothing.
+          forgetSession(browserStorage(), id);
           setSessionId(null);
           setMessages([]);
           setFiles([]);
+          return;
         }
-        return;
-      }
-      setMessages(data.messages);
-      setFiles(data.files);
-      setSessions((current) => upsertSession(current, data.session));
-      if (data.session.model) {
-        setModel(data.session.model);
-        setModelSource("session");
-      } else {
-        setModelSource("desk");
-      }
-      if (sessionRef.current === id) confirmedSessionRef.current = id;
-      rememberSession(browserStorage(), projectId, id);
-    } catch (err) {
-      // Never keep (or write back) an id that failed to open; a 404 means it is gone for good.
-      if (isMissingSession(err)) forgetSession(browserStorage(), id);
-      if (sessionRef.current === id) {
+        setMessages(data.messages);
+        setFiles(data.files);
+        setSessions((current) => upsertSession(current, data.session));
+        if (data.session.model) {
+          setModel(data.session.model);
+          setModelSource("session");
+        } else {
+          setModelSource("desk");
+        }
+        confirmedSessionRef.current = id;
+        rememberSession(browserStorage(), projectId, id);
+      },
+      // A 404 means this id is gone for good, whichever open asked: forget only this id.
+      onAnyError: (err) => {
+        if (isMissingSession(err)) forgetSession(browserStorage(), id);
+      },
+      onError: (err) => {
+        // Never keep (or write back) an id that failed to open.
         setSessionId(null);
         setMessages([]);
         setFiles([]);
-      }
-      setError(err instanceof Error ? err.message : "Could not open that chat");
-    } finally {
-      setOpeningSessionId((current) => (current === id ? null : current));
-    }
+        setError(err instanceof Error ? err.message : "Could not open that chat");
+      },
+      onSettled: () => setOpeningSessionId(null),
+    });
   }
 
   async function newChat() {
@@ -573,6 +579,7 @@ export function DeskApp() {
       resetCommandTurn();
       setActiveProjectId(targetProject.id);
       confirmedSessionRef.current = created.session.id;
+      openGate.invalidate();
       setOpeningSessionId(null);
       setSessionId(created.session.id);
       setMessages([]);
@@ -826,7 +833,7 @@ export function DeskApp() {
                     const title = window.prompt("Rename chat", active.title);
                     if (title?.trim()) void api.renameSession(active.id, title.trim()).then(() => refreshSessions());
                   }}>Rename</button>
-                  <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => void api.archiveSession(active.id, true).then(() => { resetCommandTurn(); forgetSession(browserStorage(), active.id); confirmedSessionRef.current = null; setOpeningSessionId(null); setSessionId(null); setMessages([]); return refreshSessions(); })}>Archive</button>
+                  <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => void api.archiveSession(active.id, true).then(() => { resetCommandTurn(); forgetSession(browserStorage(), active.id); confirmedSessionRef.current = null; openGate.invalidate(); setOpeningSessionId(null); setSessionId(null); setMessages([]); return refreshSessions(); })}>Archive</button>
                 </div>
               )}
             </div>
