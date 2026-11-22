@@ -76,7 +76,9 @@ Plans:
   2. Submitting `/name args` runs the command via `POST /api/session/{id}/command` and its outcome is visible in the thread; unknown or failing commands surface their error as a persistent in-thread system message, not a transient toast.
   3. When OpenCode emits `command.updated` while the desk is open, the palette reflects the new command list without a page reload.
   4. Only a leading `/` triggers command dispatch — mid-text slashes are ordinary prompts, unknown `/name` never silently becomes prompt text, and the composer draft survives palette open/close.
-**Plans**: TBD
+**Plans**: 1/2 plans executed
+- [x] 09-01-PLAN.md
+- [ ] 09-02-PLAN.md
 **UI hint**: yes
 
 ### Phase 10: v1.1 End-to-End Verification
@@ -100,5 +102,5 @@ Phases execute in numeric order: 7 → 8 → 9 → 10 (decimal insertions, if an
 |-------|----------------|--------|-----------|
 | 7. v2 Hardening Foundation | 3/3 | Complete    | 2026-11-22 |
 | 8. Chat Model Picker | 3/3 | Complete    | 2026-11-22 |
-| 9. Slash Command Palette | 0/? | Not started | - |
+| 9. Slash Command Palette | 1/2 | In Progress | - |
 | 10. v1.1 End-to-End Verification | 0/? | Not started | - |
