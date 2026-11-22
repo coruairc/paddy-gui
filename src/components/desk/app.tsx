@@ -16,7 +16,9 @@ import {
   browserStorage,
   forgetSession,
   isMissingSession,
+  OPENING_CHAT_MESSAGE,
   pickResumeId,
+  planSend,
   rememberSession,
   sessionForSend,
 } from "@/components/desk/last-session";
@@ -65,6 +67,8 @@ export function DeskApp() {
   const [serverPassword, setServerPassword] = useState("");
   const [prompts, setPrompts] = useState<PermissionPrompt[]>([]);
   const [loadingSession, setLoadingSession] = useState(false);
+  /** Set while openSession is fetching; sending is disabled until the server confirms the chat. */
+  const [openingSessionId, setOpeningSessionId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const panels = usePanelWidths(!settingsOpen);
   const [inspector, setInspector] = useState<"work" | "changes">("work");
@@ -390,7 +394,7 @@ export function DeskApp() {
   async function ensureSession(): Promise<string | null> {
     const target = sessionForSend(sessionId, confirmedSessionRef.current);
     if (target.kind === "reuse") return target.id;
-    if (target.kind === "wait") throw new Error("Still opening that chat. Try again in a moment.");
+    if (target.kind === "wait") throw new Error(OPENING_CHAT_MESSAGE);
     const created = await api.createSession();
     const id = created.session.id;
     confirmedSessionRef.current = id;
@@ -492,6 +496,8 @@ export function DeskApp() {
     // Shown as selected right away, but not reusable by a send until the server confirms it.
     confirmedSessionRef.current = null;
     setSessionId(id);
+    sessionRef.current = id; // sync now, so the confirm/clear checks below never read a pre-render value
+    setOpeningSessionId(id);
     setWorking(false);
     setError(null);
     setStick(true);
@@ -517,6 +523,8 @@ export function DeskApp() {
         setFiles([]);
       }
       setError(err instanceof Error ? err.message : "Could not open that chat");
+    } finally {
+      setOpeningSessionId((current) => (current === id ? null : current));
     }
   }
 
@@ -554,8 +562,18 @@ export function DeskApp() {
 
   async function submit() {
     const text = draft.trim();
-    if (!text || working) return;
-    if (messages.some((m) => m.pending)) return;
+    const plan = planSend({
+      text,
+      busy: working || messages.some((m) => m.pending),
+      current: sessionId,
+      confirmed: confirmedSessionRef.current,
+    });
+    if (plan.kind === "ignore") return;
+    if (plan.kind === "wait") {
+      // The draft stays in the composer; nothing is created or reused.
+      setError(plan.message);
+      return;
+    }
     if (!project) {
       setError("Add a project before starting a chat.");
       return;
@@ -565,7 +583,6 @@ export function DeskApp() {
       await dispatchCommand(parsed.name, parsed.args);
       return;
     }
-    setDraft("");
     setError(null);
     setStick(true);
     setSettingsOpen(false);
@@ -573,10 +590,13 @@ export function DeskApp() {
     try {
       id = await ensureSession();
     } catch (err) {
+      // The draft was not cleared yet, so the typed prompt survives.
       setError(err instanceof Error ? err.message : "Could not start a chat");
       return;
     }
     if (!id) return;
+    // Clear only once a session exists, matching dispatchCommand.
+    setDraft("");
     pendingCommandRef.current = null;
     settledCommandRef.current = null;
     const tempId = `local_${Date.now()}`;
@@ -998,7 +1018,7 @@ export function DeskApp() {
                         }
                       }}
                       rows={1}
-                      placeholder="Message Paddy"
+                      placeholder={openingSessionId ? "Opening chat…" : "Message Paddy"}
                       className="max-h-36 min-h-11 flex-1 resize-none bg-transparent px-3 py-2.5 text-sm text-fg placeholder:text-subtle focus:outline-none"
                     />
                     {working ? (
@@ -1006,7 +1026,7 @@ export function DeskApp() {
                         <Square />
                       </Button>
                     ) : (
-                      <Button type="submit" size="icon" disabled={!draft.trim() || messages.some((m) => m.pending)} aria-label="Send">
+                      <Button type="submit" size="icon" disabled={!draft.trim() || messages.some((m) => m.pending) || openingSessionId !== null} aria-label={openingSessionId ? "Send (opening chat…)" : "Send"}>
                         <ArrowUp />
                       </Button>
                     )}

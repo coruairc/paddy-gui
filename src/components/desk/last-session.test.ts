@@ -7,7 +7,9 @@ import {
   forgetSession,
   isMissingSession,
   lastSessionKey,
+  OPENING_CHAT_MESSAGE,
   pickResumeId,
+  planSend,
   readLastSession,
   rememberSession,
   sessionForSend,
@@ -140,4 +142,16 @@ test("sends reuse only a confirmed session; an unconfirmed id is never reused or
   // Resume still in flight (or failed without being cleared): do not reuse the id.
   assert.deepEqual(sessionForSend("ses_a", null), { kind: "wait" });
   assert.deepEqual(sessionForSend("ses_b", "ses_a"), { kind: "wait" });
+});
+
+test("planSend keeps the draft while a chat is still opening", () => {
+  // Bootstrap resume or a sidebar click selected ses_a, the server has not confirmed it yet.
+  assert.deepEqual(planSend({ text: "continue", busy: false, current: "ses_a", confirmed: null }), {
+    kind: "wait",
+    message: OPENING_CHAT_MESSAGE,
+  });
+  assert.deepEqual(planSend({ text: "continue", busy: false, current: "ses_a", confirmed: "ses_a" }), { kind: "go" });
+  assert.deepEqual(planSend({ text: "continue", busy: false, current: null, confirmed: null }), { kind: "go" });
+  assert.deepEqual(planSend({ text: "   ", busy: false, current: "ses_a", confirmed: "ses_a" }), { kind: "ignore" });
+  assert.deepEqual(planSend({ text: "hi", busy: true, current: "ses_a", confirmed: "ses_a" }), { kind: "ignore" });
 });

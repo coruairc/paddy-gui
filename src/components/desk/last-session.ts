@@ -142,3 +142,24 @@ export function sessionForSend(
   if (current === confirmed) return { kind: "reuse", id: current };
   return { kind: "wait" };
 }
+
+export const OPENING_CHAT_MESSAGE = "Still opening that chat. Your message is kept; send it once it has loaded.";
+
+/**
+ * Gate for the composer, decided before anything is cleared. `wait` means a
+ * chat is still being opened: the caller must keep the typed draft and not
+ * create or reuse a session. `go` means ensureSession may run; the draft is
+ * cleared only after it succeeds.
+ */
+export function planSend(input: {
+  text: string;
+  busy: boolean;
+  current: string | null;
+  confirmed: string | null;
+}): { kind: "ignore" } | { kind: "wait"; message: string } | { kind: "go" } {
+  if (!input.text.trim() || input.busy) return { kind: "ignore" };
+  if (sessionForSend(input.current, input.confirmed).kind === "wait") {
+    return { kind: "wait", message: OPENING_CHAT_MESSAGE };
+  }
+  return { kind: "go" };
+}
