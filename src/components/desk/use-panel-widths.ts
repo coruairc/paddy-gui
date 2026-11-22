@@ -10,7 +10,7 @@ import {
 } from "./panel-size";
 
 /** Tailwind `lg` — below this the inspector is hidden and nothing resizes. */
-const WIDE_QUERY = "(min-width: 1024px)";
+const WIDE_QUERY = "(min-width: 64rem)";
 
 function browserStorage(): Storage | null {
   try {

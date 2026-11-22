@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent, type PointerEvent } from "react";
 import { cn } from "@/lib/utils";
 import { dragWidth, keyboardWidth, type PanelSide } from "./panel-size";
 
@@ -25,6 +25,18 @@ interface ResizeHandleProps {
  */
 export function ResizeHandle({ side, label, controls, width, min, max, onResize, onCommit, onReset, className }: ResizeHandleProps) {
   const drag = useRef<{ pointerId: number; startX: number; startWidth: number; last: number } | null>(null);
+
+  // If the handle unmounts mid-drag (e.g. viewport drops below lg), restore the body styles.
+  useEffect(
+    () => () => {
+      if (drag.current) {
+        drag.current = null;
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      }
+    },
+    [],
+  );
 
   function onPointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.pointerType === "mouse" && event.button !== 0) return;
