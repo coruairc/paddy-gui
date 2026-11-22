@@ -10,6 +10,9 @@
   --color-border: #2a2a30;
   --color-accent: #7d9e72;
   --color-accent-fg: #0a0a0b;
+  --color-bubble: #1e4a2a;
+  --color-bubble-fg: #e3f1df;
+  --color-bubble-muted: #a9c8a3;
   --color-ok: #8fad90;
   --color-warn: #c4a574;
   --color-danger: #c07a72;
@@ -35,6 +38,9 @@
   --color-border: #e4e4e7;
   --color-accent: #18181b;
   --color-accent-fg: #fafafa;
+  --color-bubble: #256a35;
+  --color-bubble-fg: #ffffff;
+  --color-bubble-muted: #dcefdc;
   --color-ok: #3f7d4a;
   --color-warn: #9a6b2f;
   --color-danger: #a33b34;
