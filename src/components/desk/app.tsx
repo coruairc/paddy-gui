@@ -243,6 +243,10 @@ export function DeskApp() {
   const paletteOpen = commandQuery !== null && !commandDismissed;
   const visibleCommands = filterCommands(commandCatalog ?? [], commandQuery ?? "");
   const activeCommand = visibleCommands[commandIndex] ?? visibleCommands[0] ?? null;
+  useEffect(() => {
+    if (paletteOpen && commandCatalog === null && !commandLoading) void loadCommandsRef.current();
+  }, [paletteOpen, commandCatalog, commandLoading]);
+
   const effective = resolveActiveSource(
     modelSource,
     model,
@@ -947,7 +951,7 @@ function MessageView({ message }: { message: ChatMessage }) {
   }
   if (message.role === "user") {
     return (
-      <article className="rise-in">
+      <article className="rise-in" data-command-echo={message.pending && message.text.startsWith("/") ? "true" : undefined}>
         <div className="flex justify-end">
           <div className="max-w-[min(100%,36rem)] rounded-2xl rounded-br-md bg-elevated px-4 py-3 shadow-[var(--shadow-border)]">
             <p className="text-sm leading-relaxed text-fg">{message.text}</p>
