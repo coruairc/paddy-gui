@@ -39,6 +39,17 @@ export function canSelectModel(models: readonly { key: string; enabled?: boolean
   return match ? isSelectableModel(match) : true;
 }
 
+/**
+ * What a failed desk-model save means. A 400 is the server refusing the key
+ * (invalid, or disabled in OpenCode): it must not stay active. Anything else
+ * (offline, 5xx) only failed to persist, so the choice may stand for now.
+ */
+export function modelSaveFailure(err: unknown): "reject" | "keep-for-turn" {
+  return typeof err === "object" && err !== null && (err as { status?: unknown }).status === 400
+    ? "reject"
+    : "keep-for-turn";
+}
+
 /** DOM-id-safe slug for element ids (model ids may contain `/`). */
 export function modelSlug(key: string): string {
   return key.replace(/[^A-Za-z0-9_-]/g, "_");

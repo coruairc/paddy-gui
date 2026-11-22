@@ -8,7 +8,7 @@ import { SettingsPanel } from "@/components/desk/settings";
 import { ModelPicker } from "@/components/desk/model-picker";
 import { CommandPalette } from "@/components/desk/command-palette";
 import { filterCommands, nextCommandIndex, parseCommandInput, shouldAutoLoadCommands } from "@/components/desk/commands";
-import { canSelectModel, modelForSend, resolveActiveSource, resolveHeaderModel } from "@/components/desk/models";
+import { canSelectModel, modelForSend, modelSaveFailure, resolveActiveSource, resolveHeaderModel } from "@/components/desk/models";
 import { ResizeHandle } from "@/components/desk/resize-handle";
 import { createRequestGate } from "@/components/desk/request-gate";
 import { usePanelWidths } from "@/components/desk/use-panel-widths";
@@ -34,7 +34,6 @@ import {
   upsertSession,
 } from "./messages";
 import {
-  ApiError,
   api,
   type ActivityItem,
   type Bootstrap,
@@ -346,11 +345,11 @@ export function DeskApp() {
     setModelNote(null);
     void api.settings({ deskModel: key }).catch((err: unknown) => {
       if (!modelSaveGate.isCurrent(ticket)) return; // a newer choice owns the header
-      if (err instanceof ApiError && err.status === 400) {
+      if (modelSaveFailure(err) === "reject") {
         // The server refused the key (e.g. disabled since the catalog loaded): do not send with it.
         setModel(previous.model);
         setModelSource(previous.source);
-        setModelNote(err.message);
+        setModelNote(err instanceof Error ? err.message : "That model was rejected.");
         return;
       }
       setModelNote("Model saved for this turn only — it will not survive a reload.");

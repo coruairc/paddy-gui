@@ -4,6 +4,7 @@ import {
   canSelectModel,
   filterModels,
   isSelectableModel,
+  modelSaveFailure,
   flattenGroups,
   groupModelsByProvider,
   humanizeProviderID,
@@ -210,4 +211,11 @@ test("canSelectModel rejects a disabled catalog entry and allows unknown keys", 
   assert.equal(canSelectModel(models, "google/legacy"), true);
   assert.equal(canSelectModel(models, "openai/unlisted"), true);
   assert.equal(canSelectModel([], "openai/off"), true);
+});
+
+test("modelSaveFailure rejects only a server 400; other failures keep the choice for the turn", () => {
+  assert.equal(modelSaveFailure(Object.assign(new Error("That model is disabled in OpenCode"), { status: 400 })), "reject");
+  assert.equal(modelSaveFailure(Object.assign(new Error("down"), { status: 503 })), "keep-for-turn");
+  assert.equal(modelSaveFailure(new Error("Failed to fetch")), "keep-for-turn");
+  assert.equal(modelSaveFailure(null), "keep-for-turn");
 });
