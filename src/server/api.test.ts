@@ -789,15 +789,60 @@ for (const source of ["owned", "connection"] as const) {
   });
 }
 
-test("short secrets are not substring-masked in patches (no false positives on code)", async () => {
+for (const source of ["connection", "env"] as const) {
+  test(`a short user-chosen ${source} password is still masked inside patch lines`, async () => {
+    const { runtime } = runtimeWithProject();
+    const pw = "hunter2pw"; // 9 chars: under the old 16-char floor
+    const previous = process.env.OPENCODE_SERVER_PASSWORD;
+    if (source === "connection") runtime.state.connectionPassword = pw;
+    else process.env.OPENCODE_SERVER_PASSWORD = pw;
+    try {
+      runtime.client = {
+        ...(runtime.client as object),
+        getDiff: async () => [
+          { file: ".env", patch: `@@ -0,0 +1,2 @@\n+OPENCODE_SERVER_PASSWORD=${pw}\n+URL=http://opencode:${pw}@127.0.0.1:4096\n`, additions: 2, deletions: 0, status: "added" },
+        ],
+      } as unknown as ControllerRuntime["client"];
+      for (const path of ["/api/sessions/ses_1/diff", "/api/sessions/ses_1"]) {
+        const result = await call(runtime, "GET", path);
+        assert.equal(result.status, 200, path);
+        assert.equal(JSON.stringify(result.body).includes(pw), false, path);
+        const patch = (result.body as { files: Array<{ patch: string }> }).files[0].patch;
+        assert.match(patch, /^\+OPENCODE_SERVER_PASSWORD=\[redacted\]$/m, path);
+        assert.match(patch, /^\+URL=http:\/\/opencode:\[redacted\]@127\.0\.0\.1:4096$/m, path);
+      }
+    } finally {
+      if (previous === undefined) delete process.env.OPENCODE_SERVER_PASSWORD;
+      else process.env.OPENCODE_SERVER_PASSWORD = previous;
+    }
+  });
+}
+
+test("secrets under 4 chars are not substring-masked (trivial strings would shred code)", async () => {
   const { runtime } = runtimeWithProject();
-  runtime.state.connectionPassword = "abc12345";
+  runtime.state.connectionPassword = "abc";
   runtime.client = {
     ...(runtime.client as object),
-    getDiff: async () => [{ file: "a.ts", patch: "@@ -1 +1 @@\n-x\n+const abc12345Value = 1;\n", additions: 1, deletions: 1, status: "modified" }],
+    getDiff: async () => [{ file: "a.ts", patch: "@@ -1 +1 @@\n-x\n+const abcValue = 1;\n", additions: 1, deletions: 1, status: "modified" }],
   } as unknown as ControllerRuntime["client"];
   const result = await call(runtime, "GET", "/api/sessions/ses_1/diff");
-  assert.match((result.body as { files: Array<{ patch: string }> }).files[0].patch, /abc12345Value/);
+  assert.match((result.body as { files: Array<{ patch: string }> }).files[0].patch, /abcValue/);
+});
+
+test("an oversized upstream diff is a clean 502 on the diff route", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.client = {
+    ...(runtime.client as object),
+    getDiff: async () => {
+      throw new OpenCodeError(502, "The diff is too large to load (over 32 MB)", false);
+    },
+  } as unknown as ControllerRuntime["client"];
+  const result = await call(runtime, "GET", "/api/sessions/ses_1/diff");
+  assert.equal(result.status, 502);
+  assert.deepEqual(Object.keys(result.body as object).sort(), ["error", "retryable"]);
+  const open = await call(runtime, "GET", "/api/sessions/ses_1");
+  assert.equal(open.status, 200, "opening the chat still works; it just has no files");
+  assert.deepEqual((open.body as { files: unknown[] }).files, []);
 });
 
 test("diff route caps total patch text and keeps every file's row data", async () => {

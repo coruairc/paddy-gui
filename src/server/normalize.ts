@@ -427,16 +427,28 @@ const BINARY_PATCH = /^(?:Binary files .* differ|GIT binary patch)$/m;
 
 /** Upper bound on patch text in one diff response; files past it keep counts/status only. */
 export const MAX_DIFF_TOTAL_CHARS = 5_000_000;
-/** Secrets shorter than this are not substring-masked (too likely to hit ordinary code). */
-export const MIN_MASKED_SECRET_CHARS = 16;
+/**
+ * Shortest secret that is substring-masked in patch text. The owned server
+ * password is always 52 chars, but connection/env passwords are user-chosen
+ * with no minimum, so a high threshold let a short real password through.
+ * Four matches redactSecrets' floor: below that a "password" is no
+ * protection anyway, and masking 1-3 char strings would shred ordinary code.
+ * Masking the operator's own short password inside code is the accepted cost.
+ */
+export const MIN_MASKED_SECRET_CHARS = 4;
 /** If cutting at the last newline would drop more than this, keep the cut line, shortened. */
 const PARTIAL_LINE_MIN = 1000;
 
-/** Replace every occurrence of each long-enough secret anywhere in `text`. */
+/**
+ * Replace every occurrence of each long-enough secret anywhere in `text`.
+ * Longest first, de-duplicated: when one secret contains another, masking the
+ * short one first would leave the long one's remainder visible.
+ */
 export function maskSecrets(text: string, secrets: readonly string[]): string {
+  const ordered = [...new Set(secrets)].filter((secret) => secret.length >= MIN_MASKED_SECRET_CHARS).sort((a, b) => b.length - a.length);
   let out = text;
-  for (const secret of secrets) {
-    if (secret.length >= MIN_MASKED_SECRET_CHARS && out.includes(secret)) out = out.split(secret).join("[redacted]");
+  for (const secret of ordered) {
+    if (out.includes(secret)) out = out.split(secret).join("[redacted]");
   }
   return out;
 }
