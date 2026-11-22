@@ -67,6 +67,17 @@ export type DiffRange = { from?: string; to?: string };
 /** Unchanged lines around each hunk. Without it v2 returns whole-file patches. */
 export const DIFF_CONTEXT_LINES = 3;
 
+/**
+ * Ceiling on the raw upstream diff body. The browser response is capped at
+ * 5 MB of patch text (normalize.ts MAX_DIFF_TOTAL_CHARS), but that budget is
+ * spent after per-file cuts (400k each) and JSON escaping, so the raw body
+ * legitimately runs several times larger. 32 MiB leaves room for that while
+ * bounding controller memory. Past it the read is aborted and nothing is
+ * parsed: a cut JSON body can't be masked reliably, so no partial patch (and
+ * no partial secret) is ever passed on.
+ */
+export const MAX_DIFF_UPSTREAM_BYTES = 32 * 1024 * 1024;
+
 export type OpenCodeModel = {
   id?: string;
   modelID?: string;
@@ -289,7 +300,7 @@ export class OpenCodeClient {
     const data = await this.request(
       "GET",
       `/api/session/${encodeURIComponent(sessionId)}/diff`,
-      { query: { from: range.from, to: range.to, context: String(DIFF_CONTEXT_LINES) } },
+      { query: { from: range.from, to: range.to, context: String(DIFF_CONTEXT_LINES) }, maxBytes: MAX_DIFF_UPSTREAM_BYTES },
     );
     return asArray<unknown>(data);
   }
@@ -614,7 +625,7 @@ export class OpenCodeClient {
   private async request(
     method: string,
     path: string,
-    init?: { query?: Record<string, string | undefined>; body?: unknown; unwrap?: boolean },
+    init?: { query?: Record<string, string | undefined>; body?: unknown; unwrap?: boolean; maxBytes?: number },
   ): Promise<unknown> {
     const url = new URL(path, this.baseUrl);
     for (const [key, value] of Object.entries(init?.query ?? {})) {
@@ -633,7 +644,7 @@ export class OpenCodeClient {
       throw new OpenCodeError(0, err instanceof Error ? err.message : "OpenCode is unavailable", true);
     }
     if (response.status === 204) return null;
-    const text = await response.text();
+    const text = init?.maxBytes === undefined ? await response.text() : await readCapped(response, init.maxBytes);
     let data: unknown = null;
     if (text) {
       try {
@@ -651,6 +662,36 @@ export class OpenCodeClient {
     }
     return init?.unwrap === false ? data : unwrapData(data);
   }
+}
+
+/**
+ * Read a body as text, giving up once it passes `maxBytes`. Streams when the
+ * body is a ReadableStream, so an oversized response is never held in full.
+ */
+export async function readCapped(response: Response, maxBytes: number): Promise<string> {
+  const tooLarge = () =>
+    new OpenCodeError(502, `The diff is too large to load (over ${Math.round(maxBytes / (1024 * 1024))} MB)`, false);
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel().catch(() => {});
+    throw tooLarge();
+  }
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    received += value.byteLength;
+    if (received > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw tooLarge();
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
 }
 
 function unwrapData(data: unknown): unknown {
