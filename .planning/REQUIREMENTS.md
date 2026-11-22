@@ -21,9 +21,9 @@ Requirements for milestone v1.1 (OpenCode v2 Desk). Each maps to exactly one roa
 
 ### v2 Hardening
 
-- [ ] **V2-01**: `npm test` is green in a clean environment — the runtime spawn test passes whether or not a live server holds port 4096 (probe seam injection, no hardcoded endpoint in the test path)
-- [ ] **V2-02**: No Settings action 404s — the dead `updateConfig` chain is removed, the desk default model persists in Paddy state (`~/.paddy/state.json`), and the Agents/Permissions sections are read-only or fixed rather than silently failing
-- [ ] **V2-03**: Secret redaction uses exact-match needles with a byte-identical round-trip regression test, so identifier-shaped payloads (provider IDs like `alibaba-token-plan`) flowing through new model/command routes are never corrupted
+- [x] **V2-01**: `npm test` is green in a clean environment — the runtime spawn test passes whether or not a live server holds port 4096 (probe seam injection, no hardcoded endpoint in the test path)
+- [x] **V2-02**: No Settings action 404s — the dead `updateConfig` chain is removed, the desk default model persists in Paddy state (`~/.paddy/state.json`), and the Agents/Permissions sections are read-only or fixed rather than silently failing
+- [x] **V2-03**: Secret redaction uses exact-match needles with a byte-identical round-trip regression test, so identifier-shaped payloads (provider IDs like `alibaba-token-plan`) flowing through new model/command routes are never corrupted
 
 ### Verification
 
@@ -70,9 +70,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| V2-01 | Phase 7 | Pending |
-| V2-02 | Phase 7 | Pending |
-| V2-03 | Phase 7 | Pending |
+| V2-01 | Phase 7 | Complete |
+| V2-02 | Phase 7 | Complete |
+| V2-03 | Phase 7 | Complete |
 | MODEL-01 | Phase 8 | Pending |
 | MODEL-02 | Phase 8 | Pending |
 | MODEL-03 | Phase 8 | Pending |

@@ -35,7 +35,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. No Settings action 404s or silently fails: the dead `updateConfig`/`PATCH /api/config` chain is deleted, and the Agents/Permissions sections are honestly read-only or fixed.
   3. The desk's default model persists in Paddy state (`~/.paddy/state.json`, new `deskModel` field) across browser reloads and controller restarts, and an existing state file upgrades silently on first load.
   4. An identifier-shaped payload (e.g. provider ID `alibaba-token-plan`) round-trips through the API byte-identical, proven by an exact-match redaction regression test that fails if substring replacement is reintroduced.
-**Plans**: 2/3 plans executed
+**Plans**: 3/3 plans executed
 
 Plans:
 **Wave 1**
@@ -45,7 +45,7 @@ Plans:
 - [x] 07-02-PLAN.md — deskModel persistence: state field + silent upgrade, settings/bootstrap surface, browser mirror (V2-02)
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 07-03-PLAN.md — Honest Settings (deskModel Save, read-only Agents/Permissions), dead-chain deletion + 404 regression, both-environment gate (V2-02, V2-01, V2-03)
+- [x] 07-03-PLAN.md — Honest Settings (deskModel Save, read-only Agents/Permissions), dead-chain deletion + 404 regression, both-environment gate (V2-02, V2-01, V2-03)
 
 ### Phase 8: Chat Model Picker
 **Goal**: Users can see and switch the model that will run their session, right from the chat UI — grouped by provider, keyboard-driven, informed by metadata — and trust that what the header shows is what actually runs.
@@ -90,7 +90,7 @@ Phases execute in numeric order: 7 → 8 → 9 → 10 (decimal insertions, if an
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 7. v2 Hardening Foundation | 2/3 | In Progress | - |
+| 7. v2 Hardening Foundation | 3/3 | In Progress | - |
 | 8. Chat Model Picker | 0/? | Not started | - |
 | 9. Slash Command Palette | 0/? | Not started | - |
 | 10. v1.1 End-to-End Verification | 0/? | Not started | - |

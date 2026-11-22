@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: OpenCode v2 Desk
 current_phase: 07
 current_phase_name: v2 Hardening Foundation
-status: executing
-stopped_at: Completed 07-02-PLAN.md
-last_updated: "2026-11-21T23:10:18.440Z"
+status: verifying
+stopped_at: Completed 07-03-PLAN.md
+last_updated: "2026-11-22T00:38:15.223Z"
 last_activity: 2026-11-21
 last_activity_desc: Phase 07 execution started
-state_head: e9e9b3ca42c4d290d0512b44040801ae012aefbf
+state_head: dd2c0af7874784a28c0317414a7561fcc3a5035c
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 3
-  completed_plans: 2
+  completed_plans: 3
 ---
 
 # Project State
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-21)
 
 Phase: 07 (v2 Hardening Foundation) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-11-21 — Phase 07 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -61,6 +61,7 @@ Progress: [░░░░░░░░░░] 0%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 07 P02 | 20 min | 2 tasks | 5 files |
+| Phase 07 P03 | 86 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -76,6 +77,8 @@ Recent decisions affecting current work:
 - [Roadmap v1.1]: Zero new dependencies — both widgets are hand-built WAI-ARIA APG comboboxes (research SUMMARY.md).
 - [Phase 07]: deskModel accepts any string; no model-list validation in the controller (OpenCode authoritative, Phase 8 reconciles)
 - [Phase 07]: bootstrap seeds model from persisted deskModel and keeps both model and raw deskModel; reset clears deskModel
+- [Phase 07]: Settings model Save persists via api.settings({ deskModel }) with inline error surfacing; Agents/Permissions are read-only with honest notes
+- [Phase 07]: Dead updateConfig/patchConfig chain deleted end-to-end behind a 404 regression; no try/catch wrapper
 
 ### Pending Todos
 
@@ -84,7 +87,8 @@ None yet.
 ### Blockers/Concerns
 
 - Phase 9: command endpoint shapes are MEDIUM confidence — published OpenAPI targets a newer server than installed v2.3.2; capture `/openapi.json` from the local server before planning Phase 9 (recommend `/gsd-plan-phase --research-phase 9`). Also settle `text` semantics (args-only vs full input) and zero-arg commands live.
-- Phase 7: open decision — Agents/Permissions Settings sections: read-only with explanatory note (research recommendation) vs removal.
+- Phase 7: resolved — Agents/Permissions Settings sections are read-only with explanatory notes (07-03). Phase verification still owns the Settings save/reload/restart UAT.
+- Phase 7: `/tmp/team-build.lock` was held by a foreign cargo gate during 07-03; lock-free verify commands were used per the amended plan (see 07-03-SUMMARY.md).
 
 ## Deferred Items
 
@@ -99,8 +103,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-21T23:10:18.408Z
-Stopped at: Completed 07-02-PLAN.md
+Last session: 2026-11-22T00:38:15.194Z
+Stopped at: Completed 07-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
