@@ -38,15 +38,24 @@ export type GatedHandlers<T> = {
  */
 export async function runLatest<T>(gate: RequestGate, work: () => Promise<T>, handlers: GatedHandlers<T>): Promise<boolean> {
   const ticket = gate.begin();
+  let data: T;
   try {
-    const data = await work();
+    data = await work();
+  } catch (err) {
+    try {
+      handlers.onAnyError?.(err);
+      if (!gate.isCurrent(ticket)) return false;
+      handlers.onError(err);
+      return true;
+    } finally {
+      if (gate.isCurrent(ticket)) handlers.onSettled?.();
+    }
+  }
+  // Outside the try on purpose: a bug in onData propagates to the caller
+  // instead of being reported (and handled) as a failed request.
+  try {
     if (!gate.isCurrent(ticket)) return false;
     handlers.onData(data);
-    return true;
-  } catch (err) {
-    handlers.onAnyError?.(err);
-    if (!gate.isCurrent(ticket)) return false;
-    handlers.onError(err);
     return true;
   } finally {
     if (gate.isCurrent(ticket)) handlers.onSettled?.();

@@ -15,6 +15,7 @@ import { usePanelWidths } from "@/components/desk/use-panel-widths";
 import {
   belongsToProject,
   browserStorage,
+  cancelOpen,
   forgetSession,
   isMissingSession,
   isOpeningSelected,
@@ -101,6 +102,10 @@ export function DeskApp() {
   const [modelSaveGate] = useState(createRequestGate);
   /** One ticket per openSession call; newChat/chooseProject/Archive/session-deleted invalidate it. */
   const [openGate] = useState(createRequestGate);
+  /** The session id the server has confirmed (opened or created); only this one may be reused by a send. */
+  const confirmedSessionRef = useRef<string | null>(null);
+  /** Everything cancelOpen() touches; stable for the component's lifetime. */
+  const [openTarget] = useState(() => ({ gate: openGate, setOpening: setOpeningSessionId, confirmedRef: confirmedSessionRef }));
   const [agent, setAgent] = useState("");
   const [agents, setAgents] = useState<string[]>([]);
   const [stick, setStick] = useState(true);
@@ -110,8 +115,6 @@ export function DeskApp() {
   const composer = useRef<HTMLTextAreaElement>(null);
   const sessionRef = useRef<string | null>(null);
   sessionRef.current = sessionId;
-  /** The session id the server has confirmed (opened or created); only this one may be reused by a send. */
-  const confirmedSessionRef = useRef<string | null>(null);
 
   const project = projects.find((item) => item.id === activeProjectId) ?? null;
 
@@ -162,9 +165,7 @@ export function DeskApp() {
       forgetSession(browserStorage(), event.id);
       if (sessionRef.current === event.id) {
         // The open chat is gone: the next send must start a new one, not reuse a dead id.
-        confirmedSessionRef.current = null;
-        openGate.invalidate();
-        setOpeningSessionId(null);
+        cancelOpen(openTarget);
         pendingCommandRef.current = null;
         settledCommandRef.current = null;
         commandTurnRef.current = false;
@@ -231,7 +232,7 @@ export function DeskApp() {
       }
       setMessages((list) => mergeMessage(list, event.message));
     }
-  }, [openGate]);
+  }, [openTarget]);
 
   useEffect(() => {
     let cancelled = false;
@@ -476,9 +477,7 @@ export function DeskApp() {
     await api.selectProject(id);
     resetCommandTurn();
     setActiveProjectId(id);
-    confirmedSessionRef.current = null;
-    openGate.invalidate();
-    setOpeningSessionId(null);
+    cancelOpen(openTarget);
     setSessionId(null);
     setMessages([]);
     // Commands and models are fetched per project directory. Drop any request
@@ -578,9 +577,7 @@ export function DeskApp() {
       setSessions((current) => upsertSession(current, created.session));
       resetCommandTurn();
       setActiveProjectId(targetProject.id);
-      confirmedSessionRef.current = created.session.id;
-      openGate.invalidate();
-      setOpeningSessionId(null);
+      cancelOpen(openTarget, created.session.id);
       setSessionId(created.session.id);
       setMessages([]);
       setFiles([]);
@@ -833,7 +830,20 @@ export function DeskApp() {
                     const title = window.prompt("Rename chat", active.title);
                     if (title?.trim()) void api.renameSession(active.id, title.trim()).then(() => refreshSessions());
                   }}>Rename</button>
-                  <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => void api.archiveSession(active.id, true).then(() => { resetCommandTurn(); forgetSession(browserStorage(), active.id); confirmedSessionRef.current = null; openGate.invalidate(); setOpeningSessionId(null); setSessionId(null); setMessages([]); return refreshSessions(); })}>Archive</button>
+                  <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => {
+                    const archivedId = active.id;
+                    void api.archiveSession(archivedId, true).then(() => {
+                      forgetSession(browserStorage(), archivedId);
+                      // A slow archive must not clear a chat the user picked in the meantime.
+                      if (sessionRef.current === archivedId) {
+                        resetCommandTurn();
+                        cancelOpen(openTarget);
+                        setSessionId(null);
+                        setMessages([]);
+                      }
+                      return refreshSessions();
+                    });
+                  }}>Archive</button>
                 </div>
               )}
             </div>

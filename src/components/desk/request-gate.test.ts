@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequestGate, runLatest } from "./request-gate.ts";
+import { cancelOpen } from "./last-session.ts";
 
 test("only the latest ticket is current", () => {
   const gate = createRequestGate();
@@ -55,10 +56,16 @@ function deferred<T>() {
 function openHarness() {
   const gate = createRequestGate();
   const state = { applied: [] as string[], errors: [] as string[], forgotten: [] as string[], opening: null as string | null };
+  const confirmedRef = { current: null as string | null };
+  // The same shape app.tsx hands to cancelOpen().
+  const target = { gate, setOpening: (id: null) => void (state.opening = id), confirmedRef };
   function open(id: string, response: Promise<string>) {
     state.opening = id;
     return runLatest(gate, () => response, {
-      onData: (data) => state.applied.push(data),
+      onData: (data) => {
+        state.applied.push(data);
+        confirmedRef.current = id;
+      },
       onError: (err) => state.errors.push(`${id}:${(err as Error).message}`),
       onAnyError: (err) => {
         if ((err as { status?: number }).status === 404) state.forgotten.push(id);
@@ -68,7 +75,7 @@ function openHarness() {
       },
     });
   }
-  return { gate, state, open };
+  return { gate, state, open, target, confirmedRef };
 }
 
 test("a completion from an older open is ignored once another chat is opened", async () => {
@@ -106,16 +113,50 @@ test("A → B → A applies only the latest A, and the first A cannot clear the 
   assert.equal(state.opening, null);
 });
 
-test("invalidate (new chat, project switch, archive, delete) drops an in-flight open entirely", async () => {
-  const { gate, state, open } = openHarness();
+test("cancelOpen (new chat, project switch, archive, delete) drops an in-flight open entirely", async () => {
+  const { state, open, target, confirmedRef } = openHarness();
+  confirmedRef.current = "OLD";
   const a = deferred<string>();
   const openA = open("A", a.promise);
-  gate.invalidate();
-  state.opening = null; // the handler resets it
+  assert.equal(state.opening, "A");
+  cancelOpen(target);
+  assert.equal(state.opening, null);
+  assert.equal(confirmedRef.current, null);
   a.resolve("A-data");
   assert.equal(await openA, false);
   assert.deepEqual(state.applied, []);
   assert.equal(state.opening, null);
+  assert.equal(confirmedRef.current, null, "the late A must not confirm itself");
+});
+
+test("cancelOpen can hand over to a just-created chat; a late failure of the old open is silent", async () => {
+  const { state, open, target, confirmedRef } = openHarness();
+  const a = deferred<string>();
+  const openA = open("A", a.promise);
+  cancelOpen(target, "NEW");
+  assert.equal(confirmedRef.current, "NEW");
+  a.reject(new Error("down"));
+  assert.equal(await openA, false);
+  assert.deepEqual(state.errors, []);
+  assert.equal(confirmedRef.current, "NEW");
+  assert.equal(state.opening, null);
+});
+
+test("a throwing onData propagates and is not treated as a failed open", async () => {
+  const gate = createRequestGate();
+  const seen: string[] = [];
+  await assert.rejects(
+    runLatest(gate, async () => "data", {
+      onData: () => {
+        throw new Error("render bug");
+      },
+      onError: () => seen.push("onError"),
+      onAnyError: () => seen.push("onAnyError"),
+      onSettled: () => seen.push("onSettled"),
+    }),
+    /render bug/,
+  );
+  assert.deepEqual(seen, ["onSettled"]);
 });
 
 test("a stale failure shows no error, but a 404 still forgets that id", async () => {

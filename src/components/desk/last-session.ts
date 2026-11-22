@@ -214,3 +214,22 @@ export function planSend(input: {
   }
   return { kind: "go" };
 }
+
+/**
+ * Abandon any in-flight openSession: its late response, error and settle are
+ * dropped (gate invalidated), the "opening" flag is cleared, and the
+ * confirmed id is reset (to `confirmed`, e.g. a chat just created). Used by
+ * newChat, chooseProject, Archive and session-deleted so they cannot drift.
+ */
+export function cancelOpen(
+  target: {
+    gate: { invalidate(): void };
+    setOpening: (id: null) => void;
+    confirmedRef: { current: string | null };
+  },
+  confirmed: string | null = null,
+): void {
+  target.gate.invalidate();
+  target.setOpening(null);
+  target.confirmedRef.current = confirmed;
+}
