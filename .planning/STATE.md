@@ -4,18 +4,17 @@ milestone: v1.1
 milestone_name: OpenCode v2 Desk
 current_phase: 08
 current_phase_name: Chat Model Picker
-status: planning
+status: executing
 stopped_at: Phase 07 complete, ready to plan Phase 08
-last_updated: "2026-11-22T01:17:30.803Z"
+last_updated: "2026-11-22T05:08:58.681Z"
 last_activity: 2026-11-22
-last_activity_desc: Phase 07 complete, transitioned to Phase 08
-state_head: fb48109a7974ace5c2fddca20899a8c60d281792
+last_activity_desc: Phase 08 execution started
+state_head: d38d3cff1f4769dc590aeaf265f7851d56a5e4d0
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
-  percent: 25
+  total_plans: 6
+  completed_plans: 4
 ---
 
 # Project State
@@ -25,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-11-21)
 
 **Core value:** A browser UI you can point at a real project and drive an OpenCode session through, start to finish, with no surprises.
-**Current focus:** Phase 07 — v2 Hardening Foundation
+**Current focus:** Phase 08 — Chat Model Picker
 
 ## Current Position
 
-Phase: 08 — Chat Model Picker
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-11-22 — Phase 07 complete, transitioned to Phase 08
+Phase: 08 (Chat Model Picker) — EXECUTING
+Plan: 2 of 3
+Status: Executing Phase 08
+Last activity: 2026-11-22 — Phase 08 execution started
 
 Progress: [███░░░░░░░] 25%
 
