@@ -117,6 +117,12 @@ export type TurnFiles = {
   /** User message that opened the turn — the `from` for the diff route. Undefined = newest turn. */
   from?: string;
   files: string[];
+  /**
+   * Stable per-turn key (ordinal of the opening user message). Unlike the
+   * anchor or `from`, it survives new assistant messages and the live echo
+   * being replaced by its stored `msg_…` id, so UI state can hang off it.
+   */
+  turn: number;
 };
 
 /**
@@ -129,17 +135,19 @@ export function turnFiles(messages: readonly TurnMessage[]): Map<string, TurnFil
   const out = new Map<string, TurnFiles>();
   const lastUser = messages.reduce((index, message, i) => (message.role === "user" ? i : index), -1);
   let from: string | undefined;
+  let turn = -1;
   let fetchable = false;
   let anchor: string | null = null;
   let files: string[] = [];
   const flush = () => {
-    if (anchor && files.length && fetchable) out.set(anchor, { from, files });
+    if (anchor && files.length && fetchable) out.set(anchor, { from, files, turn });
     anchor = null;
     files = [];
   };
   messages.forEach((message, index) => {
     if (message.role === "user") {
       flush();
+      turn += 1;
       const stored = !message.pending && /^msg_[A-Za-z0-9_-]+$/.test(message.id);
       from = stored ? message.id : undefined;
       fetchable = stored || index === lastUser;
@@ -165,4 +173,27 @@ export function mergeStepFiles<T extends { id: string; files?: string[] }>(list:
     return { ...message, files: merged };
   });
   return changed ? next : list;
+}
+
+/**
+ * Turn-end detector. OpenCode v2 can report one turn's end twice
+ * (`session.execution.succeeded` and `session.idle` both normalize to idle);
+ * `idle()` is true only for the first idle after activity, so turn-end work
+ * (diff refetch) runs once per turn.
+ */
+export function createTurnTracker() {
+  let busy = false;
+  return {
+    busy() {
+      busy = true;
+    },
+    idle(): boolean {
+      const ended = busy;
+      busy = false;
+      return ended;
+    },
+    reset() {
+      busy = false;
+    },
+  };
 }

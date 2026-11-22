@@ -21,10 +21,24 @@ type LoadState = { kind: "idle" } | { kind: "loading" } | { kind: "error"; messa
 /**
  * Per-turn "Files changed (N)" disclosure in the chat. N comes from the
  * assistant snapshot (free); the diff itself is fetched only when opened, and
- * refetched when `version` changes while open (new step files, turn idle).
+ * refetched when `version` changes while open (new step files, turn end).
  */
-export function FilesChangedBlock({ sessionId, from, paths, version }: { sessionId: string; from?: string; paths: string[]; version: string }) {
-  const [open, setOpen] = useState(false);
+export function FilesChangedBlock({
+  sessionId,
+  from,
+  paths,
+  version,
+  open,
+  onOpenChange,
+}: {
+  sessionId: string;
+  from?: string;
+  paths: string[];
+  version: string;
+  /** Owned by the parent (keyed by turn) so it survives a remount while the turn grows. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const [state, setState] = useState<LoadState>({ kind: "idle" });
   const gate = useMemo(createRequestGate, []);
   const panelId = useId();
@@ -51,7 +65,7 @@ export function FilesChangedBlock({ sessionId, from, paths, version }: { session
         type="button"
         aria-expanded={open}
         aria-controls={panelId}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => onOpenChange(!open)}
         className="flex w-full items-center gap-2 bg-elevated px-3 py-2 text-left text-xs text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
       >
         <ChevronRight aria-hidden className={cn("size-3.5 transition-transform", open && "rotate-90")} />
@@ -158,7 +172,7 @@ function FileRow({ file, pathMax }: { file: DiffFile; pathMax: number }) {
   );
 }
 
-type SideTokens = { old: Token[][] | null; new: Token[][] | null };
+type SideTokens = { old: (Token[] | null)[] | null; new: (Token[] | null)[] | null };
 
 function DiffView({ file }: { file: DiffFile }) {
   const parsed = useMemo(() => parsePatch(file.patch), [file.patch]);
@@ -212,7 +226,7 @@ function DiffView({ file }: { file: DiffFile }) {
 
 const MARK: Record<DiffLine["kind"], string> = { add: "+", del: "-", ctx: " ", meta: "" };
 
-function Row({ line, tokens }: { line: DiffLine; tokens?: Token[] }) {
+function Row({ line, tokens }: { line: DiffLine; tokens?: Token[] | null }) {
   if (line.kind === "meta") {
     return (
       <tr style={{ color: MONOKAI.muted }}>

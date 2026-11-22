@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { capHunks, countLines, languageForPath, mergeStepFiles, middleTruncate, parsePatch, turnFiles } from "./diff.ts";
+import { capHunks, countLines, createTurnTracker, languageForPath, mergeStepFiles, middleTruncate, parsePatch, turnFiles } from "./diff.ts";
 
 // Real OpenCode v2.3.2 patch shape (diff --git, index, ---/+++ headers, context=3 hunks).
 const PATCH = [
@@ -95,8 +95,8 @@ test("turnFiles groups assistant snapshot files per turn under the last assistan
     { id: "msg_a4", role: "assistant", files: ["c.ts"] },
   ]);
   assert.deepEqual([...groups.entries()], [
-    ["msg_a2", { from: "msg_u1", files: ["a.ts", "b.ts"] }],
-    ["msg_a4", { from: "msg_u3", files: ["c.ts"] }],
+    ["msg_a2", { from: "msg_u1", files: ["a.ts", "b.ts"], turn: 0 }],
+    ["msg_a4", { from: "msg_u3", files: ["c.ts"], turn: 2 }],
   ]);
 });
 
@@ -107,7 +107,7 @@ test("turnFiles only uses a live echo id for the newest turn", () => {
     { id: "tmp_2", role: "user", pending: true },
     { id: "msg_a2", role: "assistant", files: ["new.ts"] },
   ]);
-  assert.deepEqual([...groups.entries()], [["msg_a2", { from: undefined, files: ["new.ts"] }]]);
+  assert.deepEqual([...groups.entries()], [["msg_a2", { from: undefined, files: ["new.ts"], turn: 1 }]]);
 });
 
 test("mergeStepFiles adds new paths once and keeps identity when nothing changes", () => {
@@ -117,4 +117,35 @@ test("mergeStepFiles adds new paths once and keeps identity when nothing changes
   assert.equal(next[1], list[1]);
   assert.equal(mergeStepFiles(next, "msg_a", ["b.ts"]), next);
   assert.equal(mergeStepFiles(list, "msg_missing", ["x.ts"]), list);
+});
+
+test("a live turn keeps its turn key as messages arrive and the echo is replaced", () => {
+  const live = turnFiles([
+    { id: "msg_u0", role: "user" },
+    { id: "msg_a0", role: "assistant", files: ["x.ts"] },
+    { id: "tmp_1", role: "user", pending: true },
+    { id: "msg_a1", role: "assistant", files: ["a.ts"] },
+  ]);
+  const grown = turnFiles([
+    { id: "msg_u0", role: "user" },
+    { id: "msg_a0", role: "assistant", files: ["x.ts"] },
+    { id: "msg_u1", role: "user" },
+    { id: "msg_a1", role: "assistant", files: ["a.ts"] },
+    { id: "msg_a2", role: "assistant", files: ["b.ts"] },
+  ]);
+  assert.equal(live.get("msg_a1")?.turn, 1);
+  assert.equal(grown.has("msg_a1"), false, "the block moves to the newest assistant message");
+  assert.deepEqual(grown.get("msg_a2"), { from: "msg_u1", files: ["a.ts", "b.ts"], turn: 1 });
+});
+
+test("two idle events for one turn end it once", () => {
+  const tracker = createTurnTracker();
+  assert.equal(tracker.idle(), false, "idle with no activity is not a turn end");
+  tracker.busy();
+  tracker.busy();
+  assert.equal(tracker.idle(), true);
+  assert.equal(tracker.idle(), false, "execution.succeeded + session.idle → one refresh");
+  tracker.busy();
+  tracker.reset();
+  assert.equal(tracker.idle(), false, "switching chats forgets the old turn");
 });

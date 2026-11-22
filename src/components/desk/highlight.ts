@@ -53,6 +53,8 @@ const LOADERS: Record<string, () => Promise<unknown>> = {
 
 /** Beyond this many lines a file is shown as plain (still Monokai-coloured) text. */
 export const MAX_HIGHLIGHT_LINES = 3000;
+/** Lines longer than this (minified output) are not tokenized; they render as plain text. */
+export const MAX_HIGHLIGHT_LINE_LENGTH = 1000;
 
 let core: Promise<HighlighterCore> | null = null;
 const loaded = new Map<string, Promise<boolean>>();
@@ -87,18 +89,29 @@ function ensureLanguage(instance: HighlighterCore, lang: string): Promise<boolea
 }
 
 /**
- * Tokenize consecutive lines of one side of a hunk. Returns one token array per
- * input line, or null when the language is unknown or loading failed (callers
- * fall back to plain text — highlighting is never required to read a diff).
+ * Tokenize consecutive lines of one side of a hunk. Returns one entry per input
+ * line — tokens, or null for a line over MAX_HIGHLIGHT_LINE_LENGTH — or null
+ * overall when the language is unknown or loading failed. Callers render null
+ * as plain text: highlighting is never required to read a diff.
  */
-export async function tokenizeLines(lines: string[], lang: string | null): Promise<Token[][] | null> {
+export async function tokenizeLines(lines: string[], lang: string | null): Promise<(Token[] | null)[] | null> {
   if (!lang || !lines.length || lines.length > MAX_HIGHLIGHT_LINES) return null;
   try {
     const instance = await highlighter();
     if (!(await ensureLanguage(instance, lang))) return null;
-    const result: ThemedToken[][] = instance.codeToTokensBase(lines.join("\n"), { lang, theme: "monokai" });
+    // Long lines are blanked before tokenizing (shiki would still scan them),
+    // which also keeps the grammar state from being poisoned by a minified blob.
+    const long = lines.map((line) => line.length > MAX_HIGHLIGHT_LINE_LENGTH);
+    const source = lines.map((line, index) => (long[index] ? "" : line)).join("\n");
+    const result: ThemedToken[][] = instance.codeToTokensBase(source, {
+      lang,
+      theme: "monokai",
+      tokenizeMaxLineLength: MAX_HIGHLIGHT_LINE_LENGTH,
+    });
     if (result.length !== lines.length) return null;
-    return result.map((line) => line.map((token) => ({ content: token.content, color: token.color, fontStyle: token.fontStyle })));
+    return result.map((line, index) =>
+      long[index] ? null : line.map((token) => ({ content: token.content, color: token.color, fontStyle: token.fontStyle })),
+    );
   } catch {
     return null;
   }
