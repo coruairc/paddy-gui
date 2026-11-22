@@ -33,6 +33,7 @@ import { Input } from "@/components/ui/input";
 import { cn, formatTime } from "@/lib/utils";
 import {
   appendDelta,
+  activityPreview,
   dropPendingBubbles,
   echoToReplace,
   mergeMessage,
@@ -133,6 +134,8 @@ export function DeskApp() {
   /** step-files can arrive before the assistant message it names; hold them until it does. */
   const stepFilesRef = useRef(new Map<string, string[]>());
   const bottom = useRef<HTMLDivElement>(null);
+  /** The message list's own scroller. Scrolled directly so the app shell never moves. */
+  const listRef = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const sessionRef = useRef<string | null>(null);
   sessionRef.current = sessionId;
@@ -315,7 +318,7 @@ export function DeskApp() {
       setSessions(data.sessions);
       setModel(data.model);
       setModelSource("desk");
-      document.documentElement.dataset.theme = data.appearance;
+      applyTheme(data.appearance);
       if (data.status.error && !data.status.connected) setError(data.status.error);
       if (window.location.search.includes("token=")) {
         window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
@@ -362,7 +365,10 @@ export function DeskApp() {
 
   useEffect(() => {
     if (!stick) return;
-    bottom.current?.scrollIntoView({ block: "end" });
+    // Not scrollIntoView: that also scrolls every scrollable ancestor (the page),
+    // which left a black band under the composer.
+    const list = listRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
   }, [messages, working, prompts, stick]);
 
   const groups = useMemo(() => groupByDate(sessions.filter((item) => !item.archived && matches(item, query))), [sessions, query]);
@@ -962,7 +968,7 @@ export function DeskApp() {
               model={model}
               hasConnectionPassword={boot?.hasConnectionPassword ?? false}
               onAppearance={(appearance) => {
-                document.documentElement.dataset.theme = appearance;
+                applyTheme(appearance);
                 setBoot((current) => (current ? { ...current, appearance } : current));
               }}
               onModelChange={(next) => {
@@ -976,7 +982,8 @@ export function DeskApp() {
             <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
               <section className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <div
-                  className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8"
+                  ref={listRef}
+                  className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-6 sm:px-8"
                   onScroll={(event) => {
                     const node = event.currentTarget;
                     const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
@@ -1094,7 +1101,7 @@ export function DeskApp() {
                       className="mb-1 rounded-full bg-elevated px-3 py-1 text-[11px] text-muted shadow-[var(--shadow-border)]"
                       onClick={() => {
                         setStick(true);
-                        bottom.current?.scrollIntoView({ behavior: "smooth" });
+                        listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
                       }}
                     >
                       <ArrowDown className="mr-1 inline size-3" /> Latest
@@ -1281,12 +1288,25 @@ export function DeskApp() {
   );
 }
 
+/**
+ * Swap the theme without colour transitions: elements with transition-colors
+ * (sidebar pills) would otherwise fade from the old theme's colours for
+ * ~150 ms. Transitions come back two frames later, after the new paint.
+ */
+function applyTheme(appearance: string) {
+  const root = document.documentElement;
+  root.dataset.themeSwitching = "";
+  root.dataset.theme = appearance;
+  requestAnimationFrame(() => requestAnimationFrame(() => delete root.dataset.themeSwitching));
+}
+
 function SectionLabel({ children }: { children: string }) {
   return <p className="mt-3 mb-1 px-2.5 text-[11px] font-medium tracking-wide text-muted uppercase">{children}</p>;
 }
 
 function MessageView({ message }: { message: ChatMessage }) {
   const [open, setOpen] = useState(message.activity.some((item) => item.status === "running"));
+  const preview = activityPreview(message.activity);
   if (message.role === "system") {
     return <p className="text-xs text-muted">{message.text}</p>;
   }
@@ -1324,7 +1344,8 @@ function MessageView({ message }: { message: ChatMessage }) {
                 </ul>
               ) : (
                 <div className="mt-1 space-y-0.5 text-xs text-subtle">
-                  {message.activity.slice(-3).map((item) => (
+                  {preview.hidden > 0 && <p>and {preview.hidden} earlier step{preview.hidden === 1 ? "" : "s"}</p>}
+                  {preview.shown.map((item) => (
                     <p key={item.id}>{item.status === "completed" ? "✓" : "▸"} {item.title}</p>
                   ))}
                 </div>

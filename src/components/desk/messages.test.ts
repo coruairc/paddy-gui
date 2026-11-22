@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  activityPreview,
   appendDelta,
   dropPendingBubbles,
   echoToReplace,
@@ -143,4 +144,12 @@ test("a late server message replaces a settled echo instead of duplicating it", 
 test("echoToReplace prefers the pending echo and is null after a reset", () => {
   assert.equal(echoToReplace({ pending: "local_new", settled: "local_old" }), "local_new");
   assert.equal(echoToReplace({ pending: null, settled: null }), null);
+});
+
+test("activityPreview lists everything up to 4 and otherwise says how many are hidden", () => {
+  assert.deepEqual(activityPreview([1, 2, 3, 4]), { shown: [1, 2, 3, 4], hidden: 0 });
+  assert.deepEqual(activityPreview([1, 2, 3, 4, 5]), { shown: [3, 4, 5], hidden: 2 });
+  const nine = activityPreview([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  assert.equal(nine.shown.length + nine.hidden, 9, "shown + hidden always equals the count in the button");
+  assert.deepEqual(activityPreview([]), { shown: [], hidden: 0 });
 });
