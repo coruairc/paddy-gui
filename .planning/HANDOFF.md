@@ -1,43 +1,44 @@
-# Pause Handoff — 2026-11-21
+# Pause Handoff — 2026-11-22 (post-v1.1 desk polish)
 
-**Milestone:** v1.1 OpenCode v2 Desk (phases 7–10)
-**Stopped at:** Phase 7, Wave 1, plan 07-01 — Task 1 complete, Task 2 in progress (WIP committed).
+**Milestone:** v1.1 OpenCode v2 Desk (phases 7–10) is complete. After it, post-milestone
+desk work landed as reviewed PRs (outside GSD phases). Resume with OpenCode + GSD.
 
 ## State at pause
 
 | Item | State |
 |------|-------|
-| Phase 7 planning | ✓ Complete — 3 plans / 3 waves, checker PASSED (commits `90104d3`, `07afba8`, `2a6ca95`) |
-| 07-01 Task 1 (exact-match redaction + fixtures) | ✓ Committed `25074a3`, pushed |
-| 07-01 Task 2 (probe seam + hermetic spawn test) | ◆ WIP — `src/server/runtime.ts` + `runtime.test.ts` committed as WIP, NOT verified complete |
-| 07-01 SUMMARY.md | ✗ Not written (plan incomplete) |
-| Waves 2–3 (07-02 deskModel, 07-03 Settings/deletion/gate) | ○ Not started |
-| Phase 8 research | ✓ Committed `bbd91a0` (live v2.3.2 model contract) |
-| Phase 9 research | ✓ Committed `27a771f` (live command contract; STATE.md Phase 9 blocker resolved) |
-| Phases 8–10 planning/execution | ○ Not started |
+| main | `6bdb796` (PR #21 merge). Typecheck OK, lint 0 errors / 5 old warnings, 261 TS + 23 script tests, build OK |
+| PR #22 `fe/archive-notice-a11y` | Open, **awaiting Reviewer**. Head includes `3af2622` plus this handoff doc commit. 271 TS + 23 script tests, build OK |
+| Other open branches | None |
 
-## Resume tomorrow
+## Merged since v1.1 (all Reviewer-approved)
 
-1. `/gsd-autonomous --from 7` — re-enters at Phase 7. Plan 07-01 has no SUMMARY, so the
-   safe-resume gate will detect the WIP commits and offer recovery (close out / re-execute /
-   mark-and-skip). Inspect the WIP diff first: `git show --stat HEAD` and the runtime files.
-2. If Task 2's WIP is complete and green (`node --experimental-strip-types --test src/server/runtime.test.ts`),
-   finish 07-01 (SUMMARY + tracking) and continue waves 2–3.
-3. After Phase 7 verifies: phases 8 and 9 skip research (already banked) → plan → execute.
+| PR | Merge | What |
+|----|-------|------|
+| #16 | `008047d` | Files changed per turn + inspector Changes tab; shiki Monokai highlighting (lazy); diff/session routes mask secrets, 5 MB cap, `^msg_` ids |
+| #17 | `96a1c6c` | Green user chat bubbles (`--color-bubble*` tokens, AA contrast both themes) |
+| #18 | `4f1e173` | 32 MiB streamed upstream cap; mask configured passwords ≥4 chars; mobile footer count; per-turn cache |
+| #19 | `5f1bcda` | Diff cache/expansion keyed by session+turn; retryable stream resets; `filesError`; union-of-ranges masking |
+| #20 | `b5ca228` | Changes tab state owned by session (no stale files after archive); zero counts hidden; work preview; no shell scroll band |
+| #21 | `6bdb796` | Archive Undo notice (PATCH `archived:false`); `~N files touched` → net `Files changed (N)`; `relative` shell root |
 
-## Config changes made this session (committed)
+## Resume
 
-- `workflow.use_worktrees=false` — team rules mandate sequential single-tree execution.
-- `workflow._auto_chain_active=false` — stale chain flag cleared.
+1. Check Reviewer's verdict on PR #22 (report will be `/workspace/paddy-gui-review/REVIEW-pr22-*.md` on the bot box, or the PR comments). If approved, `gh pr merge 22 --merge` and delete the branch.
+2. Verify main: `npm run typecheck && npm run lint && npm test && npm run build`.
+3. Start the next milestone with GSD (`/gsd-new-milestone` or plan from the Deferred list below).
 
-## Pre-existing baseline paths (NOT part of this work, left uncommitted)
+## Known open items (all LOW / deferred)
 
-- `.planning/state.json` (modified, user edit)
-- `.planning/V2-MIGRATION-SPEC.md` (untracked, referenced by planning docs — consider committing separately)
-- `graphify-out/` (untracked, generated knowledge graph)
+- **DOM/render tests:** repo has no jsdom/RTL setup. App wiring (archive notice handlers, Changes panel wiring, focus moves) is covered only by pure-helper tests + browser checks. Reviewer's PR #21 F1 asks for render tests — decide whether to add a DOM test setup (new dev dependency).
+- **AUTO-01:** Playwright smoke tests in CI (would cover the above).
+- Restored chat jumps to top of sidebar (server bumps `time.updated`) — server behaviour, left alone.
+- Mobile footer uses the snapshot "~N files touched" count, not the net diff count.
+- Live-turn behaviour with a real paid model call not exercised in browser tests (mock OpenCode 2.3.2 used).
+- `npm audit`: 17 advisories, unchanged from before this work.
 
-## Executor note
+## Rules (team)
 
-The Wave 1 executor subagent was still running at pause; a halt message could not be delivered
-(session-ID follow-up failed). If it completed Task 2 after the WIP commit, its own commit will
-appear on top — reconcile with `git log` before resuming.
+- Commit only files you changed, by name; never `git add -A`. No force push, no tags.
+- Nothing merges to main without Reviewer review.
+- Never commit or log API keys/passwords.

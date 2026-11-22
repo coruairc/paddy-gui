@@ -96,6 +96,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 | Category | Item | Status | Deferred At | Milestone |
 |----------|------|--------|-------------|-----------|
+| Testing | TEST-01 No DOM/render test setup; app wiring covered by helper tests + browser checks only | v2 | 2026-11-22 | v1.1 |
 | Automation | PRE-01 Pre-existing repo-wide `prettier --check` drift (ESLint clean; accepted) | v2 | 2026-11-22 | v1.1 |
 | Automation | AUTO-01 Playwright smoke tests in CI | v2 | 2026-11-03 | v1.0 |
 | Automation | AUTO-02 Automated `~/.config/opencode-web` upgrade path | v2 | 2026-11-03 | v1.0 |
@@ -104,10 +105,12 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-22T00:38:15.194Z
-Stopped at: Phase 10 complete — all phases complete
-Resume file: None
+Last session: 2026-11-22T14:00Z
+Stopped at: v1.1 complete; post-milestone desk PRs #16–#21 merged (main `6bdb796`); PR #22 awaiting Reviewer
+Resume file: .planning/HANDOFF.md
 
 ## Operator Next Steps
 
-- Plan Phase 7 with `/gsd-plan-phase 7`
+- Read `.planning/HANDOFF.md`; merge PR #22 once Reviewer approves
+- Decide on a DOM/render test setup (Reviewer PR #21 F1) or fold into AUTO-01 Playwright smoke tests
+- Start the next milestone with `/gsd-new-milestone`
