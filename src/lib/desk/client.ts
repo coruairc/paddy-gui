@@ -216,6 +216,8 @@ export type Bootstrap = {
   hasConnectionPassword: boolean;
   deskModel: string;
   sessions: SessionSummary[];
+  /** False when OpenCode returned more pages (or listing failed): absence from `sessions` proves nothing. */
+  sessionsComplete?: boolean;
   groups: { label: string; items: SessionSummary[] }[];
   model: string;
   controllerVersion: string;

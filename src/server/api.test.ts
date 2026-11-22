@@ -32,6 +32,10 @@ function runtimeWithProject() {
       calls.push("list");
       return [{ id: "ses_1", title: "Authentication bug", time: { created: 10, updated: 20 } }];
     },
+    listSessionsPage: async () => {
+      calls.push("list");
+      return { sessions: [{ id: "ses_1", title: "Authentication bug", time: { created: 10, updated: 20 } }], hasMore: false };
+    },
     createSession: async () => {
       calls.push("create");
       return { id: "ses_2", title: "New chat", time: { created: 30, updated: 30 } };
@@ -648,4 +652,28 @@ test("invalid reply value is rejected", async () => {
   const { runtime } = runtimeWithProject();
   const result = await call(runtime, "POST", "/api/permissions/per_1/reply", { reply: "maybe" });
   assert.equal(result.status, 400);
+});
+
+test("bootstrap says whether the session list is complete", async () => {
+  const { runtime } = runtimeWithProject();
+  const full = await call(runtime, "GET", "/api/bootstrap");
+  assert.equal((full.body as { sessionsComplete: boolean }).sessionsComplete, true);
+
+  runtime.client = {
+    ...(runtime.client as object),
+    listSessionsPage: async () => ({ sessions: [{ id: "ses_9", title: "Newest", time: { created: 1, updated: 2 } }], hasMore: true }),
+  } as unknown as ControllerRuntime["client"];
+  const truncated = await call(runtime, "GET", "/api/bootstrap");
+  assert.equal((truncated.body as { sessionsComplete: boolean }).sessionsComplete, false);
+
+  runtime.client = {
+    ...(runtime.client as object),
+    listSessionsPage: async () => {
+      throw new OpenCodeError(503, "down");
+    },
+  } as unknown as ControllerRuntime["client"];
+  const failed = await call(runtime, "GET", "/api/bootstrap");
+  const body = failed.body as { sessionsComplete: boolean; sessions: unknown[] };
+  assert.equal(body.sessionsComplete, false);
+  assert.deepEqual(body.sessions, []);
 });

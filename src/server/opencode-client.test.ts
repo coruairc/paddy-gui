@@ -350,3 +350,21 @@ test("connection loss is an unavailable error", async () => {
     return true;
   });
 });
+
+test("session list page reports a truncated list via cursor.next", async () => {
+  const { fetchImpl } = mockFetch((url) => {
+    if (url.includes("search=more")) {
+      return { body: { data: [{ id: "ses_new", time: { created: 2, updated: 2 } }], cursor: { next: "cur_2" } } };
+    }
+    return { body: { data: [{ id: "ses_only", time: { created: 1, updated: 1 } }], cursor: {} } };
+  });
+  const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: fetchImpl });
+  const truncated = await client.listSessionsPage("/work/app", "more");
+  assert.deepEqual(truncated.sessions.map((item) => item.id), ["ses_new"]);
+  assert.equal(truncated.hasMore, true);
+  const complete = await client.listSessionsPage("/work/app");
+  assert.deepEqual(complete.sessions.map((item) => item.id), ["ses_only"]);
+  assert.equal(complete.hasMore, false);
+  // The array-returning wrapper still unwraps the same response.
+  assert.deepEqual((await client.listSessions("/work/app")).map((item) => item.id), ["ses_only"]);
+});

@@ -170,10 +170,21 @@ export class OpenCodeClient {
   }
 
   async listSessions(directory: string, search?: string): Promise<OpenCodeSession[]> {
-    const data = await this.request("GET", "/api/session", {
+    return (await this.listSessionsPage(directory, search)).sessions;
+  }
+
+  /**
+   * First page of `GET /api/session` (v2: `{ data, cursor }`, newest first).
+   * `hasMore` is true when `cursor.next` is set, i.e. the list is truncated
+   * and absence from it proves nothing about a session id.
+   */
+  async listSessionsPage(directory: string, search?: string): Promise<{ sessions: OpenCodeSession[]; hasMore: boolean }> {
+    const page = (await this.request("GET", "/api/session", {
       query: { directory, search, parentID: "null", order: "desc" },
-    });
-    return asArray<OpenCodeSession>(data);
+      unwrap: false,
+    })) as { data?: unknown; cursor?: { next?: string | null } } | unknown[] | null;
+    if (Array.isArray(page)) return { sessions: page as OpenCodeSession[], hasMore: false };
+    return { sessions: asArray<OpenCodeSession>(page?.data), hasMore: Boolean(page?.cursor?.next) };
   }
 
   async createSession(directory: string, title?: string): Promise<OpenCodeSession> {

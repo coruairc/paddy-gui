@@ -13,6 +13,7 @@ import { ResizeHandle } from "@/components/desk/resize-handle";
 import { createRequestGate } from "@/components/desk/request-gate";
 import { usePanelWidths } from "@/components/desk/use-panel-widths";
 import {
+  belongsToProject,
   browserStorage,
   forgetSession,
   isMissingSession,
@@ -246,10 +247,16 @@ export function DeskApp() {
       }
       // Per-project key only, and only an id the project's session list still has.
       // openSession re-remembers it on success and forgets it on a 404.
-      const resumeId = data.status.connected ? pickResumeId(browserStorage(), data.activeProjectId, data.sessions) : null;
-      if (resumeId) {
+      const resume = data.status.connected
+        ? pickResumeId(browserStorage(), data.activeProjectId, data.sessions, data.sessionsComplete !== false)
+        : null;
+      if (resume) {
+        // An id not found on a truncated first page is confirmed by the direct fetch in openSession.
+        const projectPath = data.projects.find((item) => item.id === data.activeProjectId)?.path;
         setLoadingSession(true);
-        void openSession(resumeId, data.activeProjectId).finally(() => setLoadingSession(false));
+        void openSession(resume.id, data.activeProjectId, resume.verify ? projectPath : undefined).finally(() =>
+          setLoadingSession(false),
+        );
       }
       const stream = new EventSource("/api/events");
       source = stream;
@@ -489,7 +496,7 @@ export function DeskApp() {
     }
   }
 
-  async function openSession(id: string, projectId: string | null = activeProjectId) {
+  async function openSession(id: string, projectId: string | null = activeProjectId, expectDirectory?: string) {
     setSettingsOpen(false);
     resetCommandTurn();
     setMessages(dropPendingBubbles);
@@ -503,6 +510,16 @@ export function DeskApp() {
     setStick(true);
     try {
       const data = await api.openSession(id);
+      if (expectDirectory !== undefined && !belongsToProject(data.session.directory, expectDirectory)) {
+        // A remembered id that turned out to be another project's chat: forget it, show nothing.
+        forgetSession(browserStorage(), id);
+        if (sessionRef.current === id) {
+          setSessionId(null);
+          setMessages([]);
+          setFiles([]);
+        }
+        return;
+      }
       setMessages(data.messages);
       setFiles(data.files);
       setSessions((current) => upsertSession(current, data.session));

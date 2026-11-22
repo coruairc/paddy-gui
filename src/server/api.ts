@@ -73,13 +73,18 @@ async function bootstrap(runtime: ControllerRuntime) {
   const status = await ensureStatus(runtime);
   const project = activeProject(runtime);
   let sessions: SessionSummary[] = [];
+  // False when OpenCode said there are more pages: the client must not treat
+  // "not in this list" as "gone".
+  let sessionsComplete = true;
   let model = "";
   const agent = "";
   if (status.connected && project) {
     try {
-      const listed = await runtime.requireClient().listSessions(project.path);
-      sessions = listed.map(summarizeSession).filter((item) => !item.archived || true);
+      const page = await runtime.requireClient().listSessionsPage(project.path);
+      sessions = page.sessions.map(summarizeSession).filter((item) => !item.archived || true);
+      sessionsComplete = !page.hasMore;
     } catch (err) {
+      sessionsComplete = false;
       status.error = err instanceof Error ? err.message : status.error;
     }
     try {
@@ -96,6 +101,7 @@ async function bootstrap(runtime: ControllerRuntime) {
     status,
     ...publicState(runtime.state),
     sessions,
+    sessionsComplete,
     groups: groupSessionsByDate(sessions.filter((item) => !item.archived)),
     model,
     agent,

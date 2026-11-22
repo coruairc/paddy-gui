@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   LEGACY_GLOBAL_KEY,
+  belongsToProject,
   clearAllLastSessions,
   forgetProject,
   forgetSession,
@@ -48,17 +49,46 @@ const throwing: StorageLike = {
   },
 };
 
-test("resume uses only the per-project key, never the global fallback", () => {
+test("the legacy global key is never trusted: a foreign id is dropped, not resumed", () => {
   const storage = memoryStorage({ [LEGACY_GLOBAL_KEY]: "ses_other_project" });
-  const sessions = [{ id: "ses_other_project" }, { id: "ses_a" }];
-  assert.equal(pickResumeId(storage, "prj_a", sessions), null);
-  // The cross-project global key is dropped on sight.
+  assert.equal(pickResumeId(storage, "prj_a", [{ id: "ses_a" }]), null);
   assert.equal(storage.getItem(LEGACY_GLOBAL_KEY), null);
+  assert.equal(storage.getItem(lastSessionKey("prj_a")), null);
+  // Also dropped when the list is truncated: a legacy id is never probed.
+  const truncated = memoryStorage({ [LEGACY_GLOBAL_KEY]: "ses_other_project" });
+  assert.equal(pickResumeId(truncated, "prj_a", [{ id: "ses_a" }], false), null);
+  assert.equal(truncated.getItem(LEGACY_GLOBAL_KEY), null);
+});
+
+test("the legacy global key migrates once into this project's key when the project lists it", () => {
+  const storage = memoryStorage({ [LEGACY_GLOBAL_KEY]: "ses_a" });
+  assert.deepEqual(pickResumeId(storage, "prj_a", [{ id: "ses_x" }, { id: "ses_a" }]), { id: "ses_a", verify: false });
+  assert.deepEqual(storage.dump(), { [lastSessionKey("prj_a")]: "ses_a" });
+});
+
+test("a per-project key wins over the legacy key, which is still removed", () => {
+  const storage = memoryStorage({ [LEGACY_GLOBAL_KEY]: "ses_x", [lastSessionKey("prj_a")]: "ses_a" });
+  assert.deepEqual(pickResumeId(storage, "prj_a", [{ id: "ses_x" }, { id: "ses_a" }]), { id: "ses_a", verify: false });
+  assert.deepEqual(storage.dump(), { [lastSessionKey("prj_a")]: "ses_a" });
+});
+
+test("an id missing from a truncated list is kept and resumed with verification", () => {
+  const storage = memoryStorage({ [lastSessionKey("prj_a")]: "ses_old" });
+  assert.deepEqual(pickResumeId(storage, "prj_a", [{ id: "ses_new" }], false), { id: "ses_old", verify: true });
+  assert.equal(storage.getItem(lastSessionKey("prj_a")), "ses_old");
+});
+
+test("belongsToProject treats only a known, different directory as foreign", () => {
+  assert.equal(belongsToProject("/work/app", "/work/app"), true);
+  assert.equal(belongsToProject("/work/app/", "/work/app"), true);
+  assert.equal(belongsToProject("/work/other", "/work/app"), false);
+  assert.equal(belongsToProject(undefined, "/work/app"), true);
+  assert.equal(belongsToProject("/work/app", undefined), true);
 });
 
 test("resume returns the stored id when the project's session list contains it", () => {
   const storage = memoryStorage({ [lastSessionKey("prj_a")]: "ses_a" });
-  assert.equal(pickResumeId(storage, "prj_a", [{ id: "ses_x" }, { id: "ses_a" }]), "ses_a");
+  assert.deepEqual(pickResumeId(storage, "prj_a", [{ id: "ses_x" }, { id: "ses_a" }]), { id: "ses_a", verify: false });
   assert.equal(storage.getItem(lastSessionKey("prj_a")), "ses_a");
 });
 

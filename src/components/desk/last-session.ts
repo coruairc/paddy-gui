@@ -103,25 +103,64 @@ export function clearAllLastSessions(storage: StorageLike | null): void {
   for (const key of ownKeys(storage)) safeRemove(storage, key);
 }
 
+export type ResumePlan = {
+  id: string;
+  /**
+   * True when the id could not be matched against a complete list: the
+   * caller must confirm it with a direct fetch (and check the project)
+   * before treating it as this project's chat.
+   */
+  verify: boolean;
+};
+
 /**
- * Which chat to reopen on bootstrap. Only this project's key is considered.
- * When the server's session list for the project is non-empty and does not
- * contain the stored id, the id is dead or foreign: it is forgotten. An empty
- * list proves nothing (listing may have failed), so nothing is resumed but the
- * key is kept.
+ * Which chat to reopen on bootstrap. Only this project's key is trusted.
+ *
+ * - In the project's session list → resume it.
+ * - Not in a complete, non-empty list → dead or foreign: forget it.
+ * - Not in a truncated list (OpenCode returned `cursor.next`) → keep it and
+ *   resume with `verify`, so a valid older chat is not lost.
+ * - Empty list → proves nothing (listing may have failed): keep, don't resume.
+ *
+ * One-time migration of the legacy global key: it is used only when this
+ * project has no key of its own and the id is actually in this project's
+ * list, in which case it is moved to the per-project key. Otherwise it is
+ * dropped, never trusted. Either way the global key is removed.
  */
 export function pickResumeId(
   storage: StorageLike | null,
   projectId: string | null,
   sessions: readonly { id: string }[],
-): string | null {
+  complete = true,
+): ResumePlan | null {
+  const legacy = safeGet(storage, LEGACY_GLOBAL_KEY);
   safeRemove(storage, LEGACY_GLOBAL_KEY);
+  if (!projectId) return null;
+  const listed = (id: string) => sessions.some((session) => session.id === id);
   const stored = readLastSession(storage, projectId);
-  if (!stored || !projectId) return null;
+  if (!stored) {
+    if (legacy && listed(legacy)) {
+      rememberSession(storage, projectId, legacy);
+      return { id: legacy, verify: false };
+    }
+    return null;
+  }
   if (sessions.length === 0) return null;
-  if (sessions.some((session) => session.id === stored)) return stored;
+  if (listed(stored)) return { id: stored, verify: false };
+  if (!complete) return { id: stored, verify: true };
   forgetProject(storage, projectId);
   return null;
+}
+
+/**
+ * For a `verify` resume: does the fetched session belong to the project?
+ * Only a session whose directory is known and differs counts as foreign;
+ * a missing directory proves nothing.
+ */
+export function belongsToProject(sessionDirectory: string | undefined, projectPath: string | undefined): boolean {
+  if (!sessionDirectory || !projectPath) return true;
+  const trim = (value: string) => value.replace(/\/+$/, "") || "/";
+  return trim(sessionDirectory) === trim(projectPath);
 }
 
 /** A failed open whose status says the session is gone. */
