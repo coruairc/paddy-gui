@@ -1160,7 +1160,7 @@ function MessageView({ message }: { message: ChatMessage }) {
     return (
       <article className="rise-in" data-command-echo={message.pending && message.text.startsWith("/") ? "true" : undefined}>
         <div className="flex justify-end">
-          <div className="max-w-[min(100%,36rem)] rounded-2xl rounded-br-md bg-bubble px-4 py-3 shadow-[var(--shadow-border)]">
+          <div className="max-w-[min(100%,36rem)] rounded-2xl rounded-br-md bg-bubble px-4 py-3 selection:bg-black/30 selection:text-bubble-fg shadow-[var(--shadow-border)]">
             <p className="text-sm leading-relaxed text-bubble-fg">{message.text}</p>
             <div className="mt-1.5 flex items-center justify-end gap-1.5">
               {message.pending && <span className={cn("size-1.5 rounded-full bg-bubble-fg pulse-live")} style={{ opacity: 0.7 }} />}
