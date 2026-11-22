@@ -441,16 +441,37 @@ const PARTIAL_LINE_MIN = 1000;
 
 /**
  * Replace every occurrence of each long-enough secret anywhere in `text`.
- * Longest first, de-duplicated: when one secret contains another, masking the
- * short one first would leave the long one's remainder visible.
+ * All match ranges of all secrets are found on the original text first and
+ * merged as a union, then each merged range becomes one "[redacted]". So a
+ * secret inside another, or two that only partly overlap (`abcdXYZW` +
+ * `XYZWefgh` in `abcdXYZWefgh`), leave no visible part of either.
+ *
+ * Note: with the 4-char floor, a short password that is also a common word
+ * (e.g. "test") is masked wherever it appears in a diff, including code and
+ * paths. That is the intended trade-off; see README "Connecting".
  */
 export function maskSecrets(text: string, secrets: readonly string[]): string {
-  const ordered = [...new Set(secrets)].filter((secret) => secret.length >= MIN_MASKED_SECRET_CHARS).sort((a, b) => b.length - a.length);
-  let out = text;
-  for (const secret of ordered) {
-    if (out.includes(secret)) out = out.split(secret).join("[redacted]");
+  const needles = [...new Set(secrets)].filter((secret) => secret.length >= MIN_MASKED_SECRET_CHARS);
+  const ranges: Array<[number, number]> = [];
+  for (const needle of needles) {
+    // Step by 1, not by needle length, so self-overlapping matches ("aaaa" in "aaaaa") are all covered.
+    for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) ranges.push([at, at + needle.length]);
   }
-  return out;
+  if (!ranges.length) return text;
+  ranges.sort((a, b) => a[0] - b[0]);
+  let out = "";
+  let cursor = 0;
+  let [start, end] = ranges[0];
+  for (const [from, to] of ranges.slice(1)) {
+    if (from <= end) {
+      end = Math.max(end, to);
+      continue;
+    }
+    out += text.slice(cursor, start) + "[redacted]";
+    cursor = end;
+    [start, end] = [from, to];
+  }
+  return out + text.slice(cursor, start) + "[redacted]" + text.slice(end);
 }
 
 function capPatch(full: string): string {

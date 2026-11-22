@@ -399,6 +399,14 @@ test("maskSecrets replaces every occurrence of each secret of 4+ chars", () => {
   assert.equal(maskSecrets("nothing here", [pw, ""]), "nothing here");
 });
 
+test("maskSecrets leaves no visible part of two partly overlapping secrets", () => {
+  assert.equal(maskSecrets("abcdXYZWefgh", ["abcdXYZW", "XYZWefgh"]), "[redacted]");
+  assert.equal(maskSecrets("abcdXYZWefgh", ["XYZWefgh", "abcdXYZW"]), "[redacted]");
+  assert.equal(maskSecrets("pre abcdXYZWefgh post abcdXYZW", ["abcdXYZW", "XYZWefgh"]), "pre [redacted] post [redacted]");
+  assert.equal(maskSecrets("xaaaaax", ["aaaa"]), "x[redacted]x", "self-overlapping matches are merged");
+  assert.equal(maskSecrets("k1=abcd k2=abcd", ["abcd"]), "k1=[redacted] k2=[redacted]", "separate matches stay separate");
+});
+
 test("maskSecrets masks the longer of two overlapping secrets whole, whatever the input order", () => {
   const short = "prefix-secret";
   const long = "prefix-secret-tail-very-secret";
