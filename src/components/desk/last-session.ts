@@ -3,9 +3,11 @@
  * `node:test`. Every storage call is guarded: a locked-down or full
  * localStorage must never break bootstrap or the event stream.
  *
- * Only the per-project key `paddy:lastSession:<projectId>` is used. The old
- * global `paddy:lastSession` key could point at another project's chat, so it
- * is never read and is dropped when seen.
+ * Only the per-project key `paddy:lastSession:<projectId>` is used for
+ * remembering. The old global `paddy:lastSession` key could point at another
+ * project's chat, so it is never trusted on its own: `pickResumeId` reads it
+ * once, migrates it into the current project's key only when that project has
+ * no key yet and its session list contains the id, and removes it either way.
  */
 
 export type StorageLike = {
@@ -17,7 +19,10 @@ export type StorageLike = {
 };
 
 const PREFIX = "paddy:lastSession";
-/** Pre-v1.2 global key; read by nothing, cleaned up opportunistically. */
+/**
+ * Pre-v1.2 global key. Read only by `pickResumeId` for the one-time migration
+ * described above; removed on every bootstrap and every `rememberSession`.
+ */
 export const LEGACY_GLOBAL_KEY = PREFIX;
 
 export function lastSessionKey(projectId: string): string {
@@ -184,20 +189,27 @@ export function sessionForSend(
 
 export const OPENING_CHAT_MESSAGE = "Still opening that chat. Your message is kept; send it once it has loaded.";
 
+/** True while the selected chat itself is still being fetched by openSession. */
+export function isOpeningSelected(opening: string | null, current: string | null): boolean {
+  return opening !== null && opening === current;
+}
+
 /**
- * Gate for the composer, decided before anything is cleared. `wait` means a
- * chat is still being opened: the caller must keep the typed draft and not
- * create or reuse a session. `go` means ensureSession may run; the draft is
- * cleared only after it succeeds.
+ * Gate for the composer, decided before anything is cleared. The Send
+ * button's disabled state and the Enter/submit path both use this, so they
+ * always agree. `wait` means the selected chat is still opening (or not yet
+ * confirmed): keep the typed draft, do not create or reuse a session. `go`
+ * means ensureSession may run; the draft is cleared only after it succeeds.
  */
 export function planSend(input: {
   text: string;
   busy: boolean;
   current: string | null;
   confirmed: string | null;
+  opening: string | null;
 }): { kind: "ignore" } | { kind: "wait"; message: string } | { kind: "go" } {
   if (!input.text.trim() || input.busy) return { kind: "ignore" };
-  if (sessionForSend(input.current, input.confirmed).kind === "wait") {
+  if (isOpeningSelected(input.opening, input.current) || sessionForSend(input.current, input.confirmed).kind === "wait") {
     return { kind: "wait", message: OPENING_CHAT_MESSAGE };
   }
   return { kind: "go" };

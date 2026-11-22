@@ -17,6 +17,7 @@ import {
   browserStorage,
   forgetSession,
   isMissingSession,
+  isOpeningSelected,
   OPENING_CHAT_MESSAGE,
   pickResumeId,
   planSend,
@@ -160,6 +161,7 @@ export function DeskApp() {
       if (sessionRef.current === event.id) {
         // The open chat is gone: the next send must start a new one, not reuse a dead id.
         confirmedSessionRef.current = null;
+        setOpeningSessionId(null);
         pendingCommandRef.current = null;
         settledCommandRef.current = null;
         commandTurnRef.current = false;
@@ -292,6 +294,16 @@ export function DeskApp() {
 
   const groups = useMemo(() => groupByDate(sessions.filter((item) => !item.archived && matches(item, query))), [sessions, query]);
   const active = sessions.find((item) => item.id === sessionId) ?? null;
+  const openingSelected = isOpeningSelected(openingSessionId, sessionId);
+  // Same decision as submit(): the button is enabled exactly when planSend would not ignore or wait.
+  const sendDisabled =
+    planSend({
+      text: draft,
+      busy: messages.some((m) => m.pending),
+      current: sessionId,
+      confirmed: confirmedSessionRef.current,
+      opening: openingSessionId,
+    }).kind !== "go";
   const liveActivity = messages.flatMap((message) => message.activity).slice(-8);
   const catalogLoaded = catalog !== null;
   const commandQuery = draft.startsWith("/") ? draft.slice(1) : null;
@@ -462,6 +474,7 @@ export function DeskApp() {
     resetCommandTurn();
     setActiveProjectId(id);
     confirmedSessionRef.current = null;
+    setOpeningSessionId(null);
     setSessionId(null);
     setMessages([]);
     // Commands and models are fetched per project directory. Drop any request
@@ -560,6 +573,7 @@ export function DeskApp() {
       resetCommandTurn();
       setActiveProjectId(targetProject.id);
       confirmedSessionRef.current = created.session.id;
+      setOpeningSessionId(null);
       setSessionId(created.session.id);
       setMessages([]);
       setFiles([]);
@@ -584,6 +598,7 @@ export function DeskApp() {
       busy: working || messages.some((m) => m.pending),
       current: sessionId,
       confirmed: confirmedSessionRef.current,
+      opening: openingSessionId,
     });
     if (plan.kind === "ignore") return;
     if (plan.kind === "wait") {
@@ -811,7 +826,7 @@ export function DeskApp() {
                     const title = window.prompt("Rename chat", active.title);
                     if (title?.trim()) void api.renameSession(active.id, title.trim()).then(() => refreshSessions());
                   }}>Rename</button>
-                  <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => void api.archiveSession(active.id, true).then(() => { resetCommandTurn(); forgetSession(browserStorage(), active.id); confirmedSessionRef.current = null; setSessionId(null); setMessages([]); return refreshSessions(); })}>Archive</button>
+                  <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => void api.archiveSession(active.id, true).then(() => { resetCommandTurn(); forgetSession(browserStorage(), active.id); confirmedSessionRef.current = null; setOpeningSessionId(null); setSessionId(null); setMessages([]); return refreshSessions(); })}>Archive</button>
                 </div>
               )}
             </div>
@@ -1035,7 +1050,7 @@ export function DeskApp() {
                         }
                       }}
                       rows={1}
-                      placeholder={openingSessionId ? "Opening chat…" : "Message Paddy"}
+                      placeholder={openingSelected ? "Opening chat…" : "Message Paddy"}
                       className="max-h-36 min-h-11 flex-1 resize-none bg-transparent px-3 py-2.5 text-sm text-fg placeholder:text-subtle focus:outline-none"
                     />
                     {working ? (
@@ -1043,7 +1058,7 @@ export function DeskApp() {
                         <Square />
                       </Button>
                     ) : (
-                      <Button type="submit" size="icon" disabled={!draft.trim() || messages.some((m) => m.pending) || openingSessionId !== null} aria-label={openingSessionId ? "Send (opening chat…)" : "Send"}>
+                      <Button type="submit" size="icon" disabled={sendDisabled} aria-label={openingSelected ? "Send (opening chat…)" : "Send"}>
                         <ArrowUp />
                       </Button>
                     )}
