@@ -260,7 +260,7 @@ export function DeskApp() {
         // An id not found on a truncated first page is confirmed by the direct fetch in openSession.
         const projectPath = data.projects.find((item) => item.id === data.activeProjectId)?.path;
         setLoadingSession(true);
-        void openSession(resume.id, data.activeProjectId, resume.verify ? projectPath : undefined).finally(() =>
+        void openSessionOrReport(resume.id, data.activeProjectId, resume.verify ? projectPath : undefined).finally(() =>
           setLoadingSession(false),
         );
       }
@@ -563,6 +563,19 @@ export function DeskApp() {
     });
   }
 
+  /**
+   * For fire-and-forget callers. runLatest lets a bug in onData reject; report it
+   * on the chat that hit it (never on one the user has moved to) so it can't sit
+   * on "Still opening…" or fail silently.
+   */
+  function openSessionOrReport(id: string, projectId?: string | null, expectDirectory?: string): Promise<void> {
+    return openSession(id, projectId === undefined ? activeProjectId : projectId, expectDirectory).catch((err: unknown) => {
+      if (sessionRef.current !== id) return;
+      setOpeningSessionId(null);
+      setError(err instanceof Error ? err.message : "Could not open that chat");
+    });
+  }
+
   async function newChat() {
     if (creatingChat) return;
     setCreatingChat(true);
@@ -737,7 +750,7 @@ export function DeskApp() {
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => void openSession(item.id)}
+                    onClick={() => void openSessionOrReport(item.id)}
                     className={cn(
                       "flex h-9 w-full items-center rounded-xl px-2.5 text-left text-sm transition-colors",
                       item.id === sessionId && !settingsOpen ? "bg-elevated text-fg" : "text-muted hover:bg-surface hover:text-fg",
@@ -842,6 +855,9 @@ export function DeskApp() {
                         setMessages([]);
                       }
                       return refreshSessions();
+                    }).catch((err: unknown) => {
+                      // Only the chat being archived shows the failure; the user may have moved on.
+                      if (sessionRef.current === archivedId) setError(err instanceof Error ? err.message : "Could not archive that chat");
                     });
                   }}>Archive</button>
                 </div>
