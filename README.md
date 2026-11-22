@@ -122,6 +122,8 @@ On startup the controller:
 
 If OpenCode is already running and wants a password, set it in Settings → Connection. The password stays in the controller state file (mode `0600`) and is not returned to the browser.
 
+Any configured server password of 4 or more characters (Settings → Connection or `OPENCODE_SERVER_PASSWORD`) is replaced with `[redacted]` wherever it appears in a "Files changed" diff, including file paths. A short password that is also a common word, such as `test`, will therefore be masked inside ordinary code (`import { [redacted] } from …`). Use a long random password to avoid that.
+
 ## Projects
 
 Sidebar → Add project, then paste an absolute directory. The controller checks that the path exists and is a directory, stores the real path, and refuses later session calls that are not one of those bookmarks. Removing a project only removes it from this desk.

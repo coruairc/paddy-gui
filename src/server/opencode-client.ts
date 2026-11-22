@@ -682,7 +682,14 @@ export async function readCapped(response: Response, maxBytes: number): Promise<
   let received = 0;
   let text = "";
   for (;;) {
-    const { done, value } = await reader.read();
+    let chunk: ReadableStreamReadResult<Uint8Array>;
+    try {
+      chunk = await reader.read();
+    } catch (err) {
+      // A reset mid-body is a transport failure like a refused connection: retryable 503.
+      throw new OpenCodeError(0, err instanceof Error ? err.message : "OpenCode closed the connection", true);
+    }
+    const { done, value } = chunk;
     if (done) break;
     received += value.byteLength;
     if (received > maxBytes) {

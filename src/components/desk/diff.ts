@@ -208,3 +208,51 @@ export function createTurnTracker() {
     },
   };
 }
+
+/** Key for per-turn UI state. Includes the chat, so one chat's turn N can never match another's. */
+export function turnStateKey(sessionId: string, turn: number): string {
+  return `${sessionId}:${turn}`;
+}
+
+/** Most turn diffs kept at once (each can be up to the 5 MB response budget). */
+export const TURN_DIFF_CACHE_LIMIT = 8;
+
+export type TurnDiffCache<T> = {
+  get(sessionId: string, turn: number): T | undefined;
+  set(sessionId: string, turn: number, value: T): void;
+  clear(): void;
+  readonly size: number;
+};
+
+/**
+ * Loaded per-turn diffs, keyed by (session, turn) and bounded: least recently
+ * used entries are dropped past `limit`. Keying by session means a stale entry
+ * from an archived, deleted or switched-away chat can never be read for a new
+ * chat's turn of the same number, whichever code path changed the chat.
+ */
+export function createTurnDiffCache<T>(limit = TURN_DIFF_CACHE_LIMIT): TurnDiffCache<T> {
+  const entries = new Map<string, T>();
+  return {
+    get(sessionId, turn) {
+      const key = turnStateKey(sessionId, turn);
+      const value = entries.get(key);
+      if (value !== undefined) {
+        entries.delete(key);
+        entries.set(key, value);
+      }
+      return value;
+    },
+    set(sessionId, turn, value) {
+      const key = turnStateKey(sessionId, turn);
+      entries.delete(key);
+      entries.set(key, value);
+      while (entries.size > limit) entries.delete(entries.keys().next().value as string);
+    },
+    clear() {
+      entries.clear();
+    },
+    get size() {
+      return entries.size;
+    },
+  };
+}

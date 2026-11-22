@@ -172,7 +172,9 @@ export const api = {
   sessions: () => request<{ sessions: SessionSummary[]; groups: { label: string; items: SessionSummary[] }[]; archived: SessionSummary[] }>("/api/sessions"),
   createSession: () => request<{ session: SessionSummary }>("/api/sessions", { method: "POST", body: "{}" }),
   openSession: (id: string) =>
-    request<{ session: SessionSummary; messages: ChatMessage[]; files: DiffFile[] }>("/api/sessions/" + encodeURIComponent(id)),
+    request<{ session: SessionSummary; messages: ChatMessage[]; files: DiffFile[]; filesError?: string }>(
+      "/api/sessions/" + encodeURIComponent(id),
+    ),
   renameSession: (id: string, title: string) =>
     request("/api/sessions/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify({ title }) }),
   archiveSession: (id: string, archived: boolean) =>
