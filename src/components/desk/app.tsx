@@ -645,6 +645,7 @@ export function DeskApp() {
                   <div className="mx-auto flex max-w-2xl items-end gap-2 rounded-2xl bg-elevated p-2 shadow-[var(--shadow-border)]">
                     <textarea
                       ref={composer}
+                      data-composer
                       value={draft}
                       onChange={(event) => setDraft(event.target.value)}
                       onKeyDown={(event) => {
