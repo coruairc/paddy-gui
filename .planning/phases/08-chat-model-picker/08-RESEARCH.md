@@ -650,12 +650,16 @@ function chooseModel(key: string) {
 | A5 | 272-item flat list renders fine without virtualization (group+filter before render) | Stack | Low: Settings already renders per-provider lists of similar size; virtualization rejected by milestone research. |
 | A6 | Phase 7 `updateSettings` body key will be `model` (per ARCHITECTURE.md:44; 07-CONTEXT says "extend ... with deskModel" without naming the wire key) | Phase 7 dependency | Medium: one-line mismatch; planner MUST read Phase 7's executed api.ts before wiring the write. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Prompt-time failure shape for an invalid ref** — What we know: POST accepts anything (live). What's unclear: exact error event/message when prompting with `no-such-model-xyz`. Recommendation: Phase 10 (VER-05) live check; Phase 8 relies on existing execution-failed surfacing.
-2. **Show models of unconnected providers?** — What we know: catalog lists all 10 providers regardless of credentials; `enabled:true` everywhere; connection state lives in `/api/integration` (Settings fan-out). Recommendation: show all (OpenCode TUI parity), mark nothing — picking an unconnected provider's model fails at prompt time with OpenCode's own error, which is honest. Discretion: a "connected" badge would require one extra `/api/provider`/`/api/integration` call — not required by MODEL-01/03.
-3. **Provider display names** — Model.Info has no provider name; group labels would be raw ids (`alibaba-token-plan`). Recommendation: humanize the id for the label (repo `humanize` precedent, normalize.ts:458-461) while keeping the raw id in the key; optional single `GET /api/provider` for names is discretion, not required.
-4. **MRU ordering / default badge polish** — P2 in milestone research; `GET /api/model/default` provides the default badge cheaply. Recommendation: include default badge (one extra light call in the same route), defer MRU.
+1. **Prompt-time failure shape for an invalid ref** — What we know: POST accepts anything (live). What's unclear: exact error event/message when prompting with `no-such-model-xyz`.
+   **RESOLVED:** Deferred to Phase 10 (VER-05) live check (assumption A1). Phase 8 relies on the existing execution-failed surfacing and the abort-before-`/prompt` guard; no Phase 8 code depends on the exact failure type.
+2. **Show models of unconnected providers?** — What we know: catalog lists all 10 providers regardless of credentials; `enabled:true` everywhere; connection state lives in `/api/integration` (Settings fan-out).
+   **RESOLVED:** Show all entries, mark nothing (OpenCode TUI parity). Locked in `08-CONTEXT.md` ("Picker Experience"); a connected badge is deferred as it would add an extra request not required by MODEL-01/03.
+3. **Provider display names** — Model.Info has no provider name; group labels would be raw ids (`alibaba-token-plan`).
+   **RESOLVED:** Humanize the raw id for the group label (repo `humanize` precedent) while keeping the raw id in the key. Locked in `08-CONTEXT.md`; no extra provider-name call.
+4. **MRU ordering / default badge polish** — P2 in milestone research; `GET /api/model/default` provides the default badge cheaply.
+   **RESOLVED:** Include the default badge from the same route's `default` field; defer MRU ordering. Locked in `08-CONTEXT.md` / `08-UI-SPEC.md`.
 
 ## Environment Availability
 
