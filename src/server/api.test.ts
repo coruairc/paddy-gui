@@ -677,3 +677,65 @@ test("bootstrap says whether the session list is complete", async () => {
   assert.equal(body.sessionsComplete, false);
   assert.deepEqual(body.sessions, []);
 });
+
+test("session diff route forwards a validated turn range and normalizes the payload", async () => {
+  const { runtime } = runtimeWithProject();
+  const seen: unknown[] = [];
+  runtime.state.ownedServerPassword = "ocw_" + "z".repeat(48);
+  runtime.client = {
+    ...(runtime.client as object),
+    getDiff: async (_dir: string, _id: string, range: unknown) => {
+      seen.push(range);
+      return [
+        { file: "src/a.ts", patch: "@@ -1 +1 @@\n-a\n+b\n", additions: 1, deletions: 1, status: "modified", junk: { nested: true } },
+        { file: "img.png", patch: "Binary files a/img.png and b/img.png differ\n", additions: 0, deletions: 0, status: "added" },
+        { file: "leak.env", patch: runtime.state.ownedServerPassword, additions: 1, deletions: 0, status: "added" },
+      ];
+    },
+  } as unknown as ControllerRuntime["client"];
+  const result = await call(runtime, "GET", "/api/sessions/ses_1/diff?from=msg_u1&to=msg_u2");
+  assert.equal(result.status, 200);
+  assert.deepEqual(seen, [{ from: "msg_u1", to: "msg_u2" }]);
+  const files = (result.body as { files: Array<Record<string, unknown>> }).files;
+  assert.deepEqual(Object.keys(files[0]).sort(), ["additions", "binary", "deletions", "file", "patch", "status", "truncated"]);
+  assert.equal(files[1].binary, true);
+  assert.equal(files[1].status, "added");
+  assert.equal(JSON.stringify(result.body).includes("ocw_"), false);
+
+  await call(runtime, "GET", "/api/sessions/ses_1/diff");
+  assert.deepEqual(seen[1], {});
+});
+
+test("session diff route rejects malformed range ids before calling OpenCode", async () => {
+  const { runtime } = runtimeWithProject();
+  let called = false;
+  runtime.client = {
+    ...(runtime.client as object),
+    getDiff: async () => {
+      called = true;
+      return [];
+    },
+  } as unknown as ControllerRuntime["client"];
+  for (const query of ["from=../../etc", "to=a%20b", "from=" + "x".repeat(200)]) {
+    const result = await call(runtime, "GET", `/api/sessions/ses_1/diff?${query}`);
+    assert.equal(result.status, 400, query);
+    assert.match((result.body as { error: string }).error, /Invalid (from|to) message id/);
+  }
+  assert.equal(called, false);
+});
+
+test("session diff route requires a selected project and surfaces upstream 404s", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.state.activeProjectId = null;
+  const noProject = await call(runtime, "GET", "/api/sessions/ses_1/diff");
+  assert.equal(noProject.status, 400);
+  const { runtime: second } = runtimeWithProject();
+  second.client = {
+    ...(second.client as object),
+    getDiff: async () => {
+      throw new OpenCodeError(404, "Message not found: msg_gone");
+    },
+  } as unknown as ControllerRuntime["client"];
+  const missing = await call(second, "GET", "/api/sessions/ses_1/diff?from=msg_gone");
+  assert.equal(missing.status, 404);
+});

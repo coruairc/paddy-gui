@@ -250,9 +250,13 @@ async function sessionRoute(runtime: ControllerRuntime, request: Request, id: st
   }
   if (rest === "retry" && request.method === "POST") return retry(runtime, project.path, id);
   if (rest === "diff" && request.method === "GET") {
-    const diff = await client.getDiff(project.path, id);
+    const range = diffRange(new URL(request.url).searchParams);
+    if (!range.ok) return json(400, { error: range.error });
+    const diff = await client.getDiff(project.path, id, range.value);
     const files: DiffFile[] = Array.isArray(diff) ? diff.map(toDiffFile) : [];
-    return json(200, { files });
+    // Exact-value needles only: a persisted password echoed into a file is masked;
+    // ordinary code is untouched (no diff field name matches the key rule).
+    return json(200, { files: redactSecrets(files, secretNeedles(runtime)) });
   }
   return json(404, { error: "Not found" });
 }
@@ -527,6 +531,20 @@ async function isDisabledModel(runtime: ControllerRuntime, key: string): Promise
   } catch {
     return false;
   }
+}
+
+// OpenCode message ids (`msg_…`); anything else never reaches the upstream query.
+const MESSAGE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+function diffRange(params: URLSearchParams): { ok: true; value: { from?: string; to?: string } } | { ok: false; error: string } {
+  const value: { from?: string; to?: string } = {};
+  for (const key of ["from", "to"] as const) {
+    const raw = params.get(key);
+    if (raw === null || raw === "") continue;
+    if (!MESSAGE_ID.test(raw)) return { ok: false, error: `Invalid ${key} message id` };
+    value[key] = raw;
+  }
+  return { ok: true, value };
 }
 
 function splitModel(model: string): [string | undefined, string | undefined] {

@@ -57,7 +57,15 @@ export type OpenCodeMessage = {
   /** assistant message parts. */
   content?: OpenCodePart[];
   error?: { message?: string } | { data?: { message?: string }; name?: string };
+  /** v2 assistant step snapshot; `files` are project-relative paths the step changed. */
+  snapshot?: { start?: string; end?: string; files?: unknown };
 };
+
+/** Range for `GET /api/session/:id/diff`: user message ids; both optional (default = newest turn). */
+export type DiffRange = { from?: string; to?: string };
+
+/** Unchanged lines around each hunk. Without it v2 returns whole-file patches. */
+export const DIFF_CONTEXT_LINES = 3;
 
 export type OpenCodeModel = {
   id?: string;
@@ -272,10 +280,16 @@ export class OpenCodeClient {
     );
   }
 
-  async getDiff(_directory: string, sessionId: string): Promise<unknown[]> {
+  /**
+   * v2 `GET /api/session/:id/diff` → `{ data: FileDiff.Info[] }` (file, patch,
+   * additions, deletions, status, optional more). Per turn: `from` is the user
+   * message whose turn to diff, `to` extends through a later turn.
+   */
+  async getDiff(_directory: string, sessionId: string, range: DiffRange = {}): Promise<unknown[]> {
     const data = await this.request(
       "GET",
       `/api/session/${encodeURIComponent(sessionId)}/diff`,
+      { query: { from: range.from, to: range.to, context: String(DIFF_CONTEXT_LINES) } },
     );
     return asArray<unknown>(data);
   }
