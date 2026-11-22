@@ -42,6 +42,7 @@ export async function handleApi(runtime: ControllerRuntime, request: Request): P
     if (request.method === "POST" && route === "/sessions") return await createSession(runtime, request);
     const session = route.match(/^\/sessions\/([^/]+)(?:\/(.+))?$/);
     if (session) return await sessionRoute(runtime, request, decodeURIComponent(session[1]), session[2]);
+    if (request.method === "GET" && (route === "/models")) return await listModels(runtime);
     if (request.method === "GET" && (route === "/config" || route === "/providers" || route === "/agents" || route === "/mcp" || route === "/vcs" || route === "/files/status" || route === "/permissions")) {
       return await readOpenCode(runtime, route);
     }
@@ -267,6 +268,52 @@ async function retry(runtime: ControllerRuntime, directory: string, id: string):
   }
   await client.sendMessage(directory, id, { text: lastUser.text });
   return json(202, { ok: true, text: lastUser.text });
+}
+
+async function listModels(runtime: ControllerRuntime): Promise<ApiResult> {
+  if (!runtime.status.connected) return json(200, { models: [], default: "" });
+  const directory = activeProject(runtime)?.path;
+  const client = runtime.requireClient();
+  const [catalog, fallback] = await Promise.all([
+    client.listModels(directory),
+    client.getDefaultModel(directory).catch(() => null),
+  ]);
+  const projected: Array<{
+    modelKey: string;
+    id: string;
+    providerID: string;
+    name: string;
+    status: string;
+    context: number;
+    released: number;
+    enabled: boolean;
+    tools: boolean;
+    variantCount: number;
+  }> = [];
+  for (const entry of catalog) {
+    if (!entry?.id || !entry.providerID || !entry.name) continue;
+    projected.push({
+      modelKey: `${entry.providerID}/${entry.id}`,
+      id: entry.id,
+      providerID: entry.providerID,
+      name: entry.name,
+      status: entry.status ?? "active",
+      context: entry.limit?.context ?? 0,
+      released: entry.time?.released ?? 0,
+      enabled: entry.enabled !== false,
+      tools: entry.capabilities?.tools === true,
+      variantCount: Array.isArray(entry.variants) ? entry.variants.length : 0,
+    });
+  }
+  const defaultKey =
+    fallback?.providerID && fallback?.id ? `${fallback.providerID}/${fallback.id}` : "";
+  // Project → redact → assemble: identifiers travel under `modelKey` so the
+  // `^key$` credential rule cannot replace them with "[redacted]".
+  const safe = redactSecrets({ models: projected, default: defaultKey }, secretNeedles(runtime));
+  return json(200, {
+    models: safe.models.map(({ modelKey, ...rest }) => ({ key: modelKey, ...rest })),
+    default: safe.default,
+  });
 }
 
 async function readOpenCode(runtime: ControllerRuntime, route: string): Promise<ApiResult> {

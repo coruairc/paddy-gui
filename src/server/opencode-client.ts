@@ -69,6 +69,20 @@ export type OpenCodeModel = {
   limit?: { context?: number; input?: number; output?: number };
 };
 
+/** v2 catalog entry from `GET /api/model`. Raw `headers`/`settings`/`body` never leave the controller. */
+export type OpenCodeModelInfo = {
+  id: string;
+  modelID: string;
+  providerID: string;
+  name: string;
+  status?: "alpha" | "beta" | "deprecated" | "active";
+  enabled?: boolean;
+  limit?: { context?: number; input?: number; output?: number };
+  time?: { released?: number };
+  capabilities?: { tools?: boolean; input?: string[]; output?: string[]; temperature?: boolean };
+  variants?: Array<{ id?: string }>;
+};
+
 export type OpenCodeFormField = {
   key?: string;
   type?: string;
@@ -266,6 +280,18 @@ export class OpenCodeClient {
       if (model) merged.model = model;
     }
     return merged;
+  }
+
+  async listModels(directory?: string): Promise<OpenCodeModelInfo[]> {
+    const data = await this.request("GET", "/api/model", { query: locationQuery(directory) });
+    return asArray<OpenCodeModelInfo>(data);
+  }
+
+  async getDefaultModel(directory?: string): Promise<OpenCodeModelInfo | null> {
+    const data = await this.request("GET", "/api/model/default", {
+      query: locationQuery(directory),
+    });
+    return data && typeof data === "object" ? (data as OpenCodeModelInfo) : null;
   }
 
   async getProviders(directory?: string): Promise<unknown> {

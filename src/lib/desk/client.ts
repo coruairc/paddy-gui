@@ -71,6 +71,20 @@ export type ChatMessage = {
 
 export type DiffFile = { file: string; additions: number; deletions: number; patch: string };
 
+/** Browser-safe projection of an OpenCode v2 model catalog entry. */
+export type DeskModel = {
+  key: string;
+  id: string;
+  providerID: string;
+  name: string;
+  status: string;
+  context: number;
+  released: number;
+  enabled: boolean;
+  tools: boolean;
+  variantCount: number;
+};
+
 export type PermissionPrompt = {
   id: string;
   sessionId: string;
@@ -144,6 +158,7 @@ export const api = {
   retry: (id: string) => request("/api/sessions/" + encodeURIComponent(id) + "/retry", { method: "POST" }),
   diff: (id: string) => request<{ files: DiffFile[] }>("/api/sessions/" + encodeURIComponent(id) + "/diff"),
   providers: () => request<ProvidersResponse>("/api/providers"),
+  models: () => request<{ models: DeskModel[]; default: string }>("/api/models"),
   agents: () => request<unknown>("/api/agents"),
   mcp: () => request<unknown>("/api/mcp"),
   config: () => request<Record<string, unknown>>("/api/config"),

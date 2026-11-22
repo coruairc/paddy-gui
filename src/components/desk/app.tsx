@@ -5,6 +5,8 @@ import { HelixMark } from "@/components/helix-mark";
 import { Markdown } from "@/components/markdown";
 import { PaddyIdle } from "@/components/paddy-idle";
 import { SettingsPanel } from "@/components/desk/settings";
+import { ModelPicker } from "@/components/desk/model-picker";
+import { modelForSend, resolveActiveModel } from "@/components/desk/models";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn, formatTime } from "@/lib/utils";
@@ -16,6 +18,7 @@ import {
   type ChatMessage,
   type ConnectionStatus,
   type DeskEvent,
+  type DeskModel,
   type DiffFile,
   type PermissionPrompt,
   type Project,
@@ -43,6 +46,11 @@ export function DeskApp() {
   const [inspector, setInspector] = useState<"work" | "changes">("work");
   const [branch, setBranch] = useState<string | null>(null);
   const [model, setModel] = useState("");
+  const [catalog, setCatalog] = useState<{ models: DeskModel[]; default: string; fetchedAt: number } | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [modelLoading, setModelLoading] = useState(false);
+  const [modelLoadError, setModelLoadError] = useState<string | null>(null);
+  const [modelNote, setModelNote] = useState<string | null>(null);
   const [agent, setAgent] = useState("");
   const [agents, setAgents] = useState<string[]>([]);
   const [stick, setStick] = useState(true);
@@ -178,6 +186,38 @@ export function DeskApp() {
   const groups = useMemo(() => groupByDate(sessions.filter((item) => !item.archived && matches(item, query))), [sessions, query]);
   const active = sessions.find((item) => item.id === sessionId) ?? null;
   const liveActivity = messages.flatMap((message) => message.activity).slice(-8);
+  const catalogLoaded = catalog !== null;
+  const effective = resolveActiveModel(
+    model,
+    catalog?.models ?? [],
+    catalog?.default ?? "",
+    catalogLoaded,
+  );
+
+  async function loadModels(force = false) {
+    if (!force && catalog && Date.now() - catalog.fetchedAt < 30_000) {
+      setModelLoading(false);
+      return;
+    }
+    setModelLoading(true);
+    try {
+      const data = await api.models();
+      setCatalog({ models: data.models, default: data.default, fetchedAt: Date.now() });
+      setModelLoadError(null);
+    } catch (err) {
+      setModelLoadError(err instanceof Error ? err.message : "Could not load models");
+    } finally {
+      setModelLoading(false);
+    }
+  }
+
+  function chooseModel(key: string) {
+    setModel(key);
+    setModelNote(null);
+    void api.settings({ deskModel: key }).catch(() => {
+      setModelNote("Model saved for this turn only — it will not survive a reload.");
+    });
+  }
 
   async function refreshSessions() {
     const data = await api.sessions();
@@ -304,7 +344,7 @@ export function DeskApp() {
     ]);
     setWorking(true);
     try {
-      await api.send(id, text, model || undefined, agent || undefined);
+      await api.send(id, text, modelForSend(model, effective) || undefined, agent || undefined);
     } catch (err) {
       setMessages((current) => current.filter((m) => m.id !== tempId));
       setDraft(text);
@@ -442,6 +482,27 @@ export function DeskApp() {
               </p>
             </div>
             <div className="flex items-center gap-2">
+              {project && (
+                <ModelPicker
+                  open={pickerOpen}
+                  onOpenChange={(next) => {
+                    setPickerOpen(next);
+                    if (next) void loadModels();
+                  }}
+                  models={catalog?.models ?? []}
+                  defaultKey={catalog?.default ?? ""}
+                  active={effective}
+                  catalogLoaded={catalogLoaded}
+                  connected={Boolean(status?.connected)}
+                  loading={modelLoading}
+                  loadError={modelLoadError}
+                  onSelect={(key) => {
+                    chooseModel(key);
+                    setPickerOpen(false);
+                  }}
+                  onRetry={() => void loadModels(true)}
+                />
+              )}
               <span className="hidden items-center gap-1.5 text-xs text-muted sm:flex">
                 <span className={cn("size-1.5 rounded-full", status?.connected ? "bg-ok pulse-live" : "bg-subtle")} />
                 {status?.connected ? "Live" : "Offline"}
@@ -610,6 +671,9 @@ export function DeskApp() {
                       </Button>
                     )}
                   </div>
+                  {modelNote && (
+                    <p className="mx-auto mt-2 max-w-2xl px-2 text-[11px] text-warn">{modelNote}</p>
+                  )}
                   <p className="mx-auto mt-2 max-w-2xl px-2 text-[11px] text-subtle">
                     Enter to send · Shift+Enter for a line · work stays in {project?.name ?? "the selected project"}
                   </p>
