@@ -44,6 +44,8 @@ Result: **PASS**.
 |---|---|
 | `npm test` (live listener on 4096) | script 20/20, TS 110/110, exit 0 |
 | `unshare -Urn sh -c 'ip link set lo up && npm test'` | script 20/20, TS 110/110, exit 0 |
+
+Note: 110/110 is the `test` script as it stood then. It did not yet run `models.test.ts`/`commands.test.ts` (22 more tests, wired in later by e30da3f), so it was not the full suite.
 | `npm run lint` | exit 0, 0 errors, 5 pre-existing warnings |
 | `npm run typecheck` (`tsc --noEmit`) | exit 0 |
 | Non-test `node:*` imports in `src/components`, `src/lib/desk`, `src/routes`, `src/router.tsx` | 0 (only `*.test.ts` files import `node:test`) |

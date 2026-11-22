@@ -27,7 +27,7 @@ overrides_applied: 0
 |---|---|---|---|
 | 1 | A header-picked model is the model that runs the next message, and `/name args` produces visible results | ✓ VERIFIED | Picked `alibaba-token-plan/deepseek-v4-flash-0731`; after `ping`, both the controller session summary and OpenCode's session record showed that model. `/e2e-echo hello` produced the expanded user message in-thread. |
 | 2 | Two open tabs agree on the active model after a switch, and command outcomes fan out | ✓ VERIFIED | Direct OpenCode model switch to `opencode/tidepool-alpha-free` converged both tab labels to `Tidepool Alpha Free` without reload; the command's expanded message appeared once in each tab. |
-| 3 | `npm test`, `npm run lint`, `tsc --noEmit` green in a clean environment; no `node:*` imports in the browser bundle | ✓ VERIFIED | 20/20 script + 110/110 TS in both the live-listener and `unshare -Urn` netns runs; lint 0 errors (5 pre-existing warnings); typecheck exit 0; 0 non-test `node:*` imports. |
+| 3 | `npm test`, `npm run lint`, `tsc --noEmit` green in a clean environment; no `node:*` imports in the browser bundle | ✓ VERIFIED | 20/20 script + 110/110 TS (the `test` script as it stood then; it did not yet run `models.test.ts`/`commands.test.ts`, 22 more tests wired in later by e30da3f) in both the live-listener and `unshare -Urn` netns runs; lint 0 errors (5 pre-existing warnings); typecheck exit 0; 0 non-test `node:*` imports. |
 | 4 | Verification evidence recorded for later audit | ✓ VERIFIED | `10-CHECKLIST.md` records every command and observation; this report and the summary accompany it. |
 
 ## Requirement traceability

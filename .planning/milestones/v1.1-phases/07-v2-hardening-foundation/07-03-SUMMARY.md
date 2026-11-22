@@ -174,7 +174,7 @@ Each task was committed atomically:
 
 ### Environment A — live listener on 4096
 
-Nothing was listening at task start (`socket 4096` absent, `fetch http://127.0.0.1:4096/api/info` -> `ECONNREFUSED`), so the executor started `~/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 4096` (opencode v2.3.2) for the duration of the proof and stopped only that process (pid 449757) afterward. `ss -ltn` confirmed `LISTEN 0 512 127.0.0.1:4096`.
+Nothing was listening at task start (`socket 4096` absent, `fetch http://127.0.0.1:4096/api/info` -> `ECONNREFUSED`), so the executor started `~/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 4096` (opencode v2.3.2) for the duration of the proof and stopped only that process afterward. A socket check confirmed it was listening on 127.0.0.1:4096.
 
 Command: `npm test` -> **exit 0**
 
