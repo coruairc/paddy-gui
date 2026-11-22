@@ -256,3 +256,11 @@ export function createTurnDiffCache<T>(limit = TURN_DIFF_CACHE_LIMIT): TurnDiffC
     },
   };
 }
+
+/** "+N" / "−M" labels for a file row, leaving out zeros (a binary file with 0/0 shows nothing). */
+export function changeCounts(additions: number, deletions: number): Array<{ kind: "add" | "del"; text: string }> {
+  const out: Array<{ kind: "add" | "del"; text: string }> = [];
+  if (additions > 0) out.push({ kind: "add", text: `+${additions}` });
+  if (deletions > 0) out.push({ kind: "del", text: `−${deletions}` });
+  return out;
+}

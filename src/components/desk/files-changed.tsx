@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 
 import { ChevronRight, FileDiff } from "lucide-react";
 import type { DiffFile, DiffFileStatus } from "@/lib/desk/client";
 import { api } from "@/lib/desk/client";
-import { capHunks, languageForPath, type TurnDiffCache, middleTruncate, parsePatch, type DiffHunk, type DiffLine } from "@/components/desk/diff";
+import { capHunks, changeCounts, languageForPath, type TurnDiffCache, middleTruncate, parsePatch, type DiffHunk, type DiffLine } from "@/components/desk/diff";
 import { MONOKAI, tokenizeLines, type Token } from "@/components/desk/highlight";
 import { createRequestGate, runLatest } from "@/components/desk/request-gate";
 import { cn } from "@/lib/utils";
@@ -116,9 +116,19 @@ export function ChangesPanel({ files, loading, error, onRetry }: { files: DiffFi
 function Totals({ files }: { files: DiffFile[] }) {
   const additions = files.reduce((sum, file) => sum + file.additions, 0);
   const deletions = files.reduce((sum, file) => sum + file.deletions, 0);
+  return <Counts additions={additions} deletions={deletions} className="ml-auto" />;
+}
+
+function Counts({ additions, deletions, className }: { additions: number; deletions: number; className?: string }) {
+  const parts = changeCounts(additions, deletions);
+  if (!parts.length) return null;
   return (
-    <span className="ml-auto font-mono text-[11px] tabular-nums">
-      <span className="text-ok">+{additions}</span> <span className="text-danger">−{deletions}</span>
+    <span className={cn("shrink-0 space-x-1 font-mono text-[11px] tabular-nums", className)}>
+      {parts.map((part) => (
+        <span key={part.kind} className={part.kind === "add" ? "text-ok" : "text-danger"}>
+          {part.text}
+        </span>
+      ))}
     </span>
   );
 }
@@ -133,11 +143,16 @@ function FileDiffList({ state, onRetry, pathMax }: { state: LoadState; onRetry: 
   }
   if (state.kind === "error") {
     return (
-      <div role="alert" className="flex items-center gap-2 px-2 py-3 text-xs text-danger">
-        <span className="min-w-0 flex-1 truncate" title={state.message}>
+      <div role="alert" className="flex items-start gap-2 px-2 py-3 text-xs text-danger">
+        {/* Wraps instead of truncating: the narrow inspector must still show the whole message. */}
+        <span className="min-w-0 flex-1 break-words" title={state.message}>
           {state.message}
         </span>
-        <button type="button" onClick={onRetry} className="rounded-md px-2 py-1 text-muted shadow-[var(--shadow-border)] hover:text-fg">
+        <button
+          type="button"
+          onClick={onRetry}
+          className="shrink-0 rounded-md border border-border bg-surface px-2 py-1 text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+        >
           Retry
         </button>
       </div>
@@ -177,9 +192,7 @@ function FileRow({ file, pathMax }: { file: DiffFile; pathMax: number }) {
           <span className="sr-only"> {status.label}</span>
         </span>
         <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg">{middleTruncate(file.file, pathMax)}</span>
-        <span className="shrink-0 font-mono text-[11px] tabular-nums">
-          <span className="text-ok">+{file.additions}</span> <span className="text-danger">−{file.deletions}</span>
-        </span>
+        <Counts additions={file.additions} deletions={file.deletions} />
       </button>
       {open && (
         <div id={panelId}>
