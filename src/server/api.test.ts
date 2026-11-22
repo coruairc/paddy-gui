@@ -55,7 +55,6 @@ function runtimeWithProject() {
     },
     deleteMessage: async () => undefined,
     getConfig: async () => ({ model: "openai/gpt" }),
-    updateConfig: async (patch: Record<string, unknown>) => patch,
     setApiKey: async () => {
       calls.push("set-key");
     },
@@ -155,11 +154,10 @@ test("unavailable OpenCode becomes a recoverable error", async () => {
   assert.equal((result.body as { retryable?: boolean }).retryable, true);
 });
 
-test("config changes are forwarded, not reimplemented", async () => {
+test("PATCH /api/config is gone", async () => {
   const { runtime } = runtimeWithProject();
   const result = await call(runtime, "PATCH", "/api/config", { patch: { model: "anthropic/claude" } });
-  assert.equal(result.status, 200);
-  assert.equal((result.body as { model: string }).model, "anthropic/claude");
+  assert.equal(result.status, 404);
 });
 
 test("question replies require an explicit answer", async () => {

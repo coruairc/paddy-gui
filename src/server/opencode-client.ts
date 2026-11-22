@@ -268,19 +268,6 @@ export class OpenCodeClient {
     return merged;
   }
 
-  async updateConfig(
-    patch: Record<string, unknown>,
-    directory?: string,
-  ): Promise<Record<string, unknown>> {
-    // v2 only exposes PATCH /api/config/shell-ish writes; keep the v1-shaped
-    // call so callers get an explicit error instead of a silent no-op.
-    const data = await this.request("PATCH", "/api/config", {
-      query: locationQuery(directory),
-      body: patch,
-    });
-    return data && typeof data === "object" ? (data as Record<string, unknown>) : {};
-  }
-
   async getProviders(directory?: string): Promise<unknown> {
     const query = locationQuery(directory);
     const [providerList, modelList, integrations, defaultModel] = await Promise.all([

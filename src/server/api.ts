@@ -45,7 +45,6 @@ export async function handleApi(runtime: ControllerRuntime, request: Request): P
     if (request.method === "GET" && (route === "/config" || route === "/providers" || route === "/agents" || route === "/mcp" || route === "/vcs" || route === "/files/status" || route === "/permissions")) {
       return await readOpenCode(runtime, route);
     }
-    if (request.method === "PATCH" && route === "/config") return await patchConfig(runtime, request);
     if (request.method === "PUT" && route.startsWith("/providers/")) return await setKey(runtime, request, route);
     if (request.method === "DELETE" && route.startsWith("/providers/")) return await removeKey(runtime, route);
     if (request.method === "POST" && route === "/mcp") return await addMcp(runtime, request);
@@ -303,16 +302,6 @@ async function readOpenCode(runtime: ControllerRuntime, route: string): Promise<
   if (route === "/vcs") return json(200, await client.getVcs(directory));
   if (route === "/files/status") return json(200, await client.getFileStatus(directory));
   return json(404, { error: "Not found" });
-}
-
-async function patchConfig(runtime: ControllerRuntime, request: Request): Promise<ApiResult> {
-  const body = await readBody(request);
-  const scope = body.scope === "project" ? activeProject(runtime)?.path : undefined;
-  if (body.scope === "project" && !scope) return json(400, { error: "Select a project first" });
-  const patch = body.patch;
-  if (!patch || typeof patch !== "object" || Array.isArray(patch)) return json(400, { error: "Config patch is required" });
-  const updated = await runtime.requireClient().updateConfig(patch as Record<string, unknown>, scope);
-  return json(200, redactSecrets(updated, secretNeedles(runtime)));
 }
 
 async function setKey(runtime: ControllerRuntime, request: Request, route: string): Promise<ApiResult> {

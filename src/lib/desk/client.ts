@@ -147,8 +147,6 @@ export const api = {
   agents: () => request<unknown>("/api/agents"),
   mcp: () => request<unknown>("/api/mcp"),
   config: () => request<Record<string, unknown>>("/api/config"),
-  patchConfig: (patch: Record<string, unknown>, scope?: "project") =>
-    request("/api/config", { method: "PATCH", body: JSON.stringify({ patch, scope }) }),
   setKey: (providerId: string, key: string) =>
     request("/api/providers/" + encodeURIComponent(providerId) + "/key", {
       method: "PUT",
