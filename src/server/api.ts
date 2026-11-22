@@ -8,7 +8,7 @@ import {
   groupSessionsByDate,
   summarizeSession,
   toChatMessages,
-  toDiffFile,
+  toDiffFiles,
   type DiffFile,
   type SessionSummary,
 } from "./normalize.ts";
@@ -222,7 +222,7 @@ async function sessionRoute(runtime: ControllerRuntime, request: Request, id: st
     return json(200, {
       session: summarizeSession(session),
       messages: toChatMessages(messages),
-      files: Array.isArray(diff) ? diff.map(toDiffFile) : [],
+      files: redactSecrets(toDiffFiles(diff, secretNeedles(runtime)), secretNeedles(runtime)),
     });
   }
   if (!rest && request.method === "PATCH") {
@@ -253,9 +253,9 @@ async function sessionRoute(runtime: ControllerRuntime, request: Request, id: st
     const range = diffRange(new URL(request.url).searchParams);
     if (!range.ok) return json(400, { error: range.error });
     const diff = await client.getDiff(project.path, id, range.value);
-    const files: DiffFile[] = Array.isArray(diff) ? diff.map(toDiffFile) : [];
-    // Exact-value needles only: a persisted password echoed into a file is masked;
-    // ordinary code is untouched (no diff field name matches the key rule).
+    // Known secrets (>= 16 chars) are masked anywhere in the patch text, e.g. a
+    // `+OPENCODE_SERVER_PASSWORD=<pw>` line; total patch text is capped.
+    const files: DiffFile[] = toDiffFiles(diff, secretNeedles(runtime));
     return json(200, { files: redactSecrets(files, secretNeedles(runtime)) });
   }
   return json(404, { error: "Not found" });
@@ -533,8 +533,8 @@ async function isDisabledModel(runtime: ControllerRuntime, key: string): Promise
   }
 }
 
-// OpenCode message ids (`msg_…`); anything else never reaches the upstream query.
-const MESSAGE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+// Session.Message.ID in the v2.3.2 openapi is `{"type":"string","pattern":"^msg_"}`.
+const MESSAGE_ID = /^msg_[A-Za-z0-9_-]{1,124}$/;
 
 function diffRange(params: URLSearchParams): { ok: true; value: { from?: string; to?: string } } | { ok: false; error: string } {
   const value: { from?: string; to?: string } = {};

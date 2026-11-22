@@ -8,6 +8,9 @@ import {
   toChatMessages,
   toDiffFile,
   stepFiles,
+  maskSecrets,
+  toDiffFiles,
+  MAX_DIFF_TOTAL_CHARS,
   MAX_PATCH_CHARS,
 } from "./normalize.ts";
 
@@ -374,4 +377,40 @@ test("session.step.ended becomes step-files only when files changed", () => {
   });
   assert.deepEqual(event, { type: "step-files", sessionId: "ses_1", messageId: "msg_a", files: ["src/a.ts"] });
   assert.equal(normalizeEvent({ type: "session.step.ended", data: { sessionID: "ses_1", assistantMessageID: "msg_a", files: [] } }), null);
+});
+
+test("one enormous line is shortened, not dropped down to the hunk header", () => {
+  const patch = "@@ -1 +1 @@\n-old\n+" + "m".repeat(MAX_PATCH_CHARS * 2) + "\n";
+  const file = toDiffFile({ file: "dist/app.min.js", patch, additions: 1, deletions: 1, status: "modified" });
+  assert.equal(file.truncated, true);
+  assert.ok(file.patch.length <= MAX_PATCH_CHARS);
+  const lines = file.patch.split("\n");
+  assert.equal(lines[1], "-old");
+  assert.ok(lines[2].startsWith("+mmmm") && lines[2].endsWith("…"));
+  assert.ok(lines[2].length > MAX_PATCH_CHARS - 100);
+});
+
+test("maskSecrets replaces every occurrence of long secrets and ignores short ones", () => {
+  const pw = "ocw_" + "k".repeat(40);
+  assert.equal(maskSecrets(`a${pw}b ${pw}`, [pw]), "a[redacted]b [redacted]");
+  assert.equal(maskSecrets("token=short123", ["short123"]), "token=short123");
+  assert.equal(maskSecrets("nothing here", [pw, ""]), "nothing here");
+});
+
+test("masking happens before the per-file cap so a cut never leaks a secret prefix", () => {
+  const pw = "ocw_" + "s".repeat(60);
+  const prefix = "@@ -0,0 +1 @@\n+" + "z".repeat(MAX_PATCH_CHARS - 40);
+  const file = toDiffFile({ file: "x.txt", patch: prefix + pw + "\n", status: "added" }, [pw]);
+  assert.equal(file.patch.includes("ocw_"), false);
+  assert.equal(file.patch.includes("ssss"), false);
+});
+
+test("toDiffFiles spends the total budget in order and blanks the rest", () => {
+  const chunk = "@@ -0,0 +1 @@\n+" + "a".repeat(MAX_PATCH_CHARS - 20) + "\n";
+  const count = Math.ceil(MAX_DIFF_TOTAL_CHARS / chunk.length) + 3;
+  const files = toDiffFiles(Array.from({ length: count }, (_, i) => ({ file: `f${i}`, patch: chunk, additions: 1, deletions: 0, status: "added" })));
+  const kept = files.filter((file) => file.patch);
+  assert.equal(kept.length, Math.floor(MAX_DIFF_TOTAL_CHARS / chunk.length));
+  assert.ok(files.slice(kept.length).every((file) => file.patch === "" && file.truncated && file.additions === 1));
+  assert.deepEqual(toDiffFiles({ not: "an array" }), []);
 });

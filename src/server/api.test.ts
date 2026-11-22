@@ -689,7 +689,7 @@ test("session diff route forwards a validated turn range and normalizes the payl
       return [
         { file: "src/a.ts", patch: "@@ -1 +1 @@\n-a\n+b\n", additions: 1, deletions: 1, status: "modified", junk: { nested: true } },
         { file: "img.png", patch: "Binary files a/img.png and b/img.png differ\n", additions: 0, deletions: 0, status: "added" },
-        { file: "leak.env", patch: runtime.state.ownedServerPassword, additions: 1, deletions: 0, status: "added" },
+        { file: "src/b.ts", patch: "@@ -1 +1 @@\n-x\n+y\n", additions: 1, deletions: 1, status: "modified" },
       ];
     },
   } as unknown as ControllerRuntime["client"];
@@ -700,7 +700,6 @@ test("session diff route forwards a validated turn range and normalizes the payl
   assert.deepEqual(Object.keys(files[0]).sort(), ["additions", "binary", "deletions", "file", "patch", "status", "truncated"]);
   assert.equal(files[1].binary, true);
   assert.equal(files[1].status, "added");
-  assert.equal(JSON.stringify(result.body).includes("ocw_"), false);
 
   await call(runtime, "GET", "/api/sessions/ses_1/diff");
   assert.deepEqual(seen[1], {});
@@ -716,7 +715,8 @@ test("session diff route rejects malformed range ids before calling OpenCode", a
       return [];
     },
   } as unknown as ControllerRuntime["client"];
-  for (const query of ["from=../../etc", "to=a%20b", "from=" + "x".repeat(200)]) {
+  // OpenCode's Session.Message.ID is `^msg_`: a bare id is rejected locally, like a malformed one.
+  for (const query of ["from=../../etc", "to=a%20b", "from=" + "x".repeat(200), "from=abc", "to=ses_1", "from=msg_" + "x".repeat(125)]) {
     const result = await call(runtime, "GET", `/api/sessions/ses_1/diff?${query}`);
     assert.equal(result.status, 400, query);
     assert.match((result.body as { error: string }).error, /Invalid (from|to) message id/);
@@ -738,4 +738,87 @@ test("session diff route requires a selected project and surfaces upstream 404s"
   } as unknown as ControllerRuntime["client"];
   const missing = await call(second, "GET", "/api/sessions/ses_1/diff?from=msg_gone");
   assert.equal(missing.status, 404);
+});
+
+// A realistic leak: the agent writes the controller's OpenCode password into a project file.
+function leakyPatches(pw: string) {
+  return [
+    {
+      file: ".env",
+      patch: `diff --git a/.env b/.env\nnew file mode 100644\n--- /dev/null\n+++ b/.env\n@@ -0,0 +1,2 @@\n+OPENCODE_SERVER_PASSWORD=${pw}\n+PORT=4096\n`,
+      additions: 2,
+      deletions: 0,
+      status: "added",
+    },
+    {
+      file: "scripts/start.sh",
+      patch: `@@ -1,2 +1,2 @@\n #!/bin/sh\n-opencode serve\n+curl -u opencode:${pw}@127.0.0.1 && opencode serve # ${pw}\n`,
+      additions: 1,
+      deletions: 1,
+      status: "modified",
+    },
+  ];
+}
+
+function assertMasked(body: unknown, pw: string) {
+  const text = JSON.stringify(body);
+  assert.equal(text.includes(pw), false, "password reached the browser");
+  assert.equal(text.includes(pw.slice(0, 20)), false, "a password prefix reached the browser");
+  const files = (body as { files: Array<{ file: string; patch: string }> }).files;
+  assert.match(files[0].patch, /^\+OPENCODE_SERVER_PASSWORD=\[redacted\]$/m, "the surrounding line survives");
+  assert.match(files[0].patch, /^\+PORT=4096$/m);
+  assert.match(files[1].patch, /^\+curl -u opencode:\[redacted\]@127\.0\.0\.1 && opencode serve # \[redacted\]$/m);
+}
+
+for (const source of ["owned", "connection"] as const) {
+  test(`${source} password is masked inside patch lines on the diff route and the session GET`, async () => {
+    const { runtime } = runtimeWithProject();
+    const pw = "ocw_" + "Q7".repeat(24);
+    if (source === "owned") runtime.state.ownedServerPassword = pw;
+    else runtime.state.connectionPassword = pw;
+    runtime.client = {
+      ...(runtime.client as object),
+      getDiff: async () => leakyPatches(pw),
+    } as unknown as ControllerRuntime["client"];
+    const diff = await call(runtime, "GET", "/api/sessions/ses_1/diff");
+    assert.equal(diff.status, 200);
+    assertMasked(diff.body, pw);
+    const open = await call(runtime, "GET", "/api/sessions/ses_1");
+    assert.equal(open.status, 200);
+    assertMasked(open.body, pw);
+  });
+}
+
+test("short secrets are not substring-masked in patches (no false positives on code)", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.state.connectionPassword = "abc12345";
+  runtime.client = {
+    ...(runtime.client as object),
+    getDiff: async () => [{ file: "a.ts", patch: "@@ -1 +1 @@\n-x\n+const abc12345Value = 1;\n", additions: 1, deletions: 1, status: "modified" }],
+  } as unknown as ControllerRuntime["client"];
+  const result = await call(runtime, "GET", "/api/sessions/ses_1/diff");
+  assert.match((result.body as { files: Array<{ patch: string }> }).files[0].patch, /abc12345Value/);
+});
+
+test("diff route caps total patch text and keeps every file's row data", async () => {
+  const { runtime } = runtimeWithProject();
+  const big = "@@ -0,0 +1,4500 @@\n" + ("+" + "y".repeat(99) + "\n").repeat(4500); // ~450 kB each
+  runtime.client = {
+    ...(runtime.client as object),
+    getDiff: async () =>
+      Array.from({ length: 200 }, (_, i) => ({ file: `gen/f${i}.txt`, patch: big, additions: 4500, deletions: 0, status: "added" })),
+  } as unknown as ControllerRuntime["client"];
+  const result = await call(runtime, "GET", "/api/sessions/ses_1/diff");
+  const files = (result.body as { files: Array<{ file: string; patch: string; additions: number; status: string; truncated: boolean }> }).files;
+  assert.equal(files.length, 200);
+  const total = files.reduce((sum, file) => sum + file.patch.length, 0);
+  assert.ok(total <= 5_000_000, `total ${total}`);
+  assert.ok(JSON.stringify(result.body).length < 6_000_000);
+  const dropped = files.filter((file) => file.patch === "");
+  assert.ok(dropped.length > 150);
+  for (const file of files) {
+    assert.equal(file.additions, 4500);
+    assert.equal(file.status, "added");
+    assert.equal(file.truncated, true, file.file);
+  }
 });

@@ -425,18 +425,43 @@ export function stepFiles(raw: unknown): string[] {
 
 const BINARY_PATCH = /^(?:Binary files .* differ|GIT binary patch)$/m;
 
+/** Upper bound on patch text in one diff response; files past it keep counts/status only. */
+export const MAX_DIFF_TOTAL_CHARS = 5_000_000;
+/** Secrets shorter than this are not substring-masked (too likely to hit ordinary code). */
+export const MIN_MASKED_SECRET_CHARS = 16;
+/** If cutting at the last newline would drop more than this, keep the cut line, shortened. */
+const PARTIAL_LINE_MIN = 1000;
+
+/** Replace every occurrence of each long-enough secret anywhere in `text`. */
+export function maskSecrets(text: string, secrets: readonly string[]): string {
+  let out = text;
+  for (const secret of secrets) {
+    if (secret.length >= MIN_MASKED_SECRET_CHARS && out.includes(secret)) out = out.split(secret).join("[redacted]");
+  }
+  return out;
+}
+
+function capPatch(full: string): string {
+  if (full.length <= MAX_PATCH_CHARS) return full;
+  const end = full.lastIndexOf("\n", MAX_PATCH_CHARS - 1) + 1;
+  // One enormous line (minified output): show its start instead of an empty hunk.
+  if (MAX_PATCH_CHARS - end > PARTIAL_LINE_MIN) return full.slice(0, MAX_PATCH_CHARS - 2) + "…\n";
+  return full.slice(0, end);
+}
+
 /**
  * Validate one v2 `FileDiff.Info` (file, patch, additions, deletions, status,
  * more) at the boundary. v1-style `{before, after}` entries are still accepted.
+ * `secrets` are masked in the path and patch text before any cut, so a cap
+ * can never split one and leak its prefix.
  */
-export function toDiffFile(raw: unknown): DiffFile {
+export function toDiffFile(raw: unknown, secrets: readonly string[] = []): DiffFile {
   const item = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  const file = clipPath(String(item.file ?? item.path ?? "file"));
+  const file = clipPath(maskSecrets(String(item.file ?? item.path ?? "file"), secrets));
   const before = typeof item.before === "string" ? item.before : "";
   const after = typeof item.after === "string" ? item.after : "";
-  const full = typeof item.patch === "string" ? item.patch : unified(before, after, file);
-  const cut = full.length > MAX_PATCH_CHARS;
-  const patch = cut ? full.slice(0, full.lastIndexOf("\n", MAX_PATCH_CHARS) + 1 || MAX_PATCH_CHARS) : full;
+  const full = maskSecrets(typeof item.patch === "string" ? item.patch : unified(before, after, file), secrets);
+  const patch = capPatch(full);
   return {
     file,
     additions: numberField(item.additions) || countPrefix(full, "+"),
@@ -444,8 +469,27 @@ export function toDiffFile(raw: unknown): DiffFile {
     patch,
     status: diffStatus(item.status, full, before, after),
     binary: BINARY_PATCH.test(full),
-    truncated: cut || item.more === true,
+    truncated: patch.length < full.length || item.more === true,
   };
+}
+
+/**
+ * A whole diff response: every file normalized and masked, and patch text
+ * bounded by MAX_DIFF_TOTAL_CHARS. Once the budget is spent the remaining
+ * files keep file/status/counts with an empty patch and `truncated: true`.
+ */
+export function toDiffFiles(raw: unknown, secrets: readonly string[] = []): DiffFile[] {
+  if (!Array.isArray(raw)) return [];
+  let budget = MAX_DIFF_TOTAL_CHARS;
+  return raw.map((item) => {
+    const file = toDiffFile(item, secrets);
+    if (file.patch.length <= budget) {
+      budget -= file.patch.length;
+      return file;
+    }
+    budget = 0;
+    return { ...file, patch: "", truncated: true };
+  });
 }
 
 function diffStatus(raw: unknown, patch: string, before: string, after: string): DiffFileStatus {
