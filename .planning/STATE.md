@@ -96,6 +96,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 | Category | Item | Status | Deferred At | Milestone |
 |----------|------|--------|-------------|-----------|
+| Automation | PRE-01 Pre-existing repo-wide `prettier --check` drift (ESLint clean; accepted) | v2 | 2026-11-22 | v1.1 |
 | Automation | AUTO-01 Playwright smoke tests in CI | v2 | 2026-11-03 | v1.0 |
 | Automation | AUTO-02 Automated `~/.config/opencode-web` upgrade path | v2 | 2026-11-03 | v1.0 |
 | Experience | UX-01 Theme customization beyond light/dark | v2 | 2026-11-03 | v1.0 |

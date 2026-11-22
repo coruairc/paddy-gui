@@ -4,6 +4,10 @@ phase: 07-v2-hardening-foundation
 source: [07-VERIFICATION.md]
 started: 2026-11-22T01:30:00Z
 updated: 2026-11-22T02:05:00Z
+audit_acknowledged:
+  milestone: v1.1
+  at: 2026-11-22
+  gap_snapshot: "passed::scenarios=0"
 ---
 
 # Phase 7 UAT — v2 Hardening Foundation

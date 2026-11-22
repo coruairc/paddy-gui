@@ -4,6 +4,10 @@ phase: 08-chat-model-picker
 source: [08-VERIFICATION.md]
 started: 2026-11-22T04:10:00Z
 updated: 2026-11-22T04:35:00Z
+audit_acknowledged:
+  milestone: v1.1
+  at: 2026-11-22
+  gap_snapshot: "passed::scenarios=0"
 ---
 
 # Phase 8 UAT — Chat Model Picker

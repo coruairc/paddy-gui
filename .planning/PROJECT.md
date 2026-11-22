@@ -99,10 +99,26 @@ Everything else — settings depth, theming, packaging — is secondary to that 
 | Talk to OpenCode over its HTTP/SSE API, never scrape CLI output | The CLI is not a stable interface; the API is what OpenCode itself exposes | ✓ Good |
 | Keep only GUI metadata in `~/.paddy/state.json` | Avoid duplicating state OpenCode already owns, which would drift | ✓ Good |
 | Treat the controller as the security boundary | The browser must never gain shell or filesystem access | ✓ Good |
-| Close the auth bypass by not trusting loopback or `Host` for `localOnly` | A spoofed `Host` defeats the current check; LAN mode cannot be trusted until this is fixed | — Pending |
+| Close the auth bypass by not trusting loopback or `Host` for `localOnly` | A spoofed `Host` defeats the current check; LAN mode cannot be trusted until this is fixed | ✓ Good (v1.0) |
 | Delete the app-builder scaffolding rather than leave it dormant | Dead code wired into the build is a maintenance and review hazard | ✓ Good |
 | Migrate the controller to the OpenCode v2 `/api` surface in place (no compatibility shim) | OpenCode v2.3.2 removed the v1 endpoints; the v1 client got HTML fallbacks and constant offline flicker | ✓ Good |
-| Apply the chosen model per-session on send instead of persisting it into OpenCode global config | v2 has no remote global-config write (`PATCH /api/config` → 404); per-session `POST /api/session/{id}/model` is the supported path | — Pending |
+| Apply the chosen model per-session on send instead of persisting it into OpenCode global config | v2 has no remote global-config write; per-session `POST /api/session/{id}/model` is the supported path | ✓ Good (v1.1) |
+
+## Current State
+
+**Shipped:** v1.1 OpenCode v2 Desk (2026-11-22)
+
+- Hermetic quality gate (green with or without a live OpenCode on 4096)
+- Exact-match secret redaction; identifier-shaped payloads survive byte-identically
+- Durable `deskModel` default in Paddy state with silent upgrade
+- Provider-grouped, keyboard-first model picker reconciled live across tabs
+- Server-sourced slash-command palette with args-only dispatch and in-thread errors
+- Verified end-to-end in the live desk, including two-tab agreement
+
+## Next Milestone Goals
+
+- Start the next milestone with `/gsd-new-milestone` (questioning → research → requirements → roadmap).
+- Candidate areas from the deferred list: CI Playwright smoke tests, theme customization, concurrent desks, automated upgrade of `~/.config/opencode-web`.
 
 ## Evolution
 
@@ -122,4 +138,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-11-21 after v1.1 milestone start*
+*Last updated: 2026-11-22 after v1.1 milestone completion*
