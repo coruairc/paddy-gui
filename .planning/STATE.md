@@ -3,8 +3,8 @@ gsd_state_version: "1.0"
 milestone: v1.1
 milestone_name: OpenCode v2 Desk
 current_phase: 10
-status: completed
-stopped_at: Phase 10 complete — all phases complete
+status: milestone_complete
+stopped_at: v1.1 milestone complete (archived, tagged)
 last_updated: "2026-11-22T05:42:45.241Z"
 last_activity: 2026-11-22
 last_activity_desc: Phase 10 complete
