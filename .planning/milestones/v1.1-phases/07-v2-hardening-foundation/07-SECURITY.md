@@ -20,8 +20,8 @@ audited: "2026-11-22"
 
 | Boundary | Description | Data Crossing |
 |----------|-------------|---------------|
-| browser → controller `PATCH /api/settings` | Untrusted JSON body crosses `readBody`/`safeJson`; `deskModel` guarded by `typeof === "string"` | Non-secret GUI metadata (model id, appearance, connection URL/username, optional password the user already knows) |
-| controller → browser (`publicState`, read routes) | Every OpenCode payload crosses `redactSecrets` before leaving the controller | Provider/agent/MCP/config data, potentially credential-shaped fields; persisted secrets must never cross |
+| browser → controller `PATCH /api/settings` | Untrusted JSON body crosses `readBody`/`safeJson`; `deskModel` guarded by `typeof === "string"` (later tightened to a validated `provider/model` key of at most 256 characters, or null/"" to clear, F-8) | Non-secret GUI metadata (model id, appearance, connection URL/username, optional password the user already knows) |
+| controller → browser (`publicState`, read routes) | The provider, agent, MCP, config, model and command read routes pass OpenCode payloads through `redactSecrets` (credential-shaped key names plus exact-value needles) before they leave the controller. Not verified as complete: `/permissions` is not redacted, and a credential under an unusual key name can be missed (see the post-merge review, F-4) | Provider/agent/MCP/config data, potentially credential-shaped fields; persisted secrets must never cross |
 | controller → state file | Atomic write of GUI metadata at `~/.paddy/state.json` | `connectionPassword` / `ownedServerPassword` (must never be serialized to browser) |
 | browser → controller (dead write route) | Former `PATCH /api/config` confused-deputy surface | Removed end-to-end in 07-03 |
 | test → ambient local network | Runtime spawn test previously attached to whatever held port 4096 | Hermetic via injectable probe + env scrub |
@@ -63,7 +63,7 @@ audited: "2026-11-22"
 | Exact-match + 3/4-char boundary + exact-value redaction | `node --experimental-strip-types --test src/server/security.test.ts` | pass |
 | Identifier payload byte-identical at route boundary | `api.test.ts` "identifier payloads survive the providers route byte-identical" | pass |
 | `PATCH /api/config` removed | `grep -rn 'updateConfig\|patchConfig' src/` (exit 1) + api.test.ts:164 | 0 matches; 404 asserted |
-| `GET /api/config` retained and redacted | api.ts:45 dispatch, api.ts:293 `redactSecrets(getConfig(...))`; api.test.ts "GET /api/config still reads the OpenCode config" | pass |
+| `GET /api/config` restored (accidentally removed on main by cc29f7a, restored by dbbf86b) and redacted; later narrowed to `{ permission }` (F-4) | api.ts:45 dispatch, api.ts:293 `redactSecrets(getConfig(...))`; api.test.ts "GET /api/config still reads the OpenCode config" | pass |
 | Passwords excluded from browser projection | state.ts:107-117; state.test.ts:20-27, 48-52 | pass |
 | State file/dir modes | state.ts:64-70 (`writeFileSync` 0600, `mkdirSync`/`chmodSync` 0700) | present in code |
 | Probe seam, no direct probe call | runtime.ts:35,41,66,78,149,241; `grep 'await this.probe('` | 0 direct calls |
@@ -82,7 +82,7 @@ audited: "2026-11-22"
 
 ### Unregistered Threat Flags
 
-None. No `## Threat Flags` section exists in the plan summaries, and no new attack surface appeared without a threat mapping. The restored `GET /api/config` read path is a retained read path explicitly covered by the 07-03 prohibition ("GET read paths must not be deleted"); it redacts its payload with `redactSecrets` and is regression-tested.
+None. No `## Threat Flags` section exists in the plan summaries, and no new attack surface appeared without a threat mapping. The `GET /api/config` read path (restored by dbbf86b after cc29f7a removed it by accident) is covered by the 07-03 prohibition ("GET read paths must not be deleted"); it redacts its payload with `redactSecrets` and is regression-tested.
 
 ---
 

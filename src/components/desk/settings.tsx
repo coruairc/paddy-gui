@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { browserStorage, clearAllLastSessions, forgetProject } from "@/components/desk/last-session";
+import { modelSaveFailure } from "@/components/desk/models";
 import {
   api,
   type ConnectionStatus,
@@ -107,7 +109,10 @@ function General({ status }: { status: ConnectionStatus | null }) {
         variant="outline"
         onClick={() => {
           if (window.confirm("Reset local GUI settings? OpenCode configuration and chats are left alone.")) {
-            void api.reset().then(() => window.location.reload());
+            void api.reset().then(() => {
+              clearAllLastSessions(browserStorage());
+              window.location.reload();
+            });
           }
         }}
       >
@@ -306,14 +311,20 @@ function ProviderCard({
     setError(null);
     setNote(null);
     // The desk default persists locally in Paddy state via the settings route;
-    // OpenCode v2 has no remote global-config write. Update the desk model
-    // first so the choice takes effect immediately, then persist it for real.
-    onModelChange(fullModel);
+    // OpenCode v2 has no remote global-config write. Apply it only once the
+    // server accepts it, so a rejected key (invalid or disabled) never becomes
+    // the active model — the same outcome as the header picker's revert.
     try {
       await api.settings({ deskModel: fullModel });
+      onModelChange(fullModel);
       setNote("Desk default model saved.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save the desk default model.");
+      if (modelSaveFailure(err) === "keep-for-turn") {
+        onModelChange(fullModel);
+        setNote("Model applied for this session only — it could not be saved and will not survive a reload.");
+      } else {
+        setError(err instanceof Error ? err.message : "That model was rejected.");
+      }
     } finally {
       setSavingModel(false);
     }
@@ -527,7 +538,10 @@ function Projects({ projects, onChange }: { projects: Project[]; onChange: (proj
             size="sm"
             variant="ghost"
             onClick={() => {
-              void api.removeProject(project.id).then(() => onChange(projects.filter((item) => item.id !== project.id)));
+              void api.removeProject(project.id).then(() => {
+                forgetProject(browserStorage(), project.id);
+                onChange(projects.filter((item) => item.id !== project.id));
+              });
             }}
           >
             Remove

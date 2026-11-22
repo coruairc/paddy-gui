@@ -170,3 +170,18 @@ test("trusted local anonymous passes", async () => {
     restoreEnv(saved);
   }
 });
+test("a malformed paddy_token cookie is treated as absent, not a 500", async () => {
+  const saved = saveEnv();
+  process.env.OPENCODE_WEB_HOST = "0.0.0.0";
+  process.env.OPENCODE_WEB_TOKEN = "secret";
+  const { server, port } = await startServer();
+  try {
+    const res = await request(port, {
+      headers: { host: `127.0.0.1:${port}`, cookie: "paddy_token=%E0%A4%A" },
+    });
+    assert.equal(res.status, 401);
+  } finally {
+    await stopServer(server);
+    restoreEnv(saved);
+  }
+});

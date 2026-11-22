@@ -100,4 +100,4 @@ _Verifier: the agent_
 
 ## Re-verification at HEAD (2026-11-22)
 
-Phase 9 extended the same shared files (`app.tsx`, `normalize.ts`, `api.ts`, `client.ts`). Re-ran the full suite (20/20 + 110/110), the model-picker UAT-relevant tests, typecheck, and lint at HEAD: all green; the Phase 8 must-haves remain covered. `covered_digest` refreshed for the same covered set.
+Phase 9 extended the same shared files (`app.tsx`, `normalize.ts`, `api.ts`, `client.ts`). Re-ran the `npm test` suite (20/20 + 110/110; that was the `test` script as it stood then, which did not yet run `models.test.ts`/`commands.test.ts`, 22 more tests wired in later by e30da3f), the model-picker UAT-relevant tests, typecheck, and lint at HEAD: all green; the Phase 8 must-haves remain covered. `covered_digest` refreshed for the same covered set.

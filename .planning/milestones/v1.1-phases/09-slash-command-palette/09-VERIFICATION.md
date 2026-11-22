@@ -61,7 +61,7 @@ overrides_applied: 0
 
 ## Test evidence
 
-- `npm test` — 20/20 script stage, 110/110 TS stage.
+- `npm test` — 20/20 script stage, 110/110 TS stage (the `test` script as it stood then; it did not yet run `models.test.ts`/`commands.test.ts`, 22 more tests wired in later by e30da3f).
 - `node --experimental-strip-types --test src/components/desk/commands.test.ts` — 5/5.
 - `node --experimental-strip-types --test src/components/desk/messages.test.ts` — 9/9.
 - `npm run typecheck` — exit 0.

@@ -1,0 +1,205 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  LEGACY_GLOBAL_KEY,
+  belongsToProject,
+  clearAllLastSessions,
+  forgetProject,
+  forgetSession,
+  isOpeningSelected,
+  isMissingSession,
+  lastSessionKey,
+  OPENING_CHAT_MESSAGE,
+  pickResumeId,
+  planSend,
+  readLastSession,
+  rememberSession,
+  sessionForSend,
+  type StorageLike,
+} from "./last-session.ts";
+
+function memoryStorage(seed: Record<string, string> = {}): StorageLike & { dump(): Record<string, string> } {
+  const map = new Map(Object.entries(seed));
+  return {
+    getItem: (key) => map.get(key) ?? null,
+    setItem: (key, value) => void map.set(key, String(value)),
+    removeItem: (key) => void map.delete(key),
+    get length() {
+      return map.size;
+    },
+    key: (index) => [...map.keys()][index] ?? null,
+    dump: () => Object.fromEntries(map),
+  };
+}
+
+const throwing: StorageLike = {
+  getItem: () => {
+    throw new Error("SecurityError");
+  },
+  setItem: () => {
+    throw new Error("QuotaExceededError");
+  },
+  removeItem: () => {
+    throw new Error("SecurityError");
+  },
+  get length(): number {
+    throw new Error("SecurityError");
+  },
+  key: () => {
+    throw new Error("SecurityError");
+  },
+};
+
+test("the legacy global key is never trusted: a foreign id is dropped, not resumed", () => {
+  const storage = memoryStorage({ [LEGACY_GLOBAL_KEY]: "ses_other_project" });
+  assert.equal(pickResumeId(storage, "prj_a", [{ id: "ses_a" }]), null);
+  assert.equal(storage.getItem(LEGACY_GLOBAL_KEY), null);
+  assert.equal(storage.getItem(lastSessionKey("prj_a")), null);
+  // Also dropped when the list is truncated: a legacy id is never probed.
+  const truncated = memoryStorage({ [LEGACY_GLOBAL_KEY]: "ses_other_project" });
+  assert.equal(pickResumeId(truncated, "prj_a", [{ id: "ses_a" }], false), null);
+  assert.equal(truncated.getItem(LEGACY_GLOBAL_KEY), null);
+});
+
+test("the legacy global key migrates once into this project's key when the project lists it", () => {
+  const storage = memoryStorage({ [LEGACY_GLOBAL_KEY]: "ses_a" });
+  assert.deepEqual(pickResumeId(storage, "prj_a", [{ id: "ses_x" }, { id: "ses_a" }]), { id: "ses_a", verify: false });
+  assert.deepEqual(storage.dump(), { [lastSessionKey("prj_a")]: "ses_a" });
+});
+
+test("a per-project key wins over the legacy key, which is still removed", () => {
+  const storage = memoryStorage({ [LEGACY_GLOBAL_KEY]: "ses_x", [lastSessionKey("prj_a")]: "ses_a" });
+  assert.deepEqual(pickResumeId(storage, "prj_a", [{ id: "ses_x" }, { id: "ses_a" }]), { id: "ses_a", verify: false });
+  assert.deepEqual(storage.dump(), { [lastSessionKey("prj_a")]: "ses_a" });
+});
+
+test("an id missing from a truncated list is kept and resumed with verification", () => {
+  const storage = memoryStorage({ [lastSessionKey("prj_a")]: "ses_old" });
+  assert.deepEqual(pickResumeId(storage, "prj_a", [{ id: "ses_new" }], false), { id: "ses_old", verify: true });
+  assert.equal(storage.getItem(lastSessionKey("prj_a")), "ses_old");
+});
+
+test("belongsToProject treats only a known, different directory as foreign", () => {
+  assert.equal(belongsToProject("/work/app", "/work/app"), true);
+  assert.equal(belongsToProject("/work/app/", "/work/app"), true);
+  assert.equal(belongsToProject("/work/other", "/work/app"), false);
+  assert.equal(belongsToProject(undefined, "/work/app"), true);
+  assert.equal(belongsToProject("/work/app", undefined), true);
+});
+
+test("resume returns the stored id when the project's session list contains it", () => {
+  const storage = memoryStorage({ [lastSessionKey("prj_a")]: "ses_a" });
+  assert.deepEqual(pickResumeId(storage, "prj_a", [{ id: "ses_x" }, { id: "ses_a" }]), { id: "ses_a", verify: false });
+  assert.equal(storage.getItem(lastSessionKey("prj_a")), "ses_a");
+});
+
+test("a stale or foreign stored id is forgotten, not resumed", () => {
+  const storage = memoryStorage({ [lastSessionKey("prj_a")]: "ses_deleted", [lastSessionKey("prj_b")]: "ses_b" });
+  assert.equal(pickResumeId(storage, "prj_a", [{ id: "ses_a" }]), null);
+  assert.equal(storage.getItem(lastSessionKey("prj_a")), null);
+  assert.equal(storage.getItem(lastSessionKey("prj_b")), "ses_b");
+});
+
+test("an empty session list resumes nothing but keeps the key (listing may have failed)", () => {
+  const storage = memoryStorage({ [lastSessionKey("prj_a")]: "ses_a" });
+  assert.equal(pickResumeId(storage, "prj_a", []), null);
+  assert.equal(storage.getItem(lastSessionKey("prj_a")), "ses_a");
+});
+
+test("no project means no resume", () => {
+  const storage = memoryStorage({ [lastSessionKey("prj_a")]: "ses_a" });
+  assert.equal(pickResumeId(storage, null, [{ id: "ses_a" }]), null);
+  assert.equal(readLastSession(storage, null), null);
+});
+
+test("remember writes only the per-project key and drops the legacy global", () => {
+  const storage = memoryStorage({ [LEGACY_GLOBAL_KEY]: "ses_old" });
+  rememberSession(storage, "prj_a", "ses_a");
+  assert.deepEqual(storage.dump(), { [lastSessionKey("prj_a")]: "ses_a" });
+  rememberSession(storage, null, "ses_b");
+  rememberSession(storage, "prj_a", "");
+  assert.deepEqual(storage.dump(), { [lastSessionKey("prj_a")]: "ses_a" });
+});
+
+test("forgetSession removes a 404'd id from every project key, and only that id", () => {
+  const storage = memoryStorage({
+    [lastSessionKey("prj_a")]: "ses_dead",
+    [lastSessionKey("prj_b")]: "ses_dead",
+    [lastSessionKey("prj_c")]: "ses_live",
+    unrelated: "ses_dead",
+  });
+  forgetSession(storage, "ses_dead");
+  assert.deepEqual(storage.dump(), { [lastSessionKey("prj_c")]: "ses_live", unrelated: "ses_dead" });
+});
+
+test("forgetProject removes one project's key", () => {
+  const storage = memoryStorage({ [lastSessionKey("prj_a")]: "ses_a", [lastSessionKey("prj_b")]: "ses_b" });
+  forgetProject(storage, "prj_a");
+  assert.deepEqual(storage.dump(), { [lastSessionKey("prj_b")]: "ses_b" });
+});
+
+test("reset clears every paddy:lastSession* key and leaves other keys alone", () => {
+  const storage = memoryStorage({
+    [LEGACY_GLOBAL_KEY]: "ses_g",
+    [lastSessionKey("prj_a")]: "ses_a",
+    [lastSessionKey("prj_b")]: "ses_b",
+    "paddy:panel:right": "420",
+  });
+  clearAllLastSessions(storage);
+  assert.deepEqual(storage.dump(), { "paddy:panel:right": "420" });
+});
+
+test("every helper survives a storage that throws on every call", () => {
+  assert.equal(readLastSession(throwing, "prj_a"), null);
+  assert.equal(pickResumeId(throwing, "prj_a", [{ id: "ses_a" }]), null);
+  assert.doesNotThrow(() => rememberSession(throwing, "prj_a", "ses_a"));
+  assert.doesNotThrow(() => forgetSession(throwing, "ses_a"));
+  assert.doesNotThrow(() => forgetProject(throwing, "prj_a"));
+  assert.doesNotThrow(() => clearAllLastSessions(throwing));
+  assert.equal(pickResumeId(null, "prj_a", [{ id: "ses_a" }]), null);
+});
+
+test("only a 404 counts as a missing session", () => {
+  assert.equal(isMissingSession(Object.assign(new Error("Session not found"), { status: 404 })), true);
+  assert.equal(isMissingSession(Object.assign(new Error("Select a project first"), { status: 400 })), false);
+  assert.equal(isMissingSession(Object.assign(new Error("down"), { status: 503 })), false);
+  assert.equal(isMissingSession(new Error("network")), false);
+  assert.equal(isMissingSession(null), false);
+});
+
+test("sends reuse only a confirmed session; an unconfirmed id is never reused or replaced", () => {
+  assert.deepEqual(sessionForSend(null, null), { kind: "create" });
+  assert.deepEqual(sessionForSend("ses_a", "ses_a"), { kind: "reuse", id: "ses_a" });
+  // Resume still in flight (or failed without being cleared): do not reuse the id.
+  assert.deepEqual(sessionForSend("ses_a", null), { kind: "wait" });
+  assert.deepEqual(sessionForSend("ses_b", "ses_a"), { kind: "wait" });
+});
+
+test("planSend keeps the draft while a chat is still opening", () => {
+  const base = { text: "continue", busy: false };
+  // Bootstrap resume or a sidebar click selected ses_a; the server has not confirmed it yet.
+  assert.deepEqual(planSend({ ...base, current: "ses_a", confirmed: null, opening: "ses_a" }), {
+    kind: "wait",
+    message: OPENING_CHAT_MESSAGE,
+  });
+  assert.deepEqual(planSend({ ...base, current: "ses_a", confirmed: null, opening: null }), {
+    kind: "wait",
+    message: OPENING_CHAT_MESSAGE,
+  });
+  assert.deepEqual(planSend({ ...base, current: "ses_a", confirmed: "ses_a", opening: null }), { kind: "go" });
+  assert.deepEqual(planSend({ ...base, current: null, confirmed: null, opening: null }), { kind: "go" });
+  assert.deepEqual(planSend({ text: "   ", busy: false, current: "ses_a", confirmed: "ses_a", opening: null }), { kind: "ignore" });
+  assert.deepEqual(planSend({ text: "hi", busy: true, current: "ses_a", confirmed: "ses_a", opening: null }), { kind: "ignore" });
+});
+
+test("submit and the Send button agree: a stale opening id for another chat blocks neither", () => {
+  // newChat / chooseProject / Archive moved away while ses_a was still loading.
+  assert.equal(isOpeningSelected("ses_a", "ses_new"), false);
+  assert.deepEqual(planSend({ text: "hi", busy: false, current: "ses_new", confirmed: "ses_new", opening: "ses_a" }), { kind: "go" });
+  assert.equal(isOpeningSelected("ses_a", null), false);
+  assert.deepEqual(planSend({ text: "hi", busy: false, current: null, confirmed: null, opening: "ses_a" }), { kind: "go" });
+  // The selected chat is the one opening: the button is disabled and submit waits.
+  assert.equal(isOpeningSelected("ses_a", "ses_a"), true);
+  assert.equal(planSend({ text: "hi", busy: false, current: "ses_a", confirmed: "ses_a", opening: "ses_a" }).kind, "wait");
+  assert.equal(isOpeningSelected(null, null), false);
+});

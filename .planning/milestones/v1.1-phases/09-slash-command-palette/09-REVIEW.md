@@ -28,7 +28,7 @@ No Critical or Warning findings remain. One issue was found during review and fi
 
 ## Verification run during review
 
-- `npm test` — 20/20 script, 110/110 TS.
+- `npm test` — 20/20 script, 110/110 TS (the `test` script as it stood then; it did not yet run `models.test.ts`/`commands.test.ts`, 22 more tests wired in later by e30da3f).
 - `npm run typecheck` — clean.
 - `npm run lint` — 0 errors, 5 pre-existing warnings.
 - Targeted suites: commands 5/5, messages 9/9, normalize 13/13, api+opencode-client 45/45.

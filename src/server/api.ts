@@ -13,7 +13,7 @@ import {
   type SessionSummary,
 } from "./normalize.ts";
 import { redactSecrets, safeJson, validateWorkspacePath } from "./security.ts";
-import { newId, publicState } from "./state.ts";
+import { newId, publicState, validateDeskModel } from "./state.ts";
 import { CONTROLLER_VERSION, type ControllerRuntime } from "./runtime.ts";
 
 export type ApiResult = { status: number; body: unknown; stream?: ReadableStream<Uint8Array> };
@@ -35,15 +35,15 @@ export async function handleApi(runtime: ControllerRuntime, request: Request): P
     if (request.method === "GET" && route === "/projects") return json(200, { projects: runtime.state.projects, activeProjectId: runtime.state.activeProjectId });
     if (request.method === "POST" && route === "/projects") return await addProject(runtime, request);
     const project = route.match(/^\/projects\/([^/]+)$/);
-    if (project && request.method === "DELETE") return removeProject(runtime, decodeURIComponent(project[1]));
-    if (project && request.method === "POST") return selectProject(runtime, decodeURIComponent(project[1]));
+    if (project && request.method === "DELETE") return removeProject(runtime, decodeParam(project[1]));
+    if (project && request.method === "POST") return selectProject(runtime, decodeParam(project[1]));
     if (request.method === "PATCH" && route === "/settings") return updateSettings(runtime, request);
     if (request.method === "GET" && route === "/sessions") return await listSessions(runtime);
     if (request.method === "POST" && route === "/sessions") return await createSession(runtime, request);
     const command = route.match(/^\/sessions\/([^/]+)\/command$/);
-    if (command && request.method === "POST") return await runCommand(runtime, decodeURIComponent(command[1]), request);
+    if (command && request.method === "POST") return await runCommand(runtime, decodeParam(command[1]), request);
     const session = route.match(/^\/sessions\/([^/]+)(?:\/(.+))?$/);
-    if (session) return await sessionRoute(runtime, request, decodeURIComponent(session[1]), session[2]);
+    if (session) return await sessionRoute(runtime, request, decodeParam(session[1]), session[2]);
     if (request.method === "GET" && (route === "/models")) return await listModels(runtime);
     if (request.method === "GET" && route === "/commands") return await listCommands(runtime);
     if (request.method === "GET" && (route === "/config" || route === "/providers" || route === "/agents" || route === "/mcp" || route === "/vcs" || route === "/files/status" || route === "/permissions")) {
@@ -53,9 +53,9 @@ export async function handleApi(runtime: ControllerRuntime, request: Request): P
     if (request.method === "DELETE" && route.startsWith("/providers/")) return await removeKey(runtime, route);
     if (request.method === "POST" && route === "/mcp") return await addMcp(runtime, request);
     const mcp = route.match(/^\/mcp\/([^/]+)\/(connect|disconnect|disable)$/);
-    if (mcp && request.method === "POST") return await mcpAction(runtime, decodeURIComponent(mcp[1]), mcp[2]);
+    if (mcp && request.method === "POST") return await mcpAction(runtime, decodeParam(mcp[1]), mcp[2]);
     const permission = route.match(/^\/permissions\/([^/]+)\/reply$/);
-    if (permission && request.method === "POST") return await replyPermission(runtime, request, decodeURIComponent(permission[1]));
+    if (permission && request.method === "POST") return await replyPermission(runtime, request, decodeParam(permission[1]));
     return json(404, { error: "Not found" });
   } catch (err) {
     return errorResult(err);
@@ -73,13 +73,18 @@ async function bootstrap(runtime: ControllerRuntime) {
   const status = await ensureStatus(runtime);
   const project = activeProject(runtime);
   let sessions: SessionSummary[] = [];
+  // False when the first page came back full (there may be more) or listing
+  // failed: the client must not treat "not in this list" as "gone".
+  let sessionsComplete = true;
   let model = "";
   const agent = "";
   if (status.connected && project) {
     try {
-      const listed = await runtime.requireClient().listSessions(project.path);
-      sessions = listed.map(summarizeSession).filter((item) => !item.archived || true);
+      const page = await runtime.requireClient().listSessionsPage(project.path);
+      sessions = page.sessions.map(summarizeSession).filter((item) => !item.archived || true);
+      sessionsComplete = !page.hasMore;
     } catch (err) {
+      sessionsComplete = false;
       status.error = err instanceof Error ? err.message : status.error;
     }
     try {
@@ -96,6 +101,7 @@ async function bootstrap(runtime: ControllerRuntime) {
     status,
     ...publicState(runtime.state),
     sessions,
+    sessionsComplete,
     groups: groupSessionsByDate(sessions.filter((item) => !item.archived)),
     model,
     agent,
@@ -163,6 +169,16 @@ function selectProject(runtime: ControllerRuntime, id: string): ApiResult {
 
 async function updateSettings(runtime: ControllerRuntime, request: Request): Promise<ApiResult> {
   const body = await readBody(request);
+  // Validate before touching state so a rejected PATCH changes nothing.
+  let deskModel: string | undefined;
+  if (body.deskModel !== undefined) {
+    const checked = validateDeskModel(body.deskModel);
+    if (!checked.ok) return json(400, { error: checked.error });
+    deskModel = checked.value;
+    if (deskModel && (await isDisabledModel(runtime, deskModel))) {
+      return json(400, { error: "That model is disabled in OpenCode" });
+    }
+  }
   if (body.appearance === "light" || body.appearance === "dark") runtime.state.appearance = body.appearance;
   if (typeof body.connectionUrl === "string") runtime.state.connectionUrl = body.connectionUrl.trim();
   if (typeof body.connectionUsername === "string" && body.connectionUsername.trim()) {
@@ -170,7 +186,7 @@ async function updateSettings(runtime: ControllerRuntime, request: Request): Pro
   }
   if (body.clearConnectionPassword === true) runtime.state.connectionPassword = "";
   else if (typeof body.connectionPassword === "string" && body.connectionPassword.trim() !== "") runtime.state.connectionPassword = body.connectionPassword;
-  if (typeof body.deskModel === "string") runtime.state.deskModel = body.deskModel;
+  if (deskModel !== undefined) runtime.state.deskModel = deskModel;
   runtime.persist();
   return json(200, publicState(runtime.state));
 }
@@ -338,12 +354,13 @@ async function runCommand(
   sessionId: string,
   request: Request,
 ): Promise<ApiResult> {
+  // Same gate as the prompt route (sessionRoute → send): active, allowlisted project.
+  const project = requireProject(runtime);
   const body = await readBody(request);
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const text = typeof body.text === "string" ? body.text : "";
   if (!name) return json(400, { error: "Command name is required" });
-  const directory = activeProject(runtime)?.path ?? "";
-  await runtime.requireClient().runCommand(directory, sessionId, { name, text });
+  await runtime.requireClient().runCommand(project.path, sessionId, { name, text });
   return json(202, { ok: true });
 }
 
@@ -391,7 +408,7 @@ async function readOpenCode(runtime: ControllerRuntime, route: string): Promise<
 }
 
 async function setKey(runtime: ControllerRuntime, request: Request, route: string): Promise<ApiResult> {
-  const providerId = decodeURIComponent(route.split("/")[2] ?? "").replace(/\/key$/, "");
+  const providerId = decodeParam(route.split("/")[2] ?? "").replace(/\/key$/, "");
   if (!providerId) return json(400, { error: "Provider is required" });
   const body = await readBody(request);
   const key = typeof body.key === "string" ? body.key.trim() : "";
@@ -401,7 +418,7 @@ async function setKey(runtime: ControllerRuntime, request: Request, route: strin
 }
 
 async function removeKey(runtime: ControllerRuntime, route: string): Promise<ApiResult> {
-  const providerId = decodeURIComponent(route.split("/")[2] ?? "").replace(/\/key$/, "");
+  const providerId = decodeParam(route.split("/")[2] ?? "").replace(/\/key$/, "");
   await runtime.requireClient().removeApiKey(providerId);
   return json(200, { ok: true, providerId });
 }
@@ -486,6 +503,30 @@ async function readBody(request: Request): Promise<Record<string, unknown>> {
     throw new OpenCodeError(400, "Malformed JSON");
   }
   return parsed.value as Record<string, unknown>;
+}
+
+/** Route params are percent-encoded; a malformed escape is a client error, not a 500. */
+function decodeParam(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new OpenCodeError(400, "Malformed path parameter");
+  }
+}
+
+/**
+ * True only when OpenCode's catalog lists this exact key with `enabled: false`.
+ * Offline, a failed catalog read, or a key the catalog does not list are not
+ * proof of anything, so they never block the save.
+ */
+async function isDisabledModel(runtime: ControllerRuntime, key: string): Promise<boolean> {
+  if (!runtime.status.connected || !runtime.client) return false;
+  try {
+    const catalog = await runtime.client.listModels(activeProject(runtime)?.path);
+    return catalog.some((entry) => entry?.enabled === false && `${entry.providerID}/${entry.id}` === key);
+  } catch {
+    return false;
+  }
 }
 
 function splitModel(model: string): [string | undefined, string | undefined] {

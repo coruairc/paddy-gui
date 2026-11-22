@@ -251,7 +251,7 @@ probe: async () => "down",
 ```text
 ✖ spawn uses detached:true (34.819136ms)
   AssertionError [ERR_ASSERTION]: spawn invoked
-      at TestContext.<anonymous> (file:///home/cein_orourke/Projects/paddy-gui/src/server/runtime.test.ts:148:1)
+      at TestContext.<anonymous> (src/server/runtime.test.ts:148:1)
     actual: false, expected: true, operator: '=='
 ℹ tests 7  ℹ pass 6  ℹ fail 1
 ```

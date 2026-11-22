@@ -54,3 +54,20 @@ test("deskModel upgrades silently and round-trips", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("an invalid deskModel persisted before validation loads as unset; valid ones round-trip", () => {
+  const dir = mkdtempSync(join(tmpdir(), "paddy-state-"));
+  const file = join(dir, "state.json");
+  try {
+    for (const bad of ["x".repeat(5010), "no-slash", "openai/" + "m".repeat(300), "open ai/gpt", "openai/<b>", "trailing/"]) {
+      writeFileSync(file, JSON.stringify({ projects: [], appearance: "dark", deskModel: bad }));
+      assert.equal(readState(file).deskModel, "", bad.slice(0, 30));
+    }
+    for (const good of ["openrouter/anthropic/claude-4.5", "ollama/llama3.3:70b"]) {
+      writeFileSync(file, JSON.stringify({ projects: [], appearance: "dark", deskModel: good }));
+      assert.equal(readState(file).deskModel, good);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
