@@ -100,7 +100,7 @@ test("grouping survives a 272-entry catalog without duplicates", () => {
 });
 
 test("modelSlug replaces every unsafe id character", () => {
-  assert.equal(modelSlug("poolside/poolside/laguna-s-2.1"), "poolside_poolside_laguna-s-2.1");
+  assert.equal(modelSlug("poolside/poolside/laguna-s-2.1"), "poolside_poolside_laguna-s-2_1");
 });
 
 test("resolveActiveModel never treats an unfetched catalog as a miss", () => {

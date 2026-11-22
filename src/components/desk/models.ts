@@ -37,6 +37,51 @@ export function filterModels<T extends { name: string; id: string; providerID: s
   );
 }
 
+const PROVIDER_BRANDS: Record<string, string> = {
+  openai: "OpenAI",
+  "github-copilot": "GitHub Copilot",
+  "opencode-go": "OpenCode Go",
+  "alibaba-token-plan": "Alibaba Token Plan",
+  "ollama-cloud": "Ollama Cloud",
+  deepseek: "DeepSeek",
+  xai: "xAI",
+  google: "Google",
+  opencode: "OpenCode",
+  poolside: "Poolside",
+};
+
+export function humanizeProviderID(providerID: string): string {
+  const known = PROVIDER_BRANDS[providerID];
+  if (known) return known;
+  return providerID
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+export type ModelGroup<T> = { providerID: string; label: string; models: T[] };
+
+export function groupModelsByProvider<T extends ModelLike>(
+  models: readonly T[],
+): ModelGroup<T>[] {
+  const byProvider = new Map<string, T[]>();
+  for (const model of models) {
+    const list = byProvider.get(model.providerID) ?? [];
+    list.push(model);
+    byProvider.set(model.providerID, list);
+  }
+  const groups: ModelGroup<T>[] = [];
+  for (const [providerID, items] of byProvider) {
+    groups.push({
+      providerID,
+      label: humanizeProviderID(providerID),
+      models: items.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)),
+    });
+  }
+  return groups.sort((a, b) => a.label.localeCompare(b.label));
+}
+
 function labelFor(models: readonly ModelLike[], key: string): string {
   const match = models.find((model) => model.key === key);
   return match ? match.name || match.id : key;
