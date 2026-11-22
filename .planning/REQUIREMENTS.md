@@ -15,9 +15,9 @@ Requirements for milestone v1.1 (OpenCode v2 Desk). Each maps to exactly one roa
 
 ### Slash Commands
 
-- [ ] **CMD-01**: User typing `/` in the composer sees a filterable, keyboard-first palette of OpenCode commands (name + description) sourced from `GET /api/command`
-- [ ] **CMD-02**: Submitting `/name args` runs the command via `POST /api/session/{id}/command`; unknown or failing commands surface their error in the thread as a system message, not a transient toast
-- [ ] **CMD-03**: The command list refreshes when OpenCode emits `command.updated` while the desk is open
+- [x] **CMD-01**: User typing `/` in the composer sees a filterable, keyboard-first palette of OpenCode commands (name + description) sourced from `GET /api/command`
+- [x] **CMD-02**: Submitting `/name args` runs the command via `POST /api/session/{id}/command`; unknown or failing commands surface their error in the thread as a system message, not a transient toast
+- [x] **CMD-03**: The command list refreshes when OpenCode emits `command.updated` while the desk is open
 
 ### v2 Hardening
 
@@ -76,9 +76,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MODEL-01 | Phase 8 | Complete |
 | MODEL-02 | Phase 8 | Complete |
 | MODEL-03 | Phase 8 | Complete |
-| CMD-01 | Phase 9 | Pending |
-| CMD-02 | Phase 9 | Pending |
-| CMD-03 | Phase 9 | Pending |
+| CMD-01 | Phase 9 | Complete |
+| CMD-02 | Phase 9 | Complete |
+| CMD-03 | Phase 9 | Complete |
 | VER-05 | Phase 10 | Pending |
 | VER-06 | Phase 10 | Pending |
 

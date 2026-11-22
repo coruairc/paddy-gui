@@ -21,7 +21,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 7: v2 Hardening Foundation** - Hermetic tests, a durable desk-model default, honest Settings saves, and redaction that never corrupts identifiers — the foundation every later phase builds on (completed 2026-11-22)
 - [x] **Phase 8: Chat Model Picker** - A provider-grouped, keyboard-driven model picker in the chat header/composer whose choice actually runs, persists, and never drifts from the session (completed 2026-11-22)
-- [ ] **Phase 9: Slash Command Palette** - OpenCode commands discoverable and runnable from the composer, with outcomes and errors surfacing in the thread
+- [x] **Phase 9: Slash Command Palette** - OpenCode commands discoverable and runnable from the composer, with outcomes and errors surfacing in the thread (completed 2026-11-22)
 - [ ] **Phase 10: v1.1 End-to-End Verification** - Model switch and command execution verified live and across tabs, so the milestone's trust properties hold together, not just per-feature
 
 ## Phase Details
@@ -76,9 +76,9 @@ Plans:
   2. Submitting `/name args` runs the command via `POST /api/session/{id}/command` and its outcome is visible in the thread; unknown or failing commands surface their error as a persistent in-thread system message, not a transient toast.
   3. When OpenCode emits `command.updated` while the desk is open, the palette reflects the new command list without a page reload.
   4. Only a leading `/` triggers command dispatch — mid-text slashes are ordinary prompts, unknown `/name` never silently becomes prompt text, and the composer draft survives palette open/close.
-**Plans**: 1/2 plans executed
+**Plans**: 2/2 plans complete
 - [x] 09-01-PLAN.md
-- [ ] 09-02-PLAN.md
+- [x] 09-02-PLAN.md
 **UI hint**: yes
 
 ### Phase 10: v1.1 End-to-End Verification
@@ -102,5 +102,5 @@ Phases execute in numeric order: 7 → 8 → 9 → 10 (decimal insertions, if an
 |-------|----------------|--------|-----------|
 | 7. v2 Hardening Foundation | 3/3 | Complete    | 2026-11-22 |
 | 8. Chat Model Picker | 3/3 | Complete    | 2026-11-22 |
-| 9. Slash Command Palette | 1/2 | In Progress | - |
+| 9. Slash Command Palette | 2/2 | Complete    | 2026-11-22 |
 | 10. v1.1 End-to-End Verification | 0/? | Not started | - |

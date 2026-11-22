@@ -16,7 +16,7 @@
     {
       "number": "9",
       "name": "Slash Command Palette",
-      "status": "in_progress"
+      "status": "complete"
     },
     {
       "number": "10",
@@ -26,8 +26,8 @@
   ],
   "next": {
     "command": "/gsd-progress --next",
-    "label": "Advance to the next step",
-    "reason": "Phase 3 of 4 · executing"
+    "label": "Advance to the next step (plan phase 10)",
+    "reason": "Phase 4 of 4 — needs a plan"
   },
-  "updated_at": "2026-11-22T05:35:16.226Z"
+  "updated_at": "2026-11-22T05:38:47.217Z"
 }
