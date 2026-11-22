@@ -681,7 +681,7 @@ function secretNeedles(runtime: ControllerRuntime): string[] {
 
 ### Test conventions — node:test + node:assert/strict, co-located, temp dirs, fake injection
 **Source:** `src/server/state.test.ts:1-18` (imports + mkdtemp/finally pattern), `src/server/api.test.ts:11-91` (fake-client harness), `src/server/runtime.test.ts:9-21` (fake child + temp state)
-**Apply to:** every test edit this phase; run via `node --experimental-strip-types --test <file>`; full gate `flock -w 900 /tmp/team-build.lock npm test` in BOTH environments (live-server host + `unshare -Urn sh -c 'ip link set lo up && npm test'`)
+**Apply to:** every test edit this phase; run via `node --experimental-strip-types --test <file>`; full gate `npm test` in BOTH environments (live-server host + `unshare -Urn sh -c 'ip link set lo up && npm test'`)
 ```typescript
 import test from "node:test";
 import assert from "node:assert/strict";
