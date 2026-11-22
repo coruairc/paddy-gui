@@ -109,6 +109,7 @@ export type DeskEvent =
   | { type: "status"; sessionId: string; state: "idle" | "working" | "retry" | "error"; detail?: string }
   | { type: "diff"; sessionId: string; files: DiffFile[] }
   | { type: "model-selected"; sessionId: string; model: string }
+  | { type: "commands-updated" }
   | { type: "error"; message: string; sessionId?: string }
   | { type: "malformed"; message: string };
 

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { appendDelta, hasPendingBubble, mergeMessage, upsertActivity } from "./messages.ts";
+import { appendDelta, hasPendingBubble, mergeMessage, replacePendingEcho, upsertActivity } from "./messages.ts";
 
 function msg(overrides: Partial<{ id: string; role: "user" | "assistant" | "system"; text: string; created: number; pending: boolean; activity: { id: string; tool: string; title: string; status: "pending" | "running" | "completed" | "error" }[] }>) {
   return {
@@ -70,4 +70,22 @@ test("hasPendingBubble", () => {
   assert.equal(hasPendingBubble(list as any), true);
   const list2 = [msg({ id: "x", role: "user", text: "hi", created: 1, pending: false })];
   assert.equal(hasPendingBubble(list2 as any), false);
+});
+test("replacePendingEcho swaps the optimistic command bubble in place", () => {
+  const list = [
+    { id: "local_1", role: "user" as const, text: "/echo hi", created: 1, activity: [], pending: true },
+    { id: "m2", role: "assistant" as const, text: "ok", created: 2, activity: [] },
+  ];
+  const expanded = { id: "msg_9", role: "user" as const, text: "Repeat: hi", created: 3, activity: [] };
+  const next = replacePendingEcho(list, "local_1", expanded);
+  assert.equal(next.length, 2);
+  assert.equal(next[0].id, "msg_9");
+  assert.equal(next[0].text, "Repeat: hi");
+  assert.equal(next[0].pending, false);
+  assert.equal(next[1].id, "m2");
+});
+
+test("replacePendingEcho appends when the echo is gone", () => {
+  const message = { id: "msg_9", role: "user" as const, text: "expanded", created: 1, activity: [] };
+  assert.deepEqual(replacePendingEcho([], "local_x", message), [{ ...message, pending: false }]);
 });

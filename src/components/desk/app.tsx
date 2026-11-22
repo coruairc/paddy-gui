@@ -12,7 +12,7 @@ import { modelForSend, resolveActiveSource, resolveHeaderModel } from "@/compone
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn, formatTime } from "@/lib/utils";
-import { appendDelta, mergeMessage, upsertActivity, upsertSession } from "./messages";
+import { appendDelta, mergeMessage, replacePendingEcho, upsertActivity, upsertSession } from "./messages";
 import {
   api,
   type ActivityItem,
@@ -62,6 +62,8 @@ export function DeskApp() {
   const [commandDismissed, setCommandDismissed] = useState(false);
   const pendingCommandRef = useRef<string | null>(null);
   const commandTurnRef = useRef(false);
+  const commandRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadCommandsRef = useRef<() => Promise<void>>(async () => {});
   const [agent, setAgent] = useState("");
   const [agents, setAgents] = useState<string[]>([]);
   const [stick, setStick] = useState(true);
@@ -90,6 +92,13 @@ export function DeskApp() {
       return;
     }
     if (event.type === "malformed") return;
+    if (event.type === "commands-updated") {
+      if (commandRefreshTimer.current) clearTimeout(commandRefreshTimer.current);
+      commandRefreshTimer.current = setTimeout(() => {
+        void loadCommandsRef.current();
+      }, 300);
+      return;
+    }
     if (event.type === "model-selected") {
       const next = resolveHeaderModel(sessionRef.current, event.sessionId, event.model);
       if (next === null) return;
@@ -117,8 +126,26 @@ export function DeskApp() {
       const current = sessionRef.current;
       if (current && event.sessionId && current !== event.sessionId) return;
       setWorking(event.state === "working" || event.state === "retry");
-      if (event.state === "error" && event.detail) setError(event.detail);
-      if (event.state === "idle") setWorking(false);
+      if (event.state === "error" && event.detail) {
+        setError(event.detail);
+        if (commandTurnRef.current) {
+          commandTurnRef.current = false;
+          setMessages((list) => [
+            ...list,
+            {
+              id: `sys_${Date.now()}`,
+              role: "system",
+              text: event.detail ?? "Command failed",
+              created: Date.now(),
+              activity: [],
+            },
+          ]);
+        }
+      }
+      if (event.state === "idle") {
+        commandTurnRef.current = false;
+        setWorking(false);
+      }
       return;
     }
     if (event.type === "diff") {
@@ -134,6 +161,12 @@ export function DeskApp() {
       setWorking(true);
       setInspector("work");
     } else if (event.type === "message") {
+      if (event.message.role === "user" && pendingCommandRef.current) {
+        const tempId = pendingCommandRef.current;
+        pendingCommandRef.current = null;
+        setMessages((list) => replacePendingEcho(list, tempId, event.message));
+        return;
+      }
       setMessages((list) => mergeMessage(list, event.message));
     }
   }, []);
@@ -256,6 +289,7 @@ export function DeskApp() {
       setCommandLoading(false);
     }
   }
+  loadCommandsRef.current = loadCommands;
 
   function appendSystem(text: string) {
     setMessages((current) => [

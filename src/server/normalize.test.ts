@@ -246,3 +246,52 @@ test("session summaries project the session's own model without a variant", () =
   assert.equal(summarizeSession({ id: "ses_1", model: { providerID: "openai" } }).model, undefined);
   assert.equal(summarizeSession({ id: "ses_1", model: { id: "x" } }).model, undefined);
 });
+
+test("command.updated normalizes to an invalidation event", () => {
+  assert.deepEqual(
+    normalizeEvent({ type: "command.updated", location: { directory: "/work/app" }, data: {} }),
+    { type: "commands-updated" },
+  );
+});
+
+test("session.inbox.enqueued maps the expanded user message", () => {
+  const event = normalizeEvent({
+    type: "session.inbox.enqueued",
+    data: {
+      inboxID: "msg_1",
+      sessionID: "ses_1",
+      item: { type: "user", payload: { text: "Repeat: hello world" }, delivery: "steer" },
+    },
+  });
+  assert.equal(event?.type, "message");
+  if (event?.type === "message") {
+    assert.equal(event.sessionId, "ses_1");
+    assert.equal(event.message.id, "msg_1");
+    assert.equal(event.message.role, "user");
+    assert.equal(event.message.text, "Repeat: hello world");
+    assert.deepEqual(event.message.activity, []);
+  }
+});
+
+test("partial or non-user inbox events are dropped", () => {
+  const base = {
+    type: "session.inbox.enqueued",
+    data: { inboxID: "msg_1", sessionID: "ses_1", item: { type: "user", payload: { text: "x" } } },
+  };
+  assert.equal(
+    normalizeEvent({ ...base, data: { ...base.data, inboxID: undefined } }),
+    null,
+  );
+  assert.equal(
+    normalizeEvent({ ...base, data: { ...base.data, sessionID: undefined } }),
+    null,
+  );
+  assert.equal(
+    normalizeEvent({ ...base, data: { ...base.data, item: { type: "assistant", payload: { text: "x" } } } }),
+    null,
+  );
+  assert.equal(
+    normalizeEvent({ ...base, data: { ...base.data, item: { type: "user", payload: {} } } }),
+    null,
+  );
+});

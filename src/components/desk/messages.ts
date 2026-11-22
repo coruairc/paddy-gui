@@ -55,3 +55,18 @@ export function mergeMessage(list: ChatMessage[], message: ChatMessage): ChatMes
 export function hasPendingBubble(list: ChatMessage[]): boolean {
   return list.some((m) => m.pending);
 }
+/**
+ * Replace a command's optimistic echo with the server's expanded user message.
+ * Commands expand `$ARGUMENTS`, so text equality cannot be used.
+ */
+export function replacePendingEcho(
+  list: ChatMessage[],
+  tempId: string,
+  message: ChatMessage,
+): ChatMessage[] {
+  const index = list.findIndex((item) => item.id === tempId);
+  if (index === -1) return [...list, { ...message, pending: false }];
+  const next = [...list];
+  next[index] = { ...message, pending: false };
+  return next;
+}

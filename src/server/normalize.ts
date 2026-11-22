@@ -64,6 +64,7 @@ export type GuiEvent =
   | { type: "status"; sessionId: string; state: "idle" | "working" | "retry" | "error"; detail?: string }
   | { type: "diff"; sessionId: string; files: DiffFile[] }
   | { type: "model-selected"; sessionId: string; model: string }
+  | { type: "commands-updated" }
   | { type: "error"; message: string; sessionId?: string }
   | { type: "malformed"; message: string };
 
@@ -168,6 +169,21 @@ export function normalizeEvent(raw: unknown): GuiEvent | null {
   const sessionId = text(data.sessionID);
 
   if (type === "server.connected") return null;
+
+  if (type === "command.updated") return { type: "commands-updated" };
+
+  if (type === "session.inbox.enqueued") {
+    const item = (data.item && typeof data.item === "object" ? data.item : {}) as Record<string, unknown>;
+    const payload = (item.payload && typeof item.payload === "object" ? item.payload : {}) as Record<string, unknown>;
+    const inboxId = text(data.inboxID);
+    const itemText = text(payload.text);
+    if (!sessionId || !inboxId || item.type !== "user" || !itemText) return null;
+    return {
+      type: "message",
+      sessionId,
+      message: { id: inboxId, role: "user", text: itemText, created: Date.now(), activity: [] },
+    };
+  }
 
   if (type === "session.model.selected") {
     const model = (data.model && typeof data.model === "object" ? data.model : {}) as Record<string, unknown>;
