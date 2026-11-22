@@ -19,7 +19,7 @@ v1.0 shipped a trustworthy desk; the controller now talks OpenCode v2 (commit `9
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 7: v2 Hardening Foundation** - Hermetic tests, a durable desk-model default, honest Settings saves, and redaction that never corrupts identifiers — the foundation every later phase builds on
+- [x] **Phase 7: v2 Hardening Foundation** - Hermetic tests, a durable desk-model default, honest Settings saves, and redaction that never corrupts identifiers — the foundation every later phase builds on (completed 2026-11-22)
 - [ ] **Phase 8: Chat Model Picker** - A provider-grouped, keyboard-driven model picker in the chat header/composer whose choice actually runs, persists, and never drifts from the session
 - [ ] **Phase 9: Slash Command Palette** - OpenCode commands discoverable and runnable from the composer, with outcomes and errors surfacing in the thread
 - [ ] **Phase 10: v1.1 End-to-End Verification** - Model switch and command execution verified live and across tabs, so the milestone's trust properties hold together, not just per-feature
@@ -35,7 +35,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. No Settings action 404s or silently fails: the dead `updateConfig`/`PATCH /api/config` chain is deleted, and the Agents/Permissions sections are honestly read-only or fixed.
   3. The desk's default model persists in Paddy state (`~/.paddy/state.json`, new `deskModel` field) across browser reloads and controller restarts, and an existing state file upgrades silently on first load.
   4. An identifier-shaped payload (e.g. provider ID `alibaba-token-plan`) round-trips through the API byte-identical, proven by an exact-match redaction regression test that fails if substring replacement is reintroduced.
-**Plans**: 3/3 plans executed
+**Plans**: 3/3 plans complete
 
 Plans:
 **Wave 1**
@@ -90,7 +90,7 @@ Phases execute in numeric order: 7 → 8 → 9 → 10 (decimal insertions, if an
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 7. v2 Hardening Foundation | 3/3 | In Progress | - |
+| 7. v2 Hardening Foundation | 3/3 | Complete    | 2026-11-22 |
 | 8. Chat Model Picker | 0/? | Not started | - |
 | 9. Slash Command Palette | 0/? | Not started | - |
 | 10. v1.1 End-to-End Verification | 0/? | Not started | - |

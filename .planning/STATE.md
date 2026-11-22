@@ -2,19 +2,20 @@
 gsd_state_version: "1.0"
 milestone: v1.1
 milestone_name: OpenCode v2 Desk
-current_phase: 07
-current_phase_name: v2 Hardening Foundation
-status: verifying
-stopped_at: Completed 07-03-PLAN.md
-last_updated: "2026-11-22T00:38:15.223Z"
-last_activity: 2026-11-21
-last_activity_desc: Phase 07 execution started
-state_head: dd2c0af7874784a28c0317414a7561fcc3a5035c
+current_phase: 08
+current_phase_name: Chat Model Picker
+status: planning
+stopped_at: Phase 07 complete, ready to plan Phase 08
+last_updated: "2026-11-22T01:17:30.803Z"
+last_activity: 2026-11-22
+last_activity_desc: Phase 07 complete, transitioned to Phase 08
+state_head: fb48109a7974ace5c2fddca20899a8c60d281792
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
   completed_plans: 3
+  percent: 25
 ---
 
 # Project State
@@ -28,12 +29,12 @@ See: .planning/PROJECT.md (updated 2026-11-21)
 
 ## Current Position
 
-Phase: 07 (v2 Hardening Foundation) — EXECUTING
-Plan: 3 of 3
-Status: Phase complete — ready for verification
-Last activity: 2026-11-21 — Phase 07 execution started
+Phase: 08 — Chat Model Picker
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-11-22 — Phase 07 complete, transitioned to Phase 08
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [███░░░░░░░] 25%
 
 ## Performance Metrics
 
@@ -46,7 +47,7 @@ Progress: [░░░░░░░░░░] 0%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 7 | 0/? | - | - |
+| 07 | 3 | - | - |
 | 8 | 0/? | - | - |
 | 9 | 0/? | - | - |
 | 10 | 0/? | - | - |
@@ -104,7 +105,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-22T00:38:15.194Z
-Stopped at: Completed 07-03-PLAN.md
+Stopped at: Phase 07 complete, ready to plan Phase 08
 Resume file: None
 
 ## Operator Next Steps

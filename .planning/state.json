@@ -6,7 +6,7 @@
     {
       "number": "7",
       "name": "v2 Hardening Foundation",
-      "status": "in_progress"
+      "status": "complete"
     },
     {
       "number": "8",
@@ -26,8 +26,8 @@
   ],
   "next": {
     "command": "/gsd-progress --next",
-    "label": "Advance to the next step (verify)",
-    "reason": "Phase 1 of 4 · ready to verify"
+    "label": "Advance to the next step (plan phase 08)",
+    "reason": "Phase 2 of 4 — needs a plan"
   },
-  "updated_at": "2026-11-22T00:38:09.678Z"
+  "updated_at": "2026-11-22T01:17:30.820Z"
 }
