@@ -12,8 +12,8 @@ import { canSelectModel, modelForSend, modelSaveFailure, resolveActiveSource, re
 import { ResizeHandle } from "@/components/desk/resize-handle";
 import { createRequestGate, runLatest } from "@/components/desk/request-gate";
 import { usePanelWidths } from "@/components/desk/use-panel-widths";
-import { ChangesPanel, FilesChangedBlock, type TurnDiffCache } from "@/components/desk/files-changed";
-import { createTurnTracker, latestTurnFiles, mergeStepFiles, turnFiles } from "@/components/desk/diff";
+import { ChangesPanel, FilesChangedBlock, type TurnDiffs } from "@/components/desk/files-changed";
+import { createTurnDiffCache, createTurnTracker, latestTurnFiles, mergeStepFiles, turnFiles, turnStateKey } from "@/components/desk/diff";
 import {
   belongsToProject,
   browserStorage,
@@ -121,9 +121,12 @@ export function DeskApp() {
   /** One turn end per turn, even when execution.succeeded and session.idle both arrive. */
   const [turnTracker] = useState(createTurnTracker);
   /** Expanded "Files changed" blocks by turn ordinal; survives re-anchoring during a live turn. */
-  const [expandedTurns, setExpandedTurns] = useState<ReadonlySet<number>>(() => new Set());
-  /** Loaded turn diffs for this chat; cleared with expandedTurns whenever the chat changes. */
-  const [turnDiffs] = useState<TurnDiffCache>(() => new Map());
+  // Both keyed by (session, turn): a chat change through any path (archive, delete,
+  // ensureSession, open, new chat) can't show another chat's expansion or files.
+  // The explicit clears on chat change below only free memory.
+  const [expandedTurns, setExpandedTurns] = useState<ReadonlySet<string>>(() => new Set());
+  /** Loaded turn diffs, bounded (TURN_DIFF_CACHE_LIMIT). */
+  const [turnDiffs] = useState<TurnDiffs>(() => createTurnDiffCache());
   /** Inspector tab, readable from the event handler without re-subscribing. */
   const inspectorRef = useRef<"work" | "changes">("work");
   /** The latest-turn diff changed while the Changes tab was hidden: fetch when it opens. */
@@ -619,6 +622,8 @@ export function DeskApp() {
         }
         setMessages(data.messages);
         setFiles(data.files);
+        // An unloadable diff (e.g. too large) must not read as "No file changes".
+        setFilesError(data.filesError ?? null);
         setSessions((current) => upsertSession(current, data.session));
         if (data.session.model) {
           setModel(data.session.model);
@@ -991,6 +996,7 @@ export function DeskApp() {
                       {messages.map((message) => {
                         const turn = sessionId ? turns.get(message.id) : undefined;
                         const turnKey = turn?.turn ?? -1;
+                        const expandKey = sessionId ? turnStateKey(sessionId, turnKey) : "";
                         return (
                           <div key={message.id}>
                             <MessageView message={message} />
@@ -1002,14 +1008,14 @@ export function DeskApp() {
                                   from={turn.from}
                                   paths={turn.files}
                                   version={`${turn.files.length}:${turnEpoch}`}
-                                  open={expandedTurns.has(turnKey)}
+                                  open={expandedTurns.has(expandKey)}
                                   cache={turnDiffs}
                                   turn={turnKey}
                                   onOpenChange={(open) =>
                                     setExpandedTurns((current) => {
                                       const next = new Set(current);
-                                      if (open) next.add(turnKey);
-                                      else next.delete(turnKey);
+                                      if (open) next.add(expandKey);
+                                      else next.delete(expandKey);
                                       return next;
                                     })
                                   }

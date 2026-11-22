@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { capHunks, countLines, createTurnTracker, languageForPath, latestTurnFiles, mergeStepFiles, middleTruncate, parsePatch, turnFiles } from "./diff.ts";
+import { capHunks, countLines, createTurnDiffCache, createTurnTracker, TURN_DIFF_CACHE_LIMIT, turnStateKey, languageForPath, latestTurnFiles, mergeStepFiles, middleTruncate, parsePatch, turnFiles } from "./diff.ts";
 
 // Real OpenCode v2.3.2 patch shape (diff --git, index, ---/+++ headers, context=3 hunks).
 const PATCH = [
@@ -161,4 +161,32 @@ test("latestTurnFiles counts only the newest turn, from snapshot files", () => {
   const live = [...next.slice(0, 3), { id: "msg_a2", role: "assistant", files: ["c.ts"] }];
   assert.deepEqual(latestTurnFiles(live), ["c.ts"]);
   assert.deepEqual(latestTurnFiles([]), []);
+});
+
+test("turn diff cache never serves one chat's turn to another chat (archive → new chat)", () => {
+  const cache = createTurnDiffCache<{ key: string; files: string[] }>();
+  cache.set("ses_old", 0, { key: "msg_u1|1:0", files: ["old.ts"] });
+  // The archived chat's entry is still there (no reset ran), but chat B's turn 0 must miss.
+  assert.equal(cache.get("ses_new", 0), undefined);
+  assert.deepEqual(cache.get("ses_old", 0)?.files, ["old.ts"]);
+  cache.set("ses_new", 0, { key: "msg_v1|1:0", files: ["new.ts"] });
+  assert.deepEqual(cache.get("ses_new", 0)?.files, ["new.ts"]);
+  assert.notEqual(turnStateKey("ses_old", 0), turnStateKey("ses_new", 0), "expanded state is per chat too");
+});
+
+test("turn diff cache is bounded and drops the least recently used turn", () => {
+  const cache = createTurnDiffCache<number>(3);
+  cache.set("s", 0, 0);
+  cache.set("s", 1, 1);
+  cache.set("s", 2, 2);
+  assert.equal(cache.get("s", 0), 0, "touching turn 0 makes turn 1 the oldest");
+  cache.set("s", 3, 3);
+  assert.equal(cache.size, 3);
+  assert.equal(cache.get("s", 1), undefined);
+  assert.equal(cache.get("s", 0), 0);
+  cache.clear();
+  assert.equal(cache.size, 0);
+  const capped = createTurnDiffCache<number>();
+  for (let i = 0; i < 50; i++) capped.set("s", i, i);
+  assert.equal(capped.size, TURN_DIFF_CACHE_LIMIT);
 });

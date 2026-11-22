@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 
 import { ChevronRight, FileDiff } from "lucide-react";
 import type { DiffFile, DiffFileStatus } from "@/lib/desk/client";
 import { api } from "@/lib/desk/client";
-import { capHunks, languageForPath, middleTruncate, parsePatch, type DiffHunk, type DiffLine } from "@/components/desk/diff";
+import { capHunks, languageForPath, type TurnDiffCache, middleTruncate, parsePatch, type DiffHunk, type DiffLine } from "@/components/desk/diff";
 import { MONOKAI, tokenizeLines, type Token } from "@/components/desk/highlight";
 import { createRequestGate, runLatest } from "@/components/desk/request-gate";
 import { cn } from "@/lib/utils";
@@ -16,8 +16,8 @@ const STATUS: Record<DiffFileStatus, { letter: string; label: string; color: str
   deleted: { letter: "D", label: "deleted", color: MONOKAI.pink },
 };
 
-/** Per-turn diff results keyed by turn ordinal; `key` is the range+version they were fetched for. */
-export type TurnDiffCache = Map<number, { key: string; files: DiffFile[] }>;
+/** Per-turn diff results keyed by (session, turn); `key` is the range+version they were fetched for. */
+export type TurnDiffs = TurnDiffCache<{ key: string; files: DiffFile[] }>;
 
 type LoadState = { kind: "idle" } | { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; files: DiffFile[] };
 
@@ -44,12 +44,12 @@ export function FilesChangedBlock({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Parent-owned per-turn results, so a block remounted under a newer message doesn't reload. */
-  cache?: TurnDiffCache;
+  cache?: TurnDiffs;
   turn?: number;
 }) {
   const fetchKey = `${from ?? ""}|${version}`;
   const [state, setState] = useState<LoadState>(() => {
-    const hit = turn === undefined ? undefined : cache?.get(turn);
+    const hit = turn === undefined ? undefined : cache?.get(sessionId, turn);
     return hit ? { kind: "ready", files: hit.files } : { kind: "idle" };
   });
   const gate = useMemo(createRequestGate, []);
@@ -59,7 +59,7 @@ export function FilesChangedBlock({
     setState((current) => (current.kind === "ready" ? current : { kind: "loading" }));
     void runLatest(gate, () => api.diff(sessionId, from), {
       onData: (data) => {
-        if (turn !== undefined) cache?.set(turn, { key: fetchKey, files: data.files });
+        if (turn !== undefined) cache?.set(sessionId, turn, { key: fetchKey, files: data.files });
         setState({ kind: "ready", files: data.files });
       },
       onError: (err) => setState({ kind: "error", message: err instanceof Error ? err.message : "Could not load the diff" }),
@@ -69,7 +69,7 @@ export function FilesChangedBlock({
   useEffect(() => {
     if (!open) return;
     // Same turn, range and version already loaded (e.g. remounted as the turn grew): show it, don't refetch.
-    if (turn !== undefined && cache?.get(turn)?.key === fetchKey) return;
+    if (turn !== undefined && cache?.get(sessionId, turn)?.key === fetchKey) return;
     load();
     // load is recreated each render; the inputs that matter are listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
