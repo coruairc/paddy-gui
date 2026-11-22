@@ -236,4 +236,4 @@ _Verifier: the agent (gsd-verifier)_
 
 ## Re-verification at HEAD (2026-11-22)
 
-The covered source files were later touched by Phases 8–9 (`api.ts`, `opencode-client.ts`, `client.ts`, `api.test.ts`). Re-ran the `npm test` suite (20/20 + 110/110(the `test` script as it stood then; it did not yet run `models.test.ts`/`commands.test.ts`, 22 more tests wired in later by e30da3f), typecheck, and lint at HEAD: all green; the Phase 7 must-haves (exact-match redaction, hermetic spawn, deskModel persistence, no Settings 404s) remain covered by unchanged tests. `covered_digest` refreshed for the same covered set.
+The covered source files were later touched by Phases 8–9 (`api.ts`, `opencode-client.ts`, `client.ts`, `api.test.ts`). Re-ran the `npm test` suite (20/20 + 110/110; that was the `test` script as it stood then, which did not yet run `models.test.ts`/`commands.test.ts`, 22 more tests wired in later by e30da3f), typecheck, and lint at HEAD: all green; the Phase 7 must-haves (exact-match redaction, hermetic spawn, deskModel persistence, no Settings 404s) remain covered by unchanged tests. `covered_digest` refreshed for the same covered set.
