@@ -14,6 +14,7 @@ import { createRequestGate, runLatest } from "@/components/desk/request-gate";
 import { usePanelWidths } from "@/components/desk/use-panel-widths";
 import { ChangesPanel, FilesChangedBlock, type TurnDiffs } from "@/components/desk/files-changed";
 import { changesFailed, changesLoaded, changesLoading, changesSettled, EMPTY_CHANGES, type SessionChanges } from "@/components/desk/session-changes";
+import { createArchiveUndo, type ArchiveNotice } from "@/components/desk/archive-undo";
 import { createTurnDiffCache, createTurnTracker, latestTurnFiles, mergeStepFiles, turnFiles, turnStateKey } from "@/components/desk/diff";
 import {
   belongsToProject,
@@ -66,6 +67,10 @@ export function DeskApp() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   /** Inspector latest-turn changes, tagged with the session they belong to (see session-changes.ts). */
   const [changes, setChanges] = useState<SessionChanges>(EMPTY_CHANGES);
+  /** Archive is immediate; this offers Undo (a real `archived: false` restore) for ARCHIVE_UNDO_MS. */
+  const [archiveUndo] = useState(() => createArchiveUndo((id, archived) => api.archiveSession(id, archived)));
+  const [archiveNotice, setArchiveNotice] = useState<(ArchiveNotice & { projectId: string | null }) | null>(null);
+  const undoButton = useRef<HTMLButtonElement>(null);
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState("");
   const [working, setWorking] = useState(false);
@@ -363,6 +368,17 @@ export function DeskApp() {
     void api.agents().then((payload) => setAgents(agentNames(payload))).catch(() => setAgents([]));
   }, [project, status?.connected]);
 
+  // The notice times out; and since the Archive button that was clicked is gone,
+  // move keyboard focus to Undo (only if focus was dropped, never stealing it).
+  useEffect(() => {
+    if (!archiveNotice) return;
+    if (!document.activeElement || document.activeElement === document.body) undoButton.current?.focus();
+    const timer = window.setTimeout(() => {
+      if (archiveUndo.expire()) setArchiveNotice(null);
+    }, Math.max(0, archiveNotice.until - Date.now()) + 50);
+    return () => window.clearTimeout(timer);
+  }, [archiveNotice, archiveUndo]);
+
   useEffect(() => {
     if (!stick) return;
     // Not scrollIntoView: that also scrolls every scrollable ancestor (the page),
@@ -544,6 +560,24 @@ export function DeskApp() {
       setWorking(false);
       appendSystem(err instanceof Error ? err.message : "Command could not run");
     }
+  }
+
+  /** Restore the chat named in the archive notice and, if its project is still open, reopen it. */
+  function undoArchive() {
+    const notice = archiveNotice;
+    void archiveUndo
+      .undo()
+      .then(async (id) => {
+        setArchiveNotice(null);
+        if (!id) return;
+        await refreshSessions();
+        if (notice?.projectId === activeProjectId) await openSessionOrReport(id);
+      })
+      .catch((err: unknown) => {
+        // undo() put the notice back: keep offering Undo.
+        if (archiveUndo.notice && notice) setArchiveNotice({ ...archiveUndo.notice, projectId: notice.projectId });
+        setError(err instanceof Error ? err.message : "Could not restore that chat");
+      });
   }
 
   async function refreshSessions() {
@@ -939,7 +973,8 @@ export function DeskApp() {
                   }}>Rename</button>
                   <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => {
                     const archivedId = active.id;
-                    void api.archiveSession(archivedId, true).then(() => {
+                    void archiveUndo.archive({ id: archivedId, title: active.title }).then((notice) => {
+                      setArchiveNotice({ ...notice, projectId: activeProjectId });
                       forgetSession(browserStorage(), archivedId);
                       // A slow archive must not clear a chat the user picked in the meantime.
                       if (sessionRef.current === archivedId) {
@@ -1045,6 +1080,36 @@ export function DeskApp() {
                     </div>
                   )}
                 </div>
+                {archiveNotice && (
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    className="flex items-center gap-2 border-t border-border px-4 py-1.5 text-[11px] text-muted"
+                  >
+                    <span className="min-w-0 flex-1 truncate" title={archiveNotice.title}>
+                      Chat archived · {archiveNotice.title}
+                    </span>
+                    <button
+                      ref={undoButton}
+                      type="button"
+                      onClick={undoArchive}
+                      className="shrink-0 rounded-md border border-border bg-surface px-2 py-0.5 text-fg hover:bg-elevated focus-visible:outline-2 focus-visible:outline-accent"
+                    >
+                      Undo
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Dismiss"
+                      onClick={() => {
+                        archiveUndo.dismiss();
+                        setArchiveNotice(null);
+                      }}
+                      className="shrink-0 rounded-md px-1.5 py-0.5 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
                 {error && status?.authRequired ? (
                   <form
                     className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-1.5 text-[11px]"
