@@ -368,7 +368,14 @@ async function readOpenCode(runtime: ControllerRuntime, route: string): Promise<
     return json(200, { providers: redactSecrets(providers, secretNeedles(runtime)), auth });
   }
   if (route === "/agents") return json(200, redactSecrets(await client.getAgents(directory), secretNeedles(runtime)));
-  if (route === "/config") return json(200, redactSecrets(await client.getConfig(directory), secretNeedles(runtime)));
+  if (route === "/config") {
+    // Project to the only field the browser reads (Settings → Permissions).
+    // The merged config also carries provider headers, MCP env and other
+    // credential-shaped values whose key names key-based redaction can miss.
+    const config = (await client.getConfig(directory)) as Record<string, unknown> | null | undefined;
+    const permission = config && typeof config === "object" ? config.permission : undefined;
+    return json(200, redactSecrets({ permission: permission ?? {} }, secretNeedles(runtime)));
+  }
   if (route === "/mcp") return json(200, redactSecrets(await client.getMcp(directory), secretNeedles(runtime)));
   if (route === "/permissions") {
     const [permissions, questions] = await Promise.all([
@@ -488,7 +495,11 @@ function splitModel(model: string): [string | undefined, string | undefined] {
 }
 
 function secretNeedles(runtime: ControllerRuntime): string[] {
-  return [runtime.state.connectionPassword, process.env.OPENCODE_SERVER_PASSWORD ?? ""].filter(Boolean);
+  return [
+    runtime.state.connectionPassword,
+    runtime.state.ownedServerPassword,
+    process.env.OPENCODE_SERVER_PASSWORD ?? "",
+  ].filter(Boolean);
 }
 
 function errorResult(err: unknown): ApiResult {

@@ -5,6 +5,7 @@ import {
   filterCommands,
   nextCommandIndex,
   parseCommandInput,
+  shouldAutoLoadCommands,
 } from "./commands.ts";
 
 const catalog = [
@@ -68,4 +69,13 @@ test("nextCommandIndex clamps without wrapping", () => {
   assert.equal(nextCommandIndex(2, 3, "ArrowDown"), 2);
   assert.equal(nextCommandIndex(1, 3, "Home"), 0);
   assert.equal(nextCommandIndex(1, 3, "End"), 2);
+});
+
+test("shouldAutoLoadCommands stops after a failed load so only Retry reloads", () => {
+  const base = { open: true, catalogLoaded: false, loading: false, error: null };
+  assert.equal(shouldAutoLoadCommands(base), true);
+  assert.equal(shouldAutoLoadCommands({ ...base, error: "404 Not Found" }), false);
+  assert.equal(shouldAutoLoadCommands({ ...base, loading: true }), false);
+  assert.equal(shouldAutoLoadCommands({ ...base, catalogLoaded: true }), false);
+  assert.equal(shouldAutoLoadCommands({ ...base, open: false }), false);
 });

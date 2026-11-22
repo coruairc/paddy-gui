@@ -7,12 +7,21 @@ import { PaddyIdle } from "@/components/paddy-idle";
 import { SettingsPanel } from "@/components/desk/settings";
 import { ModelPicker } from "@/components/desk/model-picker";
 import { CommandPalette } from "@/components/desk/command-palette";
-import { filterCommands, nextCommandIndex, parseCommandInput } from "@/components/desk/commands";
+import { filterCommands, nextCommandIndex, parseCommandInput, shouldAutoLoadCommands } from "@/components/desk/commands";
 import { modelForSend, resolveActiveSource, resolveHeaderModel } from "@/components/desk/models";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn, formatTime } from "@/lib/utils";
-import { appendDelta, mergeMessage, replacePendingEcho, upsertActivity, upsertSession } from "./messages";
+import {
+  appendDelta,
+  dropPendingBubbles,
+  echoToReplace,
+  mergeMessage,
+  replacePendingEcho,
+  settlePendingEcho,
+  upsertActivity,
+  upsertSession,
+} from "./messages";
 import {
   api,
   type ActivityItem,
@@ -61,6 +70,9 @@ export function DeskApp() {
   const [commandIndex, setCommandIndex] = useState(0);
   const [commandDismissed, setCommandDismissed] = useState(false);
   const pendingCommandRef = useRef<string | null>(null);
+  // Echo settled by session idle/error before its server user message arrived;
+  // a late message still replaces it instead of showing the prompt twice.
+  const settledCommandRef = useRef<string | null>(null);
   const commandTurnRef = useRef(false);
   const commandRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadCommandsRef = useRef<() => Promise<void>>(async () => {});
@@ -126,6 +138,12 @@ export function DeskApp() {
       const current = sessionRef.current;
       if (current && event.sessionId && current !== event.sessionId) return;
       setWorking(event.state === "working" || event.state === "retry");
+      if ((event.state === "error" || event.state === "idle") && pendingCommandRef.current) {
+        const tempId = pendingCommandRef.current;
+        pendingCommandRef.current = null;
+        settledCommandRef.current = tempId;
+        setMessages((list) => settlePendingEcho(list, tempId));
+      }
       if (event.state === "error" && event.detail) {
         setError(event.detail);
         if (commandTurnRef.current) {
@@ -161,9 +179,13 @@ export function DeskApp() {
       setWorking(true);
       setInspector("work");
     } else if (event.type === "message") {
-      if (event.message.role === "user" && pendingCommandRef.current) {
-        const tempId = pendingCommandRef.current;
+      const tempId =
+        event.message.role === "user"
+          ? echoToReplace({ pending: pendingCommandRef.current, settled: settledCommandRef.current })
+          : null;
+      if (tempId) {
         pendingCommandRef.current = null;
+        settledCommandRef.current = null;
         setMessages((list) => replacePendingEcho(list, tempId, event.message));
         return;
       }
@@ -244,8 +266,21 @@ export function DeskApp() {
   const visibleCommands = filterCommands(commandCatalog ?? [], commandQuery ?? "");
   const activeCommand = visibleCommands[commandIndex] ?? visibleCommands[0] ?? null;
   useEffect(() => {
-    if (paletteOpen && commandCatalog === null && !commandLoading) void loadCommandsRef.current();
-  }, [paletteOpen, commandCatalog, commandLoading]);
+    if (
+      shouldAutoLoadCommands({
+        open: paletteOpen,
+        catalogLoaded: commandCatalog !== null,
+        loading: commandLoading,
+        error: commandLoadError,
+      })
+    ) {
+      void loadCommandsRef.current();
+    }
+  }, [paletteOpen, commandCatalog, commandLoading, commandLoadError]);
+  useEffect(() => {
+    // Closing the palette forgets the failure, so the next `/` tries once more.
+    if (!paletteOpen) setCommandLoadError(null);
+  }, [paletteOpen]);
 
   const effective = resolveActiveSource(
     modelSource,
@@ -302,6 +337,13 @@ export function DeskApp() {
     ]);
   }
 
+  /** Forget any in-flight command echo; its server message will never reach this view. */
+  function resetCommandTurn() {
+    pendingCommandRef.current = null;
+    settledCommandRef.current = null;
+    commandTurnRef.current = false;
+  }
+
   async function ensureSession(): Promise<string | null> {
     if (sessionId) return sessionId;
     const created = await api.createSession();
@@ -339,6 +381,7 @@ export function DeskApp() {
     setDraft("");
     const tempId = `local_${Date.now()}`;
     pendingCommandRef.current = tempId;
+    settledCommandRef.current = null;
     commandTurnRef.current = true;
     setMessages((current) => [
       ...current,
@@ -364,9 +407,15 @@ export function DeskApp() {
 
   async function chooseProject(id: string) {
     await api.selectProject(id);
+    resetCommandTurn();
     setActiveProjectId(id);
     setSessionId(null);
     setMessages([]);
+    // Commands and models are fetched per project directory.
+    setCommandCatalog(null);
+    setCommandLoadError(null);
+    setCatalog(null);
+    setModelLoadError(null);
     setFiles([]);
     setSettingsOpen(false);
     setStick(true);
@@ -391,6 +440,8 @@ export function DeskApp() {
 
   async function openSession(id: string) {
     setSettingsOpen(false);
+    resetCommandTurn();
+    setMessages(dropPendingBubbles);
     setSessionId(id);
     setWorking(false);
     setError(null);
@@ -429,6 +480,7 @@ export function DeskApp() {
       if (!targetProject) return;
       const created = await api.createSession();
       setSessions((current) => upsertSession(current, created.session));
+      resetCommandTurn();
       setActiveProjectId(targetProject.id);
       setSessionId(created.session.id);
       setMessages([]);
@@ -477,6 +529,7 @@ export function DeskApp() {
       return;
     }
     if (!id) return;
+    settledCommandRef.current = null;
     const tempId = `local_${Date.now()}`;
     setMessages((current) => [
       ...current,

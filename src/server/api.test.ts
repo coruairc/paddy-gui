@@ -321,11 +321,49 @@ test("unavailable OpenCode becomes a recoverable error", async () => {
   assert.equal((result.body as { retryable?: boolean }).retryable, true);
 });
 
-test("GET /api/config still reads the OpenCode config", async () => {
+test("GET /api/config returns only the permission block", async () => {
+  const { runtime } = runtimeWithProject();
+  const owned = "ocw_" + "b".repeat(48);
+  runtime.state.ownedServerPassword = owned;
+  (runtime.client as unknown as { getConfig: () => Promise<unknown> }).getConfig = async () => ({
+    model: "openai/gpt",
+    permission: { edit: "ask", bash: { "git *": "allow" } },
+    provider: { azure: { options: { headers: { "Ocp-Apim-Subscription-Key": "AZ-SECRET-123" } } } },
+    mcp: { gh: { environment: { OPENAI_KEY: "sk-envsecret" } } },
+    echoed: owned,
+  });
+  const result = await call(runtime, "GET", "/api/config");
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, { permission: { edit: "ask", bash: { "git *": "allow" } } });
+  const text = JSON.stringify(result.body);
+  for (const leaked of ["AZ-SECRET-123", "sk-envsecret", owned, "Ocp-Apim-Subscription-Key", "OPENAI_KEY"]) {
+    assert.equal(text.includes(leaked), false, `leaked ${leaked}`);
+  }
+});
+
+test("GET /api/config without a permission block returns an empty one", async () => {
   const { runtime } = runtimeWithProject();
   const result = await call(runtime, "GET", "/api/config");
   assert.equal(result.status, 200);
-  assert.equal((result.body as Record<string, unknown>).model, "openai/gpt");
+  assert.deepEqual(result.body, { permission: {} });
+});
+
+test("the owned server password is a redaction needle", async () => {
+  const { runtime } = runtimeWithProject();
+  const owned = "ocw_" + "c".repeat(48);
+  runtime.state.ownedServerPassword = owned;
+  (runtime.client as unknown as { getConfig: () => Promise<unknown> }).getConfig = async () => ({
+    permission: { note: owned, nested: [owned] },
+  });
+  (runtime.client as unknown as { getMcp: () => Promise<unknown> }).getMcp = async () => ({
+    gh: { status: "connected", echoed: owned },
+  });
+  const config = await call(runtime, "GET", "/api/config");
+  assert.deepEqual(config.body, { permission: { note: "[redacted]", nested: ["[redacted]"] } });
+  const mcp = await call(runtime, "GET", "/api/mcp");
+  assert.equal(mcp.status, 200);
+  assert.equal(JSON.stringify(mcp.body).includes(owned), false);
+  assert.equal((mcp.body as { gh: { echoed: string } }).gh.echoed, "[redacted]");
 });
 
 test("PATCH /api/config is gone", async () => {

@@ -42,3 +42,17 @@ export function nextCommandIndex(
   if (key === "ArrowDown") return current < 0 ? 0 : Math.min(current + 1, length - 1);
   return current < 0 ? length - 1 : Math.max(current - 1, 0);
 }
+
+/**
+ * Auto-load the command catalog only once per palette opening. After a failed
+ * load, only the Retry button (or a fresh `/`) loads again, so a broken
+ * `/api/commands` is not hit back to back.
+ */
+export function shouldAutoLoadCommands(state: {
+  open: boolean;
+  catalogLoaded: boolean;
+  loading: boolean;
+  error: string | null;
+}): boolean {
+  return state.open && !state.catalogLoaded && !state.loading && state.error === null;
+}
