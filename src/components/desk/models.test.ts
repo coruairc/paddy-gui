@@ -2,11 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   filterModels,
+  flattenGroups,
   groupModelsByProvider,
   humanizeProviderID,
   modelForSend,
   modelKey,
   modelSlug,
+  nextActiveIndex,
   parseModelKey,
   resolveActiveModel,
   type ModelLike,
@@ -144,4 +146,25 @@ test("modelForSend sends the effective key only when stale", () => {
   assert.equal(modelForSend("openai/gpt-x", loaded), "google/gemini-3");
   const unloaded = resolveActiveModel("openai/gpt-x", catalog, "google/gemini-3", false);
   assert.equal(modelForSend("openai/gpt-x", unloaded), "openai/gpt-x");
+});
+
+test("flattenGroups walks the visible order across group boundaries", () => {
+  const groups = groupModelsByProvider(catalog);
+  const flat = flattenGroups(groups);
+  assert.equal(flat.length, catalog.length);
+  assert.deepEqual(
+    flat.map((model) => model.key),
+    groups.flatMap((group) => group.models.map((model) => model.key)),
+  );
+  assert.deepEqual(flattenGroups([]), []);
+});
+
+test("nextActiveIndex clamps without wrapping and handles empty lists", () => {
+  assert.equal(nextActiveIndex(0, 0, "ArrowDown"), -1);
+  assert.equal(nextActiveIndex(-1, 3, "ArrowDown"), 0);
+  assert.equal(nextActiveIndex(-1, 3, "ArrowUp"), 2);
+  assert.equal(nextActiveIndex(0, 3, "ArrowUp"), 0);
+  assert.equal(nextActiveIndex(2, 3, "ArrowDown"), 2);
+  assert.equal(nextActiveIndex(1, 3, "Home"), 0);
+  assert.equal(nextActiveIndex(1, 3, "End"), 2);
 });

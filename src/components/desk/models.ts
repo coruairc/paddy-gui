@@ -62,6 +62,24 @@ export function humanizeProviderID(providerID: string): string {
 
 export type ModelGroup<T> = { providerID: string; label: string; models: T[] };
 
+/** Flatten grouped output into the visible order the keyboard walks. */
+export function flattenGroups<T>(groups: readonly ModelGroup<T>[]): T[] {
+  return groups.flatMap((group) => group.models);
+}
+
+/** Clamped navigation: no wrap-around; `-1` enters from either end. */
+export function nextActiveIndex(
+  current: number,
+  length: number,
+  key: "ArrowDown" | "ArrowUp" | "Home" | "End",
+): number {
+  if (length <= 0) return -1;
+  if (key === "Home") return 0;
+  if (key === "End") return length - 1;
+  if (key === "ArrowDown") return current < 0 ? 0 : Math.min(current + 1, length - 1);
+  return current < 0 ? length - 1 : Math.max(current - 1, 0);
+}
+
 export function groupModelsByProvider<T extends ModelLike>(
   models: readonly T[],
 ): ModelGroup<T>[] {
