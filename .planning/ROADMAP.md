@@ -56,9 +56,9 @@ Plans:
   2. Selecting a model sets the desk default; the next message sent in the session actually runs on that model (applied per-session on send), the choice persists across reloads, and session resume seeds from the session's actual model.
   3. When the session's model changes (via `session.model.selected` SSE or resume), the header reconciles so it never shows a model the session is not running; a failed model switch aborts the send rather than running the wrong model.
   4. The picker surfaces model metadata OpenCode already provides (status, context window, release date) so the user can choose informed.
-**Plans**: 3 plans
+**Plans**: 1/3 plans executed
 **Wave 1**
-- [ ] 08-01-PLAN.md — Model catalog data path + header trigger tracer: listModels/getDefaultModel, projected `/api/models`, `DeskModel` + `api.models()`, pure `models.ts` helpers, pick persists `deskModel` (MODEL-01, MODEL-02, MODEL-03)
+- [x] 08-01-PLAN.md — Model catalog data path + header trigger tracer: listModels/getDefaultModel, projected `/api/models`, `DeskModel` + `api.models()`, pure `models.ts` helpers, pick persists `deskModel` (MODEL-01, MODEL-02, MODEL-03)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 08-02-PLAN.md — Keyboard-first APG combobox: live filtering, Arrow/Home/End/Enter/Esc, metadata rows and status badges, explicit loading/offline/error/empty/no-match panels (MODEL-01, MODEL-02, MODEL-03)
@@ -99,6 +99,6 @@ Phases execute in numeric order: 7 → 8 → 9 → 10 (decimal insertions, if an
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 7. v2 Hardening Foundation | 3/3 | Complete    | 2026-11-22 |
-| 8. Chat Model Picker | 0/? | Not started | - |
+| 8. Chat Model Picker | 1/3 | In Progress | - |
 | 9. Slash Command Palette | 0/? | Not started | - |
 | 10. v1.1 End-to-End Verification | 0/? | Not started | - |
