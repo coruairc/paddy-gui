@@ -73,8 +73,8 @@ async function bootstrap(runtime: ControllerRuntime) {
   const status = await ensureStatus(runtime);
   const project = activeProject(runtime);
   let sessions: SessionSummary[] = [];
-  // False when OpenCode said there are more pages: the client must not treat
-  // "not in this list" as "gone".
+  // False when the first page came back full (there may be more) or listing
+  // failed: the client must not treat "not in this list" as "gone".
   let sessionsComplete = true;
   let model = "";
   const agent = "";

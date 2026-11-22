@@ -175,16 +175,18 @@ export class OpenCodeClient {
 
   /**
    * First page of `GET /api/session` (v2: `{ data, cursor }`, newest first).
-   * `hasMore` is true when `cursor.next` is set, i.e. the list is truncated
-   * and absence from it proves nothing about a session id.
+   * v2.3.2 sets `cursor.next` on every non-empty page, including the last
+   * one, so it cannot signal truncation. Instead an explicit `limit` is sent
+   * and a full page (`data.length >= limit`) counts as possibly truncated:
+   * absence from it proves nothing about a session id.
    */
   async listSessionsPage(directory: string, search?: string): Promise<{ sessions: OpenCodeSession[]; hasMore: boolean }> {
     const page = (await this.request("GET", "/api/session", {
-      query: { directory, search, parentID: "null", order: "desc" },
+      query: { directory, search, parentID: "null", order: "desc", limit: String(SESSION_PAGE_LIMIT) },
       unwrap: false,
-    })) as { data?: unknown; cursor?: { next?: string | null } } | unknown[] | null;
-    if (Array.isArray(page)) return { sessions: page as OpenCodeSession[], hasMore: false };
-    return { sessions: asArray<OpenCodeSession>(page?.data), hasMore: Boolean(page?.cursor?.next) };
+    })) as { data?: unknown } | unknown[] | null;
+    const sessions = Array.isArray(page) ? (page as OpenCodeSession[]) : asArray<OpenCodeSession>(page?.data);
+    return { sessions, hasMore: sessions.length >= SESSION_PAGE_LIMIT };
   }
 
   async createSession(directory: string, title?: string): Promise<OpenCodeSession> {
@@ -643,6 +645,9 @@ function unwrapData(data: unknown): unknown {
   }
   return data;
 }
+
+/** Page size for the session list; matches OpenCode v2.3.2's documented default ("newest 50"). */
+export const SESSION_PAGE_LIMIT = 50;
 
 function asArray<T>(data: unknown): T[] {
   return Array.isArray(data) ? (data as T[]) : [];

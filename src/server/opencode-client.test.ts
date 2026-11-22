@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { OpenCodeClient, OpenCodeError } from "./opencode-client.ts";
+import { OpenCodeClient, OpenCodeError, SESSION_PAGE_LIMIT } from "./opencode-client.ts";
 
 function mockFetch(handler: (url: string, init?: RequestInit) => { status?: number; body?: unknown }) {
   const calls: { url: string; init?: RequestInit }[] = [];
@@ -351,20 +351,32 @@ test("connection loss is an unavailable error", async () => {
   });
 });
 
-test("session list page reports a truncated list via cursor.next", async () => {
-  const { fetchImpl } = mockFetch((url) => {
-    if (url.includes("search=more")) {
-      return { body: { data: [{ id: "ses_new", time: { created: 2, updated: 2 } }], cursor: { next: "cur_2" } } };
+test("session list page derives truncation from page size, not cursor.next", async () => {
+  // Shapes copied from live OpenCode v2.3.2: `cursor.next` is set on every non-empty page, even the last.
+  const session = (id: string) => ({ id, time: { created: 1, updated: 1 } });
+  const { fetchImpl, calls } = mockFetch((url) => {
+    if (url.includes("search=full")) {
+      return {
+        body: {
+          data: Array.from({ length: SESSION_PAGE_LIMIT }, (_, index) => session(`ses_${index}`)),
+          cursor: { previous: "cur_prev", next: "cur_next" },
+        },
+      };
     }
-    return { body: { data: [{ id: "ses_only", time: { created: 1, updated: 1 } }], cursor: {} } };
+    return { body: { data: [session("ses_only")], cursor: { previous: "cur_prev", next: "cur_next" } } };
   });
   const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: fetchImpl });
-  const truncated = await client.listSessionsPage("/work/app", "more");
-  assert.deepEqual(truncated.sessions.map((item) => item.id), ["ses_new"]);
-  assert.equal(truncated.hasMore, true);
-  const complete = await client.listSessionsPage("/work/app");
-  assert.deepEqual(complete.sessions.map((item) => item.id), ["ses_only"]);
-  assert.equal(complete.hasMore, false);
+
+  const full = await client.listSessionsPage("/work/app", "full");
+  assert.equal(full.sessions.length, SESSION_PAGE_LIMIT);
+  assert.equal(full.hasMore, true);
+
+  const last = await client.listSessionsPage("/work/app");
+  assert.deepEqual(last.sessions.map((item) => item.id), ["ses_only"]);
+  assert.equal(last.hasMore, false, "a short last page is complete even though cursor.next is set");
+
+  for (const call of calls) assert.match(call.url, new RegExp(`limit=${SESSION_PAGE_LIMIT}`));
+  assert.match(calls[0].url, /directory=%2Fwork%2Fapp/);
   // The array-returning wrapper still unwraps the same response.
   assert.deepEqual((await client.listSessions("/work/app")).map((item) => item.id), ["ses_only"]);
 });
