@@ -22,7 +22,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 7: v2 Hardening Foundation** - Hermetic tests, a durable desk-model default, honest Settings saves, and redaction that never corrupts identifiers — the foundation every later phase builds on (completed 2026-11-22)
 - [x] **Phase 8: Chat Model Picker** - A provider-grouped, keyboard-driven model picker in the chat header/composer whose choice actually runs, persists, and never drifts from the session (completed 2026-11-22)
 - [x] **Phase 9: Slash Command Palette** - OpenCode commands discoverable and runnable from the composer, with outcomes and errors surfacing in the thread (completed 2026-11-22)
-- [ ] **Phase 10: v1.1 End-to-End Verification** - Model switch and command execution verified live and across tabs, so the milestone's trust properties hold together, not just per-feature
+- [x] **Phase 10: v1.1 End-to-End Verification** - Model switch and command execution verified live and across tabs, so the milestone's trust properties hold together, not just per-feature (completed 2026-11-22)
 
 ## Phase Details
 
@@ -90,7 +90,8 @@ Plans:
   2. Two open tabs agree on the active model after a switch, and command outcomes fan out to both via SSE without a reload.
   3. The full v1.1 loop passes the quality gates in a clean environment: `npm test`, `npm run lint`, and `tsc --noEmit` all green, with no `node:*` imports in the browser bundle.
   4. Verification evidence is recorded (VERIFICATION.md / phase checklist) so milestone completion can be audited later.
-**Plans**: TBD
+**Plans**: 1/1 plans complete
+- [x] 10-01-PLAN.md
 **UI hint**: yes
 
 ## Progress
@@ -103,4 +104,4 @@ Phases execute in numeric order: 7 → 8 → 9 → 10 (decimal insertions, if an
 | 7. v2 Hardening Foundation | 3/3 | Complete    | 2026-11-22 |
 | 8. Chat Model Picker | 3/3 | Complete    | 2026-11-22 |
 | 9. Slash Command Palette | 2/2 | Complete    | 2026-11-22 |
-| 10. v1.1 End-to-End Verification | 0/? | Not started | - |
+| 10. v1.1 End-to-End Verification | 1/1 | Complete    | 2026-11-22 |

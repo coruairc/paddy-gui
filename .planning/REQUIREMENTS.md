@@ -27,8 +27,8 @@ Requirements for milestone v1.1 (OpenCode v2 Desk). Each maps to exactly one roa
 
 ### Verification
 
-- [ ] **VER-05**: Model switch and command execution are verified end-to-end in the live desk (picked model is what runs; `/name args` produces visible results)
-- [ ] **VER-06**: Multi-tab trust check — two open tabs agree on the active model after a switch, and command outcomes fan out to both via SSE
+- [x] **VER-05**: Model switch and command execution are verified end-to-end in the live desk (picked model is what runs; `/name args` produces visible results)
+- [x] **VER-06**: Multi-tab trust check — two open tabs agree on the active model after a switch, and command outcomes fan out to both via SSE
 
 ## v2 Requirements
 
@@ -79,8 +79,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CMD-01 | Phase 9 | Complete |
 | CMD-02 | Phase 9 | Complete |
 | CMD-03 | Phase 9 | Complete |
-| VER-05 | Phase 10 | Pending |
-| VER-06 | Phase 10 | Pending |
+| VER-05 | Phase 10 | Complete |
+| VER-06 | Phase 10 | Complete |
 
 **Coverage:**
 - v1 requirements: 11 total

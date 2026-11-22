@@ -21,13 +21,13 @@
     {
       "number": "10",
       "name": "v1.1 End-to-End Verification",
-      "status": "pending"
+      "status": "complete"
     }
   ],
   "next": {
-    "command": "/gsd-progress --next",
-    "label": "Advance to the next step (plan phase 10)",
-    "reason": "Phase 4 of 4 — needs a plan"
+    "command": "/gsd-new-milestone",
+    "label": "Start a new milestone",
+    "reason": "All phases complete — start a new milestone"
   },
-  "updated_at": "2026-11-22T05:38:47.217Z"
+  "updated_at": "2026-11-22T05:42:45.253Z"
 }
