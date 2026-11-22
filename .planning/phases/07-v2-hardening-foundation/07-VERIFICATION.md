@@ -23,7 +23,7 @@ covered_files:
     "src/server/state.test.ts",
     "src/server/state.ts",
   ]
-covered_digest: "v4:sha256:2a237a93734bc4a0eb238bfae4e0e7b4667e27bfed82ee9d3342dd50baed49cf"
+covered_digest: "v4:sha256:ae0341d5331bcd7e508319ffcdbb630910f13cf8abbe99a59724638ea01361af"
 behavior_unverified: 0
 overrides_applied: 0
 behavior_unverified_items:
@@ -232,3 +232,8 @@ Not applicable — this was an initial verification (no prior `gaps:` contract),
 
 _Verified: 2026-11-22T01:13:49Z_
 _Verifier: the agent (gsd-verifier)_
+
+
+## Re-verification at HEAD (2026-11-22)
+
+The covered source files were later touched by Phases 8–9 (`api.ts`, `opencode-client.ts`, `client.ts`, `api.test.ts`). Re-ran the full suite (20/20 + 110/110), typecheck, and lint at HEAD: all green; the Phase 7 must-haves (exact-match redaction, hermetic spawn, deskModel persistence, no Settings 404s) remain covered by unchanged tests. `covered_digest` refreshed for the same covered set.

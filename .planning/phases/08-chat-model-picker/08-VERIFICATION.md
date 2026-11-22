@@ -22,7 +22,7 @@ covered_files:
     "src/server/normalize.ts",
     "src/server/opencode-client.ts"
   ]
-covered_digest: "v4:sha256:2031af7c57e041c12d13081a3c368a4f5acde7d73232226f69bd9631a3f2c005"
+covered_digest: "v4:sha256:5999e8c4d7112fa9aa9063dbf98a9ef3c6b7a14e62355dcb967fb1ba1d97b76d"
 behavior_unverified: 0
 overrides_applied: 0
 ---
@@ -96,3 +96,8 @@ No gaps.
 
 _Verified: 2026-11-22_
 _Verifier: the agent_
+
+
+## Re-verification at HEAD (2026-11-22)
+
+Phase 9 extended the same shared files (`app.tsx`, `normalize.ts`, `api.ts`, `client.ts`). Re-ran the full suite (20/20 + 110/110), the model-picker UAT-relevant tests, typecheck, and lint at HEAD: all green; the Phase 8 must-haves remain covered. `covered_digest` refreshed for the same covered set.
