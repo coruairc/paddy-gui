@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { capHunks, countLines, createTurnDiffCache, createTurnTracker, TURN_DIFF_CACHE_LIMIT, turnStateKey, languageForPath, latestTurnFiles, mergeStepFiles, middleTruncate, parsePatch, turnFiles } from "./diff.ts";
+import { capHunks, changeCounts, countLines, createTurnDiffCache, createTurnTracker, TURN_DIFF_CACHE_LIMIT, turnStateKey, languageForPath, latestTurnFiles, mergeStepFiles, middleTruncate, parsePatch, turnFiles } from "./diff.ts";
 
 // Real OpenCode v2.3.2 patch shape (diff --git, index, ---/+++ headers, context=3 hunks).
 const PATCH = [
@@ -189,4 +189,11 @@ test("turn diff cache is bounded and drops the least recently used turn", () => 
   const capped = createTurnDiffCache<number>();
   for (let i = 0; i < 50; i++) capped.set("s", i, i);
   assert.equal(capped.size, TURN_DIFF_CACHE_LIMIT);
+});
+
+test("changeCounts leaves out zero counts", () => {
+  assert.deepEqual(changeCounts(3, 2), [{ kind: "add", text: "+3" }, { kind: "del", text: "−2" }]);
+  assert.deepEqual(changeCounts(5, 0), [{ kind: "add", text: "+5" }]);
+  assert.deepEqual(changeCounts(0, 92), [{ kind: "del", text: "−92" }]);
+  assert.deepEqual(changeCounts(0, 0), [], "binary logo.png: nothing at all");
 });

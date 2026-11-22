@@ -54,10 +54,21 @@
     color: var(--color-fg);
   }
 
+  /* The desk is a fixed full-viewport shell; only its panes scroll. A scrollable
+     page let overscroll or scrollIntoView move the shell and expose a band under
+     the composer. */
   html,
-  body,
-  #app {
-    min-height: 100dvh;
+  body {
+    height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  /* Theme swap: no colour fades from the old theme (see applyTheme in app.tsx). */
+  [data-theme-switching] *,
+  [data-theme-switching] *::before,
+  [data-theme-switching] *::after {
+    transition: none !important;
   }
 
   h1,

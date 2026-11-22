@@ -13,6 +13,7 @@ import { ResizeHandle } from "@/components/desk/resize-handle";
 import { createRequestGate, runLatest } from "@/components/desk/request-gate";
 import { usePanelWidths } from "@/components/desk/use-panel-widths";
 import { ChangesPanel, FilesChangedBlock, type TurnDiffs } from "@/components/desk/files-changed";
+import { changesFailed, changesLoaded, changesLoading, changesSettled, EMPTY_CHANGES, type SessionChanges, visibleChanges } from "@/components/desk/session-changes";
 import { createTurnDiffCache, createTurnTracker, latestTurnFiles, mergeStepFiles, turnFiles, turnStateKey } from "@/components/desk/diff";
 import {
   belongsToProject,
@@ -32,6 +33,7 @@ import { Input } from "@/components/ui/input";
 import { cn, formatTime } from "@/lib/utils";
 import {
   appendDelta,
+  activityPreview,
   dropPendingBubbles,
   echoToReplace,
   mergeMessage,
@@ -49,7 +51,6 @@ import {
   type DeskCommand,
   type DeskEvent,
   type DeskModel,
-  type DiffFile,
   type PermissionPrompt,
   type Project,
   type SessionSummary,
@@ -63,7 +64,8 @@ export function DeskApp() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [files, setFiles] = useState<DiffFile[]>([]);
+  /** Inspector latest-turn changes, tagged with the session they belong to (see session-changes.ts). */
+  const [changes, setChanges] = useState<SessionChanges>(EMPTY_CHANGES);
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState("");
   const [working, setWorking] = useState(false);
@@ -114,8 +116,6 @@ export function DeskApp() {
   const [showJump, setShowJump] = useState(false);
   /** Latest-turn diff refresh for the inspector (on idle, or Retry). */
   const [filesGate] = useState(createRequestGate);
-  const [filesLoading, setFilesLoading] = useState(false);
-  const [filesError, setFilesError] = useState<string | null>(null);
   /** Bumped once per finished turn, so an expanded "Files changed" block refetches its turn. */
   const [turnEpoch, setTurnEpoch] = useState(0);
   /** One turn end per turn, even when execution.succeeded and session.idle both arrive. */
@@ -134,6 +134,8 @@ export function DeskApp() {
   /** step-files can arrive before the assistant message it names; hold them until it does. */
   const stepFilesRef = useRef(new Map<string, string[]>());
   const bottom = useRef<HTMLDivElement>(null);
+  /** The message list's own scroller. Scrolled directly so the app shell never moves. */
+  const listRef = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const sessionRef = useRef<string | null>(null);
   sessionRef.current = sessionId;
@@ -193,6 +195,7 @@ export function DeskApp() {
         commandTurnRef.current = false;
         setSessionId(null);
         setMessages([]);
+        setChanges(EMPTY_CHANGES);
         setWorking(false);
       }
       return;
@@ -237,7 +240,7 @@ export function DeskApp() {
       return;
     }
     if (event.type === "diff") {
-      if (!sessionRef.current || sessionRef.current === event.sessionId) setFiles(event.files);
+      if (sessionRef.current === event.sessionId) setChanges(changesLoaded(event.sessionId, event.files));
       return;
     }
     if (!sessionRef.current || ("sessionId" in event && event.sessionId !== sessionRef.current)) return;
@@ -291,17 +294,16 @@ export function DeskApp() {
 
   function refreshLatestFiles(id: string) {
     filesStaleRef.current = false;
-    setFilesLoading(true);
-    setFilesError(null);
+    setChanges((current) => changesLoading(current, id));
     void runLatest(filesGate, () => api.diff(id), {
       onData: (data) => {
-        if (sessionRef.current === id) setFiles(data.files);
+        if (sessionRef.current === id) setChanges(changesLoaded(id, data.files));
       },
       onError: (err) => {
-        if (sessionRef.current === id) setFilesError(err instanceof Error ? err.message : "Could not load changes");
+        if (sessionRef.current === id) setChanges((current) => changesFailed(current, id, err instanceof Error ? err.message : "Could not load changes"));
       },
-      onSettled: () => setFilesLoading(false),
-    }).catch(() => setFilesLoading(false));
+      onSettled: () => setChanges((current) => changesSettled(current, id)),
+    }).catch(() => setChanges((current) => changesSettled(current, id)));
   }
 
   useEffect(() => {
@@ -316,7 +318,7 @@ export function DeskApp() {
       setSessions(data.sessions);
       setModel(data.model);
       setModelSource("desk");
-      document.documentElement.dataset.theme = data.appearance;
+      applyTheme(data.appearance);
       if (data.status.error && !data.status.connected) setError(data.status.error);
       if (window.location.search.includes("token=")) {
         window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
@@ -363,7 +365,10 @@ export function DeskApp() {
 
   useEffect(() => {
     if (!stick) return;
-    bottom.current?.scrollIntoView({ block: "end" });
+    // Not scrollIntoView: that also scrolls every scrollable ancestor (the page),
+    // which left a black band under the composer.
+    const list = listRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
   }, [messages, working, prompts, stick]);
 
   const groups = useMemo(() => groupByDate(sessions.filter((item) => !item.archived && matches(item, query))), [sessions, query]);
@@ -380,6 +385,8 @@ export function DeskApp() {
     }).kind !== "go";
   const liveActivity = messages.flatMap((message) => message.activity).slice(-8);
   const turns = useMemo(() => turnFiles(messages), [messages]);
+  // Only the open chat's changes, never a previous chat's (archive, delete, ensureSession).
+  const shownChanges = visibleChanges(changes, sessionId);
   // Footer count from snapshot data in the chat: current even while the Changes tab is hidden.
   const latestFileCount = useMemo(() => latestTurnFiles(messages, turns).length, [messages, turns]);
   const catalogLoaded = catalog !== null;
@@ -563,7 +570,7 @@ export function DeskApp() {
     setCatalog(null);
     setModelLoadError(null);
     setModelLoading(false);
-    setFiles([]);
+    setChanges(EMPTY_CHANGES);
     setExpandedTurns(new Set());
     turnDiffs.clear();
     turnTracker.reset();
@@ -593,8 +600,7 @@ export function DeskApp() {
     resetCommandTurn();
     setMessages(dropPendingBubbles);
     filesGate.invalidate();
-    setFilesLoading(false);
-    setFilesError(null);
+    setChanges(EMPTY_CHANGES);
     stepFilesRef.current.clear();
     turnTracker.reset();
     filesStaleRef.current = false;
@@ -617,13 +623,12 @@ export function DeskApp() {
           forgetSession(browserStorage(), id);
           setSessionId(null);
           setMessages([]);
-          setFiles([]);
+          setChanges(EMPTY_CHANGES);
           return;
         }
         setMessages(data.messages);
-        setFiles(data.files);
         // An unloadable diff (e.g. too large) must not read as "No file changes".
-        setFilesError(data.filesError ?? null);
+        setChanges(changesLoaded(id, data.files, data.filesError ?? null));
         setSessions((current) => upsertSession(current, data.session));
         if (data.session.model) {
           setModel(data.session.model);
@@ -642,7 +647,7 @@ export function DeskApp() {
         // Never keep (or write back) an id that failed to open.
         setSessionId(null);
         setMessages([]);
-        setFiles([]);
+        setChanges(EMPTY_CHANGES);
         setError(err instanceof Error ? err.message : "Could not open that chat");
       },
       onSettled: () => setOpeningSessionId(null),
@@ -679,7 +684,7 @@ export function DeskApp() {
       cancelOpen(openTarget, created.session.id);
       setSessionId(created.session.id);
       setMessages([]);
-      setFiles([]);
+      setChanges(EMPTY_CHANGES);
       setExpandedTurns(new Set());
       turnDiffs.clear();
       turnTracker.reset();
@@ -942,6 +947,7 @@ export function DeskApp() {
                         cancelOpen(openTarget);
                         setSessionId(null);
                         setMessages([]);
+                        setChanges(EMPTY_CHANGES);
                       }
                       return refreshSessions();
                     }).catch((err: unknown) => {
@@ -962,7 +968,7 @@ export function DeskApp() {
               model={model}
               hasConnectionPassword={boot?.hasConnectionPassword ?? false}
               onAppearance={(appearance) => {
-                document.documentElement.dataset.theme = appearance;
+                applyTheme(appearance);
                 setBoot((current) => (current ? { ...current, appearance } : current));
               }}
               onModelChange={(next) => {
@@ -976,7 +982,8 @@ export function DeskApp() {
             <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
               <section className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <div
-                  className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8"
+                  ref={listRef}
+                  className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-6 sm:px-8"
                   onScroll={(event) => {
                     const node = event.currentTarget;
                     const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
@@ -1094,7 +1101,7 @@ export function DeskApp() {
                       className="mb-1 rounded-full bg-elevated px-3 py-1 text-[11px] text-muted shadow-[var(--shadow-border)]"
                       onClick={() => {
                         setStick(true);
-                        bottom.current?.scrollIntoView({ behavior: "smooth" });
+                        listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
                       }}
                     >
                       <ArrowDown className="mr-1 inline size-3" /> Latest
@@ -1263,9 +1270,9 @@ export function DeskApp() {
                     <WorkList items={liveActivity} working={working} />
                   ) : (
                     <ChangesPanel
-                      files={files}
-                      loading={filesLoading}
-                      error={filesError}
+                      files={shownChanges.files}
+                      loading={shownChanges.loading}
+                      error={shownChanges.error}
                       onRetry={() => {
                         if (sessionId) refreshLatestFiles(sessionId);
                       }}
@@ -1281,12 +1288,25 @@ export function DeskApp() {
   );
 }
 
+/**
+ * Swap the theme without colour transitions: elements with transition-colors
+ * (sidebar pills) would otherwise fade from the old theme's colours for
+ * ~150 ms. Transitions come back two frames later, after the new paint.
+ */
+function applyTheme(appearance: string) {
+  const root = document.documentElement;
+  root.dataset.themeSwitching = "";
+  root.dataset.theme = appearance;
+  requestAnimationFrame(() => requestAnimationFrame(() => delete root.dataset.themeSwitching));
+}
+
 function SectionLabel({ children }: { children: string }) {
   return <p className="mt-3 mb-1 px-2.5 text-[11px] font-medium tracking-wide text-muted uppercase">{children}</p>;
 }
 
 function MessageView({ message }: { message: ChatMessage }) {
   const [open, setOpen] = useState(message.activity.some((item) => item.status === "running"));
+  const preview = activityPreview(message.activity);
   if (message.role === "system") {
     return <p className="text-xs text-muted">{message.text}</p>;
   }
@@ -1324,7 +1344,8 @@ function MessageView({ message }: { message: ChatMessage }) {
                 </ul>
               ) : (
                 <div className="mt-1 space-y-0.5 text-xs text-subtle">
-                  {message.activity.slice(-3).map((item) => (
+                  {preview.hidden > 0 && <p>and {preview.hidden} earlier step{preview.hidden === 1 ? "" : "s"}</p>}
+                  {preview.shown.map((item) => (
                     <p key={item.id}>{item.status === "completed" ? "✓" : "▸"} {item.title}</p>
                   ))}
                 </div>

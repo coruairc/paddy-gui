@@ -100,3 +100,10 @@ export type CommandEchoRefs = { pending: string | null; settled: string | null }
 export function echoToReplace(refs: CommandEchoRefs): string | null {
   return refs.pending ?? refs.settled;
 }
+
+/** Collapsed "Show work · N" preview: everything when short, else the last few plus how many are hidden. */
+export function activityPreview<T>(items: readonly T[], max = 4): { shown: T[]; hidden: number } {
+  if (items.length <= max) return { shown: [...items], hidden: 0 };
+  const shown = items.slice(-(max - 1));
+  return { shown, hidden: items.length - shown.length };
+}
