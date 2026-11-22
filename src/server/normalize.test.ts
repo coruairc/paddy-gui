@@ -176,3 +176,73 @@ test("diffs keep added and removed counts", () => {
   assert.equal(v2.additions, 3);
   assert.equal(v2.deletions, 2);
 });
+
+test("session.model.selected normalizes to one additive variant", () => {
+  const first = normalizeEvent({
+    type: "session.model.selected",
+    data: { sessionID: "ses_x", model: { id: "gemini-4-neon", providerID: "google" } },
+  });
+  assert.deepEqual(first, {
+    type: "model-selected",
+    sessionId: "ses_x",
+    model: "google/gemini-4-neon",
+  });
+
+  // A later switch carries `previous`; only the new model is read.
+  const switched = normalizeEvent({
+    type: "session.model.selected",
+    data: {
+      sessionID: "ses_x",
+      model: { id: "gemini-4-neon", providerID: "opencode" },
+      previous: { id: "gemini-4-neon", providerID: "google", variant: "high" },
+    },
+  });
+  assert.deepEqual(switched, {
+    type: "model-selected",
+    sessionId: "ses_x",
+    model: "opencode/gemini-4-neon",
+  });
+});
+
+test("partial model-selected payloads are dropped", () => {
+  assert.equal(
+    normalizeEvent({
+      type: "session.model.selected",
+      data: { sessionID: "ses_x", model: { id: "gemini-4-neon" } },
+    }),
+    null,
+  );
+  assert.equal(
+    normalizeEvent({
+      type: "session.model.selected",
+      data: { sessionID: "ses_x", model: { providerID: "google" } },
+    }),
+    null,
+  );
+  assert.equal(
+    normalizeEvent({
+      type: "session.model.selected",
+      data: { model: { id: "gemini-4-neon", providerID: "google" } },
+    }),
+    null,
+  );
+});
+
+test("session summaries project the session's own model without a variant", () => {
+  const withVariant = summarizeSession({
+    id: "ses_1",
+    model: { id: "gpt-6.2-astra-fast", providerID: "openai", variant: "high" },
+  });
+  assert.equal(withVariant.model, "openai/gpt-6.2-astra-fast");
+
+  const normalized = summarizeSession({
+    id: "ses_1",
+    model: { id: "gpt-6.2-astra-fast", providerID: "openai", variant: "default" },
+  });
+  assert.equal(normalized.model, "openai/gpt-6.2-astra-fast");
+  assert.equal(JSON.stringify(normalized).includes("default"), false);
+
+  assert.equal(summarizeSession({ id: "ses_1" }).model, undefined);
+  assert.equal(summarizeSession({ id: "ses_1", model: { providerID: "openai" } }).model, undefined);
+  assert.equal(summarizeSession({ id: "ses_1", model: { id: "x" } }).model, undefined);
+});

@@ -11,6 +11,8 @@ import {
   nextActiveIndex,
   parseModelKey,
   resolveActiveModel,
+  resolveActiveSource,
+  resolveHeaderModel,
   type ModelLike,
 } from "./models.ts";
 
@@ -167,4 +169,24 @@ test("nextActiveIndex clamps without wrapping and handles empty lists", () => {
   assert.equal(nextActiveIndex(2, 3, "ArrowDown"), 2);
   assert.equal(nextActiveIndex(1, 3, "Home"), 0);
   assert.equal(nextActiveIndex(1, 3, "End"), 2);
+});
+
+test("resolveHeaderModel applies only the active session's switch", () => {
+  assert.equal(resolveHeaderModel("ses_a", "ses_a", "openai/gpt"), "openai/gpt");
+  assert.equal(resolveHeaderModel("ses_a", "ses_b", "openai/gpt"), null);
+  assert.equal(resolveHeaderModel(null, "ses_a", "openai/gpt"), null);
+  assert.equal(resolveHeaderModel("ses_a", "ses_a", ""), null);
+});
+
+test("resolveActiveSource keeps session truth over catalog fallback", () => {
+  const sessionSourced = resolveActiveSource("session", "openai/not-in-catalog", catalog, "google/gemini-3", true);
+  assert.equal(sessionSourced.key, "openai/not-in-catalog");
+  assert.equal(sessionSourced.isStale, false);
+
+  const sessionNamed = resolveActiveSource("session", "openai/gpt-6.2-astra", catalog, "google/gemini-3", true);
+  assert.equal(sessionNamed.label, "GPT-6.2 Astra");
+
+  const deskSourced = resolveActiveSource("desk", "openai/not-in-catalog", catalog, "google/gemini-3", true);
+  assert.equal(deskSourced.key, "google/gemini-3");
+  assert.equal(deskSourced.isStale, true);
 });

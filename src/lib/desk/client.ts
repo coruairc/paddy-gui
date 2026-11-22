@@ -49,6 +49,7 @@ export type SessionSummary = {
   additions: number;
   deletions: number;
   files: number;
+  model?: string;
 };
 
 export type ActivityItem = {
@@ -104,6 +105,7 @@ export type DeskEvent =
   | { type: "session-deleted"; id: string }
   | { type: "status"; sessionId: string; state: "idle" | "working" | "retry" | "error"; detail?: string }
   | { type: "diff"; sessionId: string; files: DiffFile[] }
+  | { type: "model-selected"; sessionId: string; model: string }
   | { type: "error"; message: string; sessionId?: string }
   | { type: "malformed"; message: string };
 

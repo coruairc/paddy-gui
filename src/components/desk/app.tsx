@@ -6,7 +6,7 @@ import { Markdown } from "@/components/markdown";
 import { PaddyIdle } from "@/components/paddy-idle";
 import { SettingsPanel } from "@/components/desk/settings";
 import { ModelPicker } from "@/components/desk/model-picker";
-import { modelForSend, resolveActiveModel } from "@/components/desk/models";
+import { modelForSend, resolveActiveSource, resolveHeaderModel } from "@/components/desk/models";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn, formatTime } from "@/lib/utils";
@@ -51,6 +51,7 @@ export function DeskApp() {
   const [modelLoading, setModelLoading] = useState(false);
   const [modelLoadError, setModelLoadError] = useState<string | null>(null);
   const [modelNote, setModelNote] = useState<string | null>(null);
+  const [modelSource, setModelSource] = useState<"desk" | "session">("desk");
   const [agent, setAgent] = useState("");
   const [agents, setAgents] = useState<string[]>([]);
   const [stick, setStick] = useState(true);
@@ -79,6 +80,13 @@ export function DeskApp() {
       return;
     }
     if (event.type === "malformed") return;
+    if (event.type === "model-selected") {
+      const next = resolveHeaderModel(sessionRef.current, event.sessionId, event.model);
+      if (next === null) return;
+      setModel(next);
+      setModelSource("session");
+      return;
+    }
     if (event.type === "permission") {
       setPrompts((current) => (current.some((item) => item.id === event.prompt.id) ? current : [...current, event.prompt]));
       return;
@@ -131,6 +139,7 @@ export function DeskApp() {
       setActiveProjectId(data.activeProjectId);
       setSessions(data.sessions);
       setModel(data.model);
+      setModelSource("desk");
       document.documentElement.dataset.theme = data.appearance;
       if (data.status.error && !data.status.connected) setError(data.status.error);
       if (window.location.search.includes("token=")) {
@@ -187,7 +196,8 @@ export function DeskApp() {
   const active = sessions.find((item) => item.id === sessionId) ?? null;
   const liveActivity = messages.flatMap((message) => message.activity).slice(-8);
   const catalogLoaded = catalog !== null;
-  const effective = resolveActiveModel(
+  const effective = resolveActiveSource(
+    modelSource,
     model,
     catalog?.models ?? [],
     catalog?.default ?? "",
@@ -213,6 +223,7 @@ export function DeskApp() {
 
   function chooseModel(key: string) {
     setModel(key);
+    setModelSource("desk");
     setModelNote(null);
     void api.settings({ deskModel: key }).catch(() => {
       setModelNote("Model saved for this turn only — it will not survive a reload.");
@@ -232,12 +243,8 @@ export function DeskApp() {
     setFiles([]);
     setSettingsOpen(false);
     setStick(true);
-    const [data, config] = await Promise.all([
-      api.sessions(),
-      api.config().catch(() => ({} as Record<string, unknown>)),
-    ]);
+    const data = await api.sessions();
     setSessions(data.sessions);
-    if (typeof config.model === "string") setModel(config.model);
   }
 
   async function addProject(): Promise<Project | null> {
@@ -266,6 +273,12 @@ export function DeskApp() {
       setMessages(data.messages);
       setFiles(data.files);
       setSessions((current) => upsertSession(current, data.session));
+      if (data.session.model) {
+        setModel(data.session.model);
+        setModelSource("session");
+      } else {
+        setModelSource("desk");
+      }
       try {
         localStorage.setItem("paddy:lastSession", id);
         if (activeProjectId) localStorage.setItem(`paddy:lastSession:${activeProjectId}`, id);

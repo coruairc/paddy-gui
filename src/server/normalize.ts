@@ -35,6 +35,7 @@ export type SessionSummary = {
   additions: number;
   deletions: number;
   files: number;
+  model?: string;
 };
 
 export type DiffFile = {
@@ -62,6 +63,7 @@ export type GuiEvent =
   | { type: "session-deleted"; id: string }
   | { type: "status"; sessionId: string; state: "idle" | "working" | "retry" | "error"; detail?: string }
   | { type: "diff"; sessionId: string; files: DiffFile[] }
+  | { type: "model-selected"; sessionId: string; model: string }
   | { type: "error"; message: string; sessionId?: string }
   | { type: "malformed"; message: string };
 
@@ -103,6 +105,9 @@ export function summarizeSession(session: OpenCodeSession): SessionSummary {
     additions: session.summary?.additions ?? 0,
     deletions: session.summary?.deletions ?? 0,
     files: session.summary?.files ?? 0,
+    ...(session.model?.providerID && session.model?.id
+      ? { model: `${session.model.providerID}/${session.model.id}` }
+      : {}),
   };
 }
 
@@ -163,6 +168,14 @@ export function normalizeEvent(raw: unknown): GuiEvent | null {
   const sessionId = text(data.sessionID);
 
   if (type === "server.connected") return null;
+
+  if (type === "session.model.selected") {
+    const model = (data.model && typeof data.model === "object" ? data.model : {}) as Record<string, unknown>;
+    const id = text(model.id);
+    const providerID = text(model.providerID);
+    if (!sessionId || !id || !providerID) return null;
+    return { type: "model-selected", sessionId, model: `${providerID}/${id}` };
+  }
 
   if (type === "session.text.delta") {
     const messageId = text(data.assistantMessageID);

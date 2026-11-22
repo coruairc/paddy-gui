@@ -151,3 +151,37 @@ export function resolveActiveModel(
 export function modelForSend(persistedKey: string, active: ActiveModel): string {
   return active.isStale ? active.key : persistedKey;
 }
+
+/** Only the active session's own switch may move the header. */
+export function resolveHeaderModel(
+  activeSessionId: string | null,
+  eventSessionId: string,
+  eventModel: string,
+): string | null {
+  if (!activeSessionId || !eventModel) return null;
+  return activeSessionId === eventSessionId ? eventModel : null;
+}
+
+/**
+ * Session truth wins over the desk preference: a resumed/session-sourced model
+ * is shown as-is even when the catalog lacks it. Only the desk preference gets
+ * catalog fallback and the stale note.
+ */
+export function resolveActiveSource(
+  source: "desk" | "session",
+  modelKeyValue: string,
+  models: readonly ModelLike[],
+  defaultKey: string,
+  catalogLoaded: boolean,
+): ActiveModel {
+  if (source === "session") {
+    if (!modelKeyValue) return { key: "", label: "", isStale: false, persistedKey: "" };
+    return {
+      key: modelKeyValue,
+      label: labelFor(models, modelKeyValue),
+      isStale: false,
+      persistedKey: modelKeyValue,
+    };
+  }
+  return resolveActiveModel(modelKeyValue, models, defaultKey, catalogLoaded);
+}
