@@ -154,6 +154,13 @@ test("unavailable OpenCode becomes a recoverable error", async () => {
   assert.equal((result.body as { retryable?: boolean }).retryable, true);
 });
 
+test("GET /api/config still reads the OpenCode config", async () => {
+  const { runtime } = runtimeWithProject();
+  const result = await call(runtime, "GET", "/api/config");
+  assert.equal(result.status, 200);
+  assert.equal((result.body as Record<string, unknown>).model, "openai/gpt");
+});
+
 test("PATCH /api/config is gone", async () => {
   const { runtime } = runtimeWithProject();
   const result = await call(runtime, "PATCH", "/api/config", { patch: { model: "anthropic/claude" } });

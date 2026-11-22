@@ -403,10 +403,11 @@ function Agents() {
     void api.agents().then((payload) => {
       if (!Array.isArray(payload)) return;
       setAgents(payload as typeof agents);
-      const first = payload[0] as { name?: string; prompt?: string } | undefined;
+      const first = payload[0] as { name?: string; prompt?: string; model?: { providerID?: string; modelID?: string } } | undefined;
       if (first?.name) {
         setName(first.name);
         setPrompt(first.prompt ?? "");
+        setModel(first.model?.providerID && first.model.modelID ? `${first.model.providerID}/${first.model.modelID}` : "");
       }
     }).catch((err: Error) => setNote(err.message));
   }, []);

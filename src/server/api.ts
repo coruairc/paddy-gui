@@ -290,6 +290,7 @@ async function readOpenCode(runtime: ControllerRuntime, route: string): Promise<
     return json(200, { providers: redactSecrets(providers, secretNeedles(runtime)), auth });
   }
   if (route === "/agents") return json(200, redactSecrets(await client.getAgents(directory), secretNeedles(runtime)));
+  if (route === "/config") return json(200, redactSecrets(await client.getConfig(directory), secretNeedles(runtime)));
   if (route === "/mcp") return json(200, redactSecrets(await client.getMcp(directory), secretNeedles(runtime)));
   if (route === "/permissions") {
     const [permissions, questions] = await Promise.all([
