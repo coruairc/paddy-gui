@@ -8,7 +8,7 @@ desk work landed as reviewed PRs (outside GSD phases). Resume with OpenCode + GS
 | Item | State |
 |------|-------|
 | main | `6bdb796` (PR #21 merge). Typecheck OK, lint 0 errors / 5 old warnings, 261 TS + 23 script tests, build OK |
-| PR #22 `fe/archive-notice-a11y` | Open, **awaiting Reviewer**. Head includes `3af2622` plus this handoff doc commit. 271 TS + 23 script tests, build OK |
+| PR #22 `fe/archive-notice-a11y` | Reviewer APPROVED (REVIEW-pr22-3af2622.md). Head includes `3af2622` plus this handoff doc commit. 271 TS + 23 script tests, build OK |
 | Other open branches | None |
 
 ## Merged since v1.1 (all Reviewer-approved)
@@ -24,7 +24,7 @@ desk work landed as reviewed PRs (outside GSD phases). Resume with OpenCode + GS
 
 ## Resume
 
-1. Check Reviewer's verdict on PR #22 (report will be `/workspace/paddy-gui-review/REVIEW-pr22-*.md` on the bot box, or the PR comments). If approved, `gh pr merge 22 --merge` and delete the branch.
+1. Check Reviewer's verdict on PR #22 (report will be `/workspace/paddy-gui-review/REVIEW-pr22-*.md` on the bot box; Reviewer does not comment on GitHub). If approved, `gh pr merge 22 --merge` and delete the branch.
 2. Verify main: `npm run typecheck && npm run lint && npm test && npm run build`.
 3. Start the next milestone with GSD (`/gsd-new-milestone` or plan from the Deferred list below).
 
@@ -35,6 +35,7 @@ desk work landed as reviewed PRs (outside GSD phases). Resume with OpenCode + GS
 - Restored chat jumps to top of sidebar (server bumps `time.updated`) — server behaviour, left alone.
 - Mobile footer uses the snapshot "~N files touched" count, not the net diff count.
 - Live-turn behaviour with a real paid model call not exercised in browser tests (mock OpenCode 2.3.2 used).
+- Archive notice: timeout and session-deleted closes move focus from `<body>` into the composer (can pop the on-screen keyboard on touch). Keep the `<body>` clause only for Undo/×/Escape (Reviewer PR #22 F2).
 - `npm audit`: 17 advisories, unchanged from before this work.
 
 ## Rules (team)
