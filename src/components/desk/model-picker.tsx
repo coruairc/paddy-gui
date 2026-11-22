@@ -93,6 +93,10 @@ export function ModelPicker({
   }, [open]);
 
   useEffect(() => {
+    if (open && (state === "list" || state === "no-match")) inputRef.current?.focus();
+  }, [open, state]);
+
+  useEffect(() => {
     if (!open) return;
     function onPointerDown(event: PointerEvent) {
       if (!wrapperRef.current?.contains(event.target as Node)) onOpenChange(false);
@@ -100,6 +104,14 @@ export function ModelPicker({
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [open, onOpenChange]);
+
+  useEffect(() => {
+    if (!open || activeIndex !== -1 || flat.length === 0) return;
+    const index = flat.findIndex((model) => model.key === active.key);
+    setActiveIndex(index >= 0 ? index : 0);
+    // Only adopts a default when the user has not navigated yet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, flat.length]);
 
   function requestOpen(intent: "down" | "up" | "enter") {
     if (open) return;

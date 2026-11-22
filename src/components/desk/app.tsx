@@ -544,7 +544,10 @@ export function DeskApp() {
                 document.documentElement.dataset.theme = appearance;
                 setBoot((current) => (current ? { ...current, appearance } : current));
               }}
-              onModelChange={setModel}
+              onModelChange={(next) => {
+                setModel(next);
+                setModelSource("desk");
+              }}
               onProjectsChange={setProjects}
               onReconnect={() => void api.connect().then(setStatus)}
             />
