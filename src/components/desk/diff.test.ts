@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { capHunks, countLines, createTurnTracker, languageForPath, mergeStepFiles, middleTruncate, parsePatch, turnFiles } from "./diff.ts";
+import { capHunks, countLines, createTurnTracker, languageForPath, latestTurnFiles, mergeStepFiles, middleTruncate, parsePatch, turnFiles } from "./diff.ts";
 
 // Real OpenCode v2.3.2 patch shape (diff --git, index, ---/+++ headers, context=3 hunks).
 const PATCH = [
@@ -148,4 +148,17 @@ test("two idle events for one turn end it once", () => {
   tracker.busy();
   tracker.reset();
   assert.equal(tracker.idle(), false, "switching chats forgets the old turn");
+});
+
+test("latestTurnFiles counts only the newest turn, from snapshot files", () => {
+  const earlier = [
+    { id: "msg_u1", role: "user" },
+    { id: "msg_a1", role: "assistant", files: ["a.ts", "b.ts"] },
+  ];
+  assert.deepEqual(latestTurnFiles(earlier), ["a.ts", "b.ts"]);
+  const next = [...earlier, { id: "tmp_2", role: "user", pending: true }, { id: "msg_a2", role: "assistant" }];
+  assert.deepEqual(latestTurnFiles(next), [], "a new turn with no edits yet is not the previous turn's count");
+  const live = [...next.slice(0, 3), { id: "msg_a2", role: "assistant", files: ["c.ts"] }];
+  assert.deepEqual(latestTurnFiles(live), ["c.ts"]);
+  assert.deepEqual(latestTurnFiles([]), []);
 });

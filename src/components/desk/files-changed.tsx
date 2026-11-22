@@ -16,6 +16,9 @@ const STATUS: Record<DiffFileStatus, { letter: string; label: string; color: str
   deleted: { letter: "D", label: "deleted", color: MONOKAI.pink },
 };
 
+/** Per-turn diff results keyed by turn ordinal; `key` is the range+version they were fetched for. */
+export type TurnDiffCache = Map<number, { key: string; files: DiffFile[] }>;
+
 type LoadState = { kind: "idle" } | { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; files: DiffFile[] };
 
 /**
@@ -30,6 +33,8 @@ export function FilesChangedBlock({
   version,
   open,
   onOpenChange,
+  cache,
+  turn,
 }: {
   sessionId: string;
   from?: string;
@@ -38,21 +43,34 @@ export function FilesChangedBlock({
   /** Owned by the parent (keyed by turn) so it survives a remount while the turn grows. */
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Parent-owned per-turn results, so a block remounted under a newer message doesn't reload. */
+  cache?: TurnDiffCache;
+  turn?: number;
 }) {
-  const [state, setState] = useState<LoadState>({ kind: "idle" });
+  const fetchKey = `${from ?? ""}|${version}`;
+  const [state, setState] = useState<LoadState>(() => {
+    const hit = turn === undefined ? undefined : cache?.get(turn);
+    return hit ? { kind: "ready", files: hit.files } : { kind: "idle" };
+  });
   const gate = useMemo(createRequestGate, []);
   const panelId = useId();
 
   const load = () => {
     setState((current) => (current.kind === "ready" ? current : { kind: "loading" }));
     void runLatest(gate, () => api.diff(sessionId, from), {
-      onData: (data) => setState({ kind: "ready", files: data.files }),
+      onData: (data) => {
+        if (turn !== undefined) cache?.set(turn, { key: fetchKey, files: data.files });
+        setState({ kind: "ready", files: data.files });
+      },
       onError: (err) => setState({ kind: "error", message: err instanceof Error ? err.message : "Could not load the diff" }),
     }).catch(() => setState({ kind: "error", message: "Could not show the diff" }));
   };
 
   useEffect(() => {
-    if (open) load();
+    if (!open) return;
+    // Same turn, range and version already loaded (e.g. remounted as the turn grew): show it, don't refetch.
+    if (turn !== undefined && cache?.get(turn)?.key === fetchKey) return;
+    load();
     // load is recreated each render; the inputs that matter are listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, sessionId, from, version]);

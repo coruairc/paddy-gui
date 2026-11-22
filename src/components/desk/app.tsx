@@ -12,8 +12,8 @@ import { canSelectModel, modelForSend, modelSaveFailure, resolveActiveSource, re
 import { ResizeHandle } from "@/components/desk/resize-handle";
 import { createRequestGate, runLatest } from "@/components/desk/request-gate";
 import { usePanelWidths } from "@/components/desk/use-panel-widths";
-import { ChangesPanel, FilesChangedBlock } from "@/components/desk/files-changed";
-import { createTurnTracker, mergeStepFiles, turnFiles } from "@/components/desk/diff";
+import { ChangesPanel, FilesChangedBlock, type TurnDiffCache } from "@/components/desk/files-changed";
+import { createTurnTracker, latestTurnFiles, mergeStepFiles, turnFiles } from "@/components/desk/diff";
 import {
   belongsToProject,
   browserStorage,
@@ -122,6 +122,8 @@ export function DeskApp() {
   const [turnTracker] = useState(createTurnTracker);
   /** Expanded "Files changed" blocks by turn ordinal; survives re-anchoring during a live turn. */
   const [expandedTurns, setExpandedTurns] = useState<ReadonlySet<number>>(() => new Set());
+  /** Loaded turn diffs for this chat; cleared with expandedTurns whenever the chat changes. */
+  const [turnDiffs] = useState<TurnDiffCache>(() => new Map());
   /** Inspector tab, readable from the event handler without re-subscribing. */
   const inspectorRef = useRef<"work" | "changes">("work");
   /** The latest-turn diff changed while the Changes tab was hidden: fetch when it opens. */
@@ -375,6 +377,8 @@ export function DeskApp() {
     }).kind !== "go";
   const liveActivity = messages.flatMap((message) => message.activity).slice(-8);
   const turns = useMemo(() => turnFiles(messages), [messages]);
+  // Footer count from snapshot data in the chat: current even while the Changes tab is hidden.
+  const latestFileCount = useMemo(() => latestTurnFiles(messages, turns).length, [messages, turns]);
   const catalogLoaded = catalog !== null;
   const commandQuery = draft.startsWith("/") ? draft.slice(1) : null;
   const paletteOpen = commandQuery !== null && !commandDismissed;
@@ -558,6 +562,7 @@ export function DeskApp() {
     setModelLoading(false);
     setFiles([]);
     setExpandedTurns(new Set());
+    turnDiffs.clear();
     turnTracker.reset();
     setSettingsOpen(false);
     setStick(true);
@@ -591,6 +596,7 @@ export function DeskApp() {
     turnTracker.reset();
     filesStaleRef.current = false;
     setExpandedTurns(new Set());
+    turnDiffs.clear();
     // Shown as selected right away, but not reusable by a send until the server confirms it.
     confirmedSessionRef.current = null;
     setSessionId(id);
@@ -670,6 +676,7 @@ export function DeskApp() {
       setMessages([]);
       setFiles([]);
       setExpandedTurns(new Set());
+      turnDiffs.clear();
       turnTracker.reset();
       setPrompts([]);
       setWorking(false);
@@ -996,6 +1003,8 @@ export function DeskApp() {
                                   paths={turn.files}
                                   version={`${turn.files.length}:${turnEpoch}`}
                                   open={expandedTurns.has(turnKey)}
+                                  cache={turnDiffs}
+                                  turn={turnKey}
                                   onOpenChange={(open) =>
                                     setExpandedTurns((current) => {
                                       const next = new Set(current);
@@ -1062,14 +1071,14 @@ export function DeskApp() {
                     </button>
                   </p>
                 ) : null}
-                {files.length > 0 && (
+                {latestFileCount > 0 && (
                   <button
                     type="button"
                     className="flex items-center gap-2 border-t border-border px-4 py-1.5 text-[11px] text-muted hover:text-fg lg:hidden"
                     onClick={() => setInspector("changes")}
                   >
                     <FolderGit2 className="size-3.5" />
-                    {files.length} file{files.length === 1 ? "" : "s"} changed
+                    {latestFileCount} file{latestFileCount === 1 ? "" : "s"} changed
                   </button>
                 )}
                 {showJump && (
