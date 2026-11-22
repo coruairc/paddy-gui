@@ -36,6 +36,35 @@ test("contrast() matches known WCAG values", () => {
   assert.equal(contrast("#777777", "#ffffff").toFixed(2), "4.48");
 });
 
+/** Source-over composite of black at `alpha` onto an opaque hex colour (sRGB, as browsers blend). */
+function overBlack(hex: string, alpha: number): string {
+  const full = hex.replace("#", "");
+  return (
+    "#" +
+    [0, 2, 4]
+      .map((i) => Math.round(parseInt(full.slice(i, i + 2), 16) * (1 - alpha)))
+      .map((channel) => channel.toString(16).padStart(2, "0"))
+      .join("")
+  );
+}
+
+test("overBlack() composites like a browser", () => {
+  assert.equal(overBlack("#ffffff", 0.3), "#b3b3b3");
+  assert.equal(overBlack("#256a35", 0), "#256a35");
+});
+
+// The bubble's own selection classes live in app.tsx; read them so the test
+// follows the real markup instead of a copied number.
+const app = readFileSync(new URL("./components/desk/app.tsx", import.meta.url), "utf8");
+const bubbleClass = /className="[^"]*\bbg-bubble\b[^"]*"/.exec(app)?.[0] ?? "";
+
+test("the user bubble declares its own selection colours", () => {
+  assert.match(bubbleClass, /\bselection:bg-black\/\d+\b/);
+  assert.match(bubbleClass, /\bselection:text-bubble-fg\b/);
+});
+
+const selectionAlpha = Number(/\bselection:bg-black\/(\d+)\b/.exec(bubbleClass)?.[1] ?? NaN) / 100;
+
 const themes = {
   dark: block(/@theme\s*\{/),
   light: block(/\[data-theme="light"\]\s*\{/),
@@ -50,4 +79,13 @@ for (const [theme, tokens] of Object.entries(themes)) {
       assert.ok(ratio >= 4.5, `${theme} ${fg} ${tokens[fg]} on ${tokens["--color-bubble"]} = ${ratio.toFixed(2)}:1`);
     });
   }
+}
+
+for (const [theme, tokens] of Object.entries(themes)) {
+  test(`${theme}: selected bubble text (bubble-fg on black/${Math.round(selectionAlpha * 100)} over bubble) is at least 4.5:1`, () => {
+    assert.ok(Number.isFinite(selectionAlpha), "selection alpha parsed from app.tsx");
+    const background = overBlack(tokens["--color-bubble"], selectionAlpha);
+    const ratio = contrast(tokens["--color-bubble-fg"], background);
+    assert.ok(ratio >= 4.5, `${theme} ${tokens["--color-bubble-fg"]} on ${background} = ${ratio.toFixed(2)}:1`);
+  });
 }
