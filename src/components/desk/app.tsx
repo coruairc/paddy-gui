@@ -13,6 +13,7 @@ import { ResizeHandle } from "@/components/desk/resize-handle";
 import { createRequestGate, runLatest } from "@/components/desk/request-gate";
 import { usePanelWidths } from "@/components/desk/use-panel-widths";
 import { ChangesPanel, FilesChangedBlock, type TurnDiffs } from "@/components/desk/files-changed";
+import { changesFailed, changesLoaded, changesLoading, changesSettled, EMPTY_CHANGES, type SessionChanges, visibleChanges } from "@/components/desk/session-changes";
 import { createTurnDiffCache, createTurnTracker, latestTurnFiles, mergeStepFiles, turnFiles, turnStateKey } from "@/components/desk/diff";
 import {
   belongsToProject,
@@ -49,7 +50,6 @@ import {
   type DeskCommand,
   type DeskEvent,
   type DeskModel,
-  type DiffFile,
   type PermissionPrompt,
   type Project,
   type SessionSummary,
@@ -63,7 +63,8 @@ export function DeskApp() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [files, setFiles] = useState<DiffFile[]>([]);
+  /** Inspector latest-turn changes, tagged with the session they belong to (see session-changes.ts). */
+  const [changes, setChanges] = useState<SessionChanges>(EMPTY_CHANGES);
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState("");
   const [working, setWorking] = useState(false);
@@ -114,8 +115,6 @@ export function DeskApp() {
   const [showJump, setShowJump] = useState(false);
   /** Latest-turn diff refresh for the inspector (on idle, or Retry). */
   const [filesGate] = useState(createRequestGate);
-  const [filesLoading, setFilesLoading] = useState(false);
-  const [filesError, setFilesError] = useState<string | null>(null);
   /** Bumped once per finished turn, so an expanded "Files changed" block refetches its turn. */
   const [turnEpoch, setTurnEpoch] = useState(0);
   /** One turn end per turn, even when execution.succeeded and session.idle both arrive. */
@@ -193,6 +192,7 @@ export function DeskApp() {
         commandTurnRef.current = false;
         setSessionId(null);
         setMessages([]);
+        setChanges(EMPTY_CHANGES);
         setWorking(false);
       }
       return;
@@ -237,7 +237,7 @@ export function DeskApp() {
       return;
     }
     if (event.type === "diff") {
-      if (!sessionRef.current || sessionRef.current === event.sessionId) setFiles(event.files);
+      if (sessionRef.current === event.sessionId) setChanges(changesLoaded(event.sessionId, event.files));
       return;
     }
     if (!sessionRef.current || ("sessionId" in event && event.sessionId !== sessionRef.current)) return;
@@ -291,17 +291,16 @@ export function DeskApp() {
 
   function refreshLatestFiles(id: string) {
     filesStaleRef.current = false;
-    setFilesLoading(true);
-    setFilesError(null);
+    setChanges((current) => changesLoading(current, id));
     void runLatest(filesGate, () => api.diff(id), {
       onData: (data) => {
-        if (sessionRef.current === id) setFiles(data.files);
+        if (sessionRef.current === id) setChanges(changesLoaded(id, data.files));
       },
       onError: (err) => {
-        if (sessionRef.current === id) setFilesError(err instanceof Error ? err.message : "Could not load changes");
+        if (sessionRef.current === id) setChanges((current) => changesFailed(current, id, err instanceof Error ? err.message : "Could not load changes"));
       },
-      onSettled: () => setFilesLoading(false),
-    }).catch(() => setFilesLoading(false));
+      onSettled: () => setChanges((current) => changesSettled(current, id)),
+    }).catch(() => setChanges((current) => changesSettled(current, id)));
   }
 
   useEffect(() => {
@@ -380,6 +379,8 @@ export function DeskApp() {
     }).kind !== "go";
   const liveActivity = messages.flatMap((message) => message.activity).slice(-8);
   const turns = useMemo(() => turnFiles(messages), [messages]);
+  // Only the open chat's changes, never a previous chat's (archive, delete, ensureSession).
+  const shownChanges = visibleChanges(changes, sessionId);
   // Footer count from snapshot data in the chat: current even while the Changes tab is hidden.
   const latestFileCount = useMemo(() => latestTurnFiles(messages, turns).length, [messages, turns]);
   const catalogLoaded = catalog !== null;
@@ -563,7 +564,7 @@ export function DeskApp() {
     setCatalog(null);
     setModelLoadError(null);
     setModelLoading(false);
-    setFiles([]);
+    setChanges(EMPTY_CHANGES);
     setExpandedTurns(new Set());
     turnDiffs.clear();
     turnTracker.reset();
@@ -593,8 +594,7 @@ export function DeskApp() {
     resetCommandTurn();
     setMessages(dropPendingBubbles);
     filesGate.invalidate();
-    setFilesLoading(false);
-    setFilesError(null);
+    setChanges(EMPTY_CHANGES);
     stepFilesRef.current.clear();
     turnTracker.reset();
     filesStaleRef.current = false;
@@ -617,13 +617,12 @@ export function DeskApp() {
           forgetSession(browserStorage(), id);
           setSessionId(null);
           setMessages([]);
-          setFiles([]);
+          setChanges(EMPTY_CHANGES);
           return;
         }
         setMessages(data.messages);
-        setFiles(data.files);
         // An unloadable diff (e.g. too large) must not read as "No file changes".
-        setFilesError(data.filesError ?? null);
+        setChanges(changesLoaded(id, data.files, data.filesError ?? null));
         setSessions((current) => upsertSession(current, data.session));
         if (data.session.model) {
           setModel(data.session.model);
@@ -642,7 +641,7 @@ export function DeskApp() {
         // Never keep (or write back) an id that failed to open.
         setSessionId(null);
         setMessages([]);
-        setFiles([]);
+        setChanges(EMPTY_CHANGES);
         setError(err instanceof Error ? err.message : "Could not open that chat");
       },
       onSettled: () => setOpeningSessionId(null),
@@ -679,7 +678,7 @@ export function DeskApp() {
       cancelOpen(openTarget, created.session.id);
       setSessionId(created.session.id);
       setMessages([]);
-      setFiles([]);
+      setChanges(EMPTY_CHANGES);
       setExpandedTurns(new Set());
       turnDiffs.clear();
       turnTracker.reset();
@@ -942,6 +941,7 @@ export function DeskApp() {
                         cancelOpen(openTarget);
                         setSessionId(null);
                         setMessages([]);
+                        setChanges(EMPTY_CHANGES);
                       }
                       return refreshSessions();
                     }).catch((err: unknown) => {
@@ -1263,9 +1263,9 @@ export function DeskApp() {
                     <WorkList items={liveActivity} working={working} />
                   ) : (
                     <ChangesPanel
-                      files={files}
-                      loading={filesLoading}
-                      error={filesError}
+                      files={shownChanges.files}
+                      loading={shownChanges.loading}
+                      error={shownChanges.error}
                       onRetry={() => {
                         if (sessionId) refreshLatestFiles(sessionId);
                       }}
