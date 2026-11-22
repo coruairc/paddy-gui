@@ -14,8 +14,8 @@ export const MONOKAI = {
   muted: "#75715E",
   green: "#A6E22E",
   pink: "#F92672",
-  addBg: "rgba(166, 226, 46, 0.16)",
-  delBg: "rgba(249, 38, 114, 0.18)",
+  addBg: "rgba(166, 226, 46, 0.12)",
+  delBg: "rgba(249, 38, 114, 0.16)",
   gutter: "#1e1f1c",
 } as const;
 
@@ -42,10 +42,8 @@ const LOADERS: Record<string, () => Promise<unknown>> = {
   java: () => import("shiki/langs/java.mjs"),
   kotlin: () => import("shiki/langs/kotlin.mjs"),
   swift: () => import("shiki/langs/swift.mjs"),
-  ruby: () => import("shiki/langs/ruby.mjs"),
   php: () => import("shiki/langs/php.mjs"),
   c: () => import("shiki/langs/c.mjs"),
-  cpp: () => import("shiki/langs/cpp.mjs"),
   csharp: () => import("shiki/langs/csharp.mjs"),
   sql: () => import("shiki/langs/sql.mjs"),
   shellscript: () => import("shiki/langs/shellscript.mjs"),

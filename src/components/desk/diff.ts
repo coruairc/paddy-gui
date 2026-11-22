@@ -94,8 +94,9 @@ const BY_EXTENSION: Record<string, string> = {
   js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "jsx",
   json: "json", jsonc: "jsonc", css: "css", scss: "scss", html: "html", htm: "html", vue: "vue", svelte: "svelte",
   md: "markdown", mdx: "markdown", yml: "yaml", yaml: "yaml", toml: "toml", xml: "xml", svg: "xml",
-  py: "python", go: "go", rs: "rust", java: "java", kt: "kotlin", swift: "swift", rb: "ruby", php: "php",
-  c: "c", h: "c", cc: "cpp", cpp: "cpp", hpp: "cpp", cs: "csharp", sql: "sql",
+  py: "python", go: "go", rs: "rust", java: "java", kt: "kotlin", swift: "swift", php: "php",
+  // C++ and Ruby are left out on purpose: each grammar chunk is ~800 kB minified.
+  c: "c", h: "c", cs: "csharp", sql: "sql",
   sh: "shellscript", bash: "shellscript", zsh: "shellscript",
 };
 
