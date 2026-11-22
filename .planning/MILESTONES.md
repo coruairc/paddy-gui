@@ -11,3 +11,18 @@
 - Inline permission card with allow/deny/question input, deny-abort handling, and browser-restart session resume with loading state
 
 ---
+
+## v1.1 OpenCode v2 Desk (Shipped: 2026-11-22)
+
+**Phases completed:** 4 phases, 9 plans
+
+**Key accomplishments:**
+- Made the quality gate hermetic: injectable probe seam + env scrub, green with and without a live server on port 4096.
+- Exact-match redaction so identifier-shaped provider/model payloads survive byte-identically at unit and route level.
+- Added a durable `deskModel` default with silent state upgrade, bootstrap precedence, and honest Settings read-only sections.
+- Shipped a provider-grouped, keyboard-first model picker whose pick is exactly the model that runs, reconciled live across tabs.
+- Shipped a server-sourced slash-command palette with args-only dispatch, expanded-message echo reconciliation, in-thread errors, and live `command.updated` invalidation.
+- Closed the milestone with live two-tab end-to-end verification and clean gates in both a live and an isolated environment.
+
+**Archived:** `.planning/milestones/v1.1-ROADMAP.md`, `v1.1-REQUIREMENTS.md`, `v1.1-MILESTONE-AUDIT.md`, `v1.1-phases/`
+

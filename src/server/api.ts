@@ -40,12 +40,15 @@ export async function handleApi(runtime: ControllerRuntime, request: Request): P
     if (request.method === "PATCH" && route === "/settings") return updateSettings(runtime, request);
     if (request.method === "GET" && route === "/sessions") return await listSessions(runtime);
     if (request.method === "POST" && route === "/sessions") return await createSession(runtime, request);
+    const command = route.match(/^\/sessions\/([^/]+)\/command$/);
+    if (command && request.method === "POST") return await runCommand(runtime, decodeURIComponent(command[1]), request);
     const session = route.match(/^\/sessions\/([^/]+)(?:\/(.+))?$/);
     if (session) return await sessionRoute(runtime, request, decodeURIComponent(session[1]), session[2]);
+    if (request.method === "GET" && (route === "/models")) return await listModels(runtime);
+    if (request.method === "GET" && route === "/commands") return await listCommands(runtime);
     if (request.method === "GET" && (route === "/config" || route === "/providers" || route === "/agents" || route === "/mcp" || route === "/vcs" || route === "/files/status" || route === "/permissions")) {
       return await readOpenCode(runtime, route);
     }
-    if (request.method === "PATCH" && route === "/config") return await patchConfig(runtime, request);
     if (request.method === "PUT" && route.startsWith("/providers/")) return await setKey(runtime, request, route);
     if (request.method === "DELETE" && route.startsWith("/providers/")) return await removeKey(runtime, route);
     if (request.method === "POST" && route === "/mcp") return await addMcp(runtime, request);
@@ -86,6 +89,9 @@ async function bootstrap(runtime: ControllerRuntime) {
       /* config is optional on first paint */
     }
   }
+  // A saved desk default wins over the OpenCode project-config model; the config
+  // model stays the fallback for fresh installs (v2 has no remote global write).
+  if (runtime.state.deskModel) model = runtime.state.deskModel;
   return {
     status,
     ...publicState(runtime.state),
@@ -117,6 +123,7 @@ async function reset(runtime: ControllerRuntime): Promise<ApiResult> {
   runtime.state.connectionUrl = "";
   runtime.state.connectionPassword = "";
   runtime.state.ownedServerPassword = "";
+  runtime.state.deskModel = "";
   runtime.persist();
   return json(200, publicState(runtime.state));
 }
@@ -163,6 +170,7 @@ async function updateSettings(runtime: ControllerRuntime, request: Request): Pro
   }
   if (body.clearConnectionPassword === true) runtime.state.connectionPassword = "";
   else if (typeof body.connectionPassword === "string" && body.connectionPassword.trim() !== "") runtime.state.connectionPassword = body.connectionPassword;
+  if (typeof body.deskModel === "string") runtime.state.deskModel = body.deskModel;
   runtime.persist();
   return json(200, publicState(runtime.state));
 }
@@ -265,6 +273,80 @@ async function retry(runtime: ControllerRuntime, directory: string, id: string):
   return json(202, { ok: true, text: lastUser.text });
 }
 
+async function listModels(runtime: ControllerRuntime): Promise<ApiResult> {
+  if (!runtime.status.connected) return json(200, { models: [], default: "" });
+  const directory = activeProject(runtime)?.path;
+  const client = runtime.requireClient();
+  const [catalog, fallback] = await Promise.all([
+    client.listModels(directory),
+    client.getDefaultModel(directory).catch(() => null),
+  ]);
+  const projected: Array<{
+    modelKey: string;
+    id: string;
+    providerID: string;
+    name: string;
+    status: string;
+    context: number;
+    released: number;
+    enabled: boolean;
+    tools: boolean;
+    variantCount: number;
+  }> = [];
+  for (const entry of catalog) {
+    if (!entry?.id || !entry.providerID || !entry.name) continue;
+    projected.push({
+      modelKey: `${entry.providerID}/${entry.id}`,
+      id: entry.id,
+      providerID: entry.providerID,
+      name: entry.name,
+      status: entry.status ?? "active",
+      context: entry.limit?.context ?? 0,
+      released: entry.time?.released ?? 0,
+      enabled: entry.enabled !== false,
+      tools: entry.capabilities?.tools === true,
+      variantCount: Array.isArray(entry.variants) ? entry.variants.length : 0,
+    });
+  }
+  const defaultKey =
+    fallback?.providerID && fallback?.id ? `${fallback.providerID}/${fallback.id}` : "";
+  // Project → redact → assemble: identifiers travel under `modelKey` so the
+  // `^key$` credential rule cannot replace them with "[redacted]".
+  const safe = redactSecrets({ models: projected, default: defaultKey }, secretNeedles(runtime));
+  return json(200, {
+    models: safe.models.map(({ modelKey, ...rest }) => ({ key: modelKey, ...rest })),
+    default: safe.default,
+  });
+}
+
+async function listCommands(runtime: ControllerRuntime): Promise<ApiResult> {
+  if (!runtime.status.connected) return json(200, { commands: [] });
+  const directory = activeProject(runtime)?.path;
+  const client = runtime.requireClient();
+  const catalog = await client.listCommands(directory);
+  const projected = catalog
+    .filter((entry) => typeof entry?.name === "string" && entry.name.trim() !== "")
+    .map((entry) => ({
+      name: entry.name,
+      description: typeof entry.description === "string" ? entry.description : "",
+    }));
+  return json(200, { commands: redactSecrets(projected, secretNeedles(runtime)) });
+}
+
+async function runCommand(
+  runtime: ControllerRuntime,
+  sessionId: string,
+  request: Request,
+): Promise<ApiResult> {
+  const body = await readBody(request);
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  const text = typeof body.text === "string" ? body.text : "";
+  if (!name) return json(400, { error: "Command name is required" });
+  const directory = activeProject(runtime)?.path ?? "";
+  await runtime.requireClient().runCommand(directory, sessionId, { name, text });
+  return json(202, { ok: true });
+}
+
 async function readOpenCode(runtime: ControllerRuntime, route: string): Promise<ApiResult> {
   const project = activeProject(runtime);
   const directory = project?.path;
@@ -286,6 +368,14 @@ async function readOpenCode(runtime: ControllerRuntime, route: string): Promise<
     return json(200, { providers: redactSecrets(providers, secretNeedles(runtime)), auth });
   }
   if (route === "/agents") return json(200, redactSecrets(await client.getAgents(directory), secretNeedles(runtime)));
+  if (route === "/config") {
+    // Project to the only field the browser reads (Settings → Permissions).
+    // The merged config also carries provider headers, MCP env and other
+    // credential-shaped values whose key names key-based redaction can miss.
+    const config = (await client.getConfig(directory)) as Record<string, unknown> | null | undefined;
+    const permission = config && typeof config === "object" ? config.permission : undefined;
+    return json(200, redactSecrets({ permission: permission ?? {} }, secretNeedles(runtime)));
+  }
   if (route === "/mcp") return json(200, redactSecrets(await client.getMcp(directory), secretNeedles(runtime)));
   if (route === "/permissions") {
     const [permissions, questions] = await Promise.all([
@@ -298,16 +388,6 @@ async function readOpenCode(runtime: ControllerRuntime, route: string): Promise<
   if (route === "/vcs") return json(200, await client.getVcs(directory));
   if (route === "/files/status") return json(200, await client.getFileStatus(directory));
   return json(404, { error: "Not found" });
-}
-
-async function patchConfig(runtime: ControllerRuntime, request: Request): Promise<ApiResult> {
-  const body = await readBody(request);
-  const scope = body.scope === "project" ? activeProject(runtime)?.path : undefined;
-  if (body.scope === "project" && !scope) return json(400, { error: "Select a project first" });
-  const patch = body.patch;
-  if (!patch || typeof patch !== "object" || Array.isArray(patch)) return json(400, { error: "Config patch is required" });
-  const updated = await runtime.requireClient().updateConfig(patch as Record<string, unknown>, scope);
-  return json(200, redactSecrets(updated, secretNeedles(runtime)));
 }
 
 async function setKey(runtime: ControllerRuntime, request: Request, route: string): Promise<ApiResult> {
@@ -415,7 +495,11 @@ function splitModel(model: string): [string | undefined, string | undefined] {
 }
 
 function secretNeedles(runtime: ControllerRuntime): string[] {
-  return [runtime.state.connectionPassword, process.env.OPENCODE_SERVER_PASSWORD ?? ""].filter(Boolean);
+  return [
+    runtime.state.connectionPassword,
+    runtime.state.ownedServerPassword,
+    process.env.OPENCODE_SERVER_PASSWORD ?? "",
+  ].filter(Boolean);
 }
 
 function errorResult(err: unknown): ApiResult {

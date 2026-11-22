@@ -55,3 +55,48 @@ export function mergeMessage(list: ChatMessage[], message: ChatMessage): ChatMes
 export function hasPendingBubble(list: ChatMessage[]): boolean {
   return list.some((m) => m.pending);
 }
+/**
+ * Replace a command's optimistic echo with the server's expanded user message.
+ * Commands expand `$ARGUMENTS`, so text equality cannot be used.
+ */
+export function replacePendingEcho(
+  list: ChatMessage[],
+  tempId: string,
+  message: ChatMessage,
+): ChatMessage[] {
+  const index = list.findIndex((item) => item.id === tempId);
+  if (index === -1) return [...list, { ...message, pending: false }];
+  const next = [...list];
+  next[index] = { ...message, pending: false };
+  return next;
+}
+
+/**
+ * Settle a command's optimistic echo without a server user message (session
+ * error, idle, or chat/project switch). The bubble stays as a plain user line
+ * so the transcript still shows what ran, but it no longer blocks sending.
+ */
+export function settlePendingEcho(list: ChatMessage[], tempId: string | null): ChatMessage[] {
+  if (!tempId) return list;
+  const index = list.findIndex((item) => item.id === tempId);
+  if (index === -1 || !list[index].pending) return list;
+  const next = [...list];
+  next[index] = { ...list[index], pending: false };
+  return next;
+}
+
+/** Drop every optimistic bubble, e.g. when leaving a chat whose replies will never arrive here. */
+export function dropPendingBubbles(list: ChatMessage[]): ChatMessage[] {
+  return list.some((item) => item.pending) ? list.filter((item) => !item.pending) : list;
+}
+
+export type CommandEchoRefs = { pending: string | null; settled: string | null };
+
+/**
+ * Which local echo (if any) a server user message should replace. A pending
+ * echo wins; an echo settled by idle/error can still be replaced by a late
+ * server message so the prompt is not shown twice.
+ */
+export function echoToReplace(refs: CommandEchoRefs): string | null {
+  return refs.pending ?? refs.settled;
+}

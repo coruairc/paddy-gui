@@ -305,16 +305,15 @@ function ProviderCard({
     setSavingModel(true);
     setError(null);
     setNote(null);
-    // OpenCode v2 has no remote write for the desk default model; the chosen
-    // model is applied per-session on send (POST /api/session/{id}/model).
-    // Update the desk model first so the choice always takes effect, then
-    // best-effort persist to OpenCode config (ignored when unsupported).
+    // The desk default persists locally in Paddy state via the settings route;
+    // OpenCode v2 has no remote global-config write. Update the desk model
+    // first so the choice takes effect immediately, then persist it for real.
     onModelChange(fullModel);
     try {
-      await api.patchConfig({ model: fullModel });
-      setNote("Desk default model saved in OpenCode.");
-    } catch {
-      setNote("Desk default model set for this desk.");
+      await api.settings({ deskModel: fullModel });
+      setNote("Desk default model saved.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save the desk default model.");
     } finally {
       setSavingModel(false);
     }
@@ -404,17 +403,18 @@ function Agents() {
     void api.agents().then((payload) => {
       if (!Array.isArray(payload)) return;
       setAgents(payload as typeof agents);
-      const first = payload[0] as { name?: string; prompt?: string } | undefined;
+      const first = payload[0] as { name?: string; prompt?: string; model?: { providerID?: string; modelID?: string } } | undefined;
       if (first?.name) {
         setName(first.name);
         setPrompt(first.prompt ?? "");
+        setModel(first.model?.providerID && first.model.modelID ? `${first.model.providerID}/${first.model.modelID}` : "");
       }
     }).catch((err: Error) => setNote(err.message));
   }, []);
   const current = agents.find((item) => item.name === name);
   return (
     <div className="max-w-lg space-y-3 text-sm">
-      <p className="text-muted">Only fields OpenCode already supports are shown. Saving writes the agent block back through OpenCode config.</p>
+      <p className="text-muted">Agents are defined in OpenCode configuration and shown here read-only. Edit them in your OpenCode config.</p>
       <select className="h-9 w-full rounded-lg border border-border bg-bg px-2" value={name} onChange={(event) => {
         const next = agents.find((item) => item.name === event.target.value);
         setName(event.target.value);
@@ -426,19 +426,8 @@ function Agents() {
         ))}
       </select>
       {current?.description && <p className="text-subtle">{current.description}</p>}
-      <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={6} className="w-full rounded-lg border border-border bg-bg p-2 font-mono text-xs" placeholder="Agent instructions" />
-      <Input value={model} onChange={(event) => setModel(event.target.value)} placeholder="provider/model" />
-      <Button
-        onClick={() => {
-          if (!name) return;
-          const agent: Record<string, unknown> = {};
-          if (prompt) agent.prompt = prompt;
-          if (model) agent.model = model;
-          void api.patchConfig({ agent: { [name]: agent } }).then(() => setNote("Agent saved.")).catch((err: Error) => setNote(err.message));
-        }}
-      >
-        Save agent
-      </Button>
+      <textarea value={prompt} readOnly rows={6} className="w-full rounded-lg border border-border bg-bg p-2 font-mono text-xs" placeholder="No instructions set in OpenCode" />
+      <Input value={model} readOnly placeholder="No model set in OpenCode" />
       {note && <p className="text-muted">{note}</p>}
     </div>
   );
@@ -462,19 +451,13 @@ function Permissions() {
   return (
     <div className="max-w-lg space-y-3 text-sm">
       <p className="text-muted">These are OpenCode's permission defaults. Live prompts still appear in the chat and are never auto-approved.</p>
+      <p className="text-muted">Permission defaults come from OpenCode configuration and are read-only here.</p>
       {keys.map((key) => (
-        <label key={key} className="flex items-center justify-between gap-3">
+        <div key={key} className="flex items-center justify-between gap-3">
           <span className="font-mono text-xs">{key}</span>
-          <select className="h-8 rounded-md border border-border bg-bg px-2" value={values[key] ?? "ask"} onChange={(event) => setValues((current) => ({ ...current, [key]: event.target.value }))}>
-            <option value="ask">ask</option>
-            <option value="allow">allow</option>
-            <option value="deny">deny</option>
-          </select>
-        </label>
+          <span className="rounded-md border border-border bg-elevated px-2 py-1 font-mono text-xs text-fg">{values[key] ?? "ask"}</span>
+        </div>
       ))}
-      <Button onClick={() => void api.patchConfig({ permission: values }).then(() => setNote("Permissions saved.")).catch((err: Error) => setNote(err.message))}>
-        Save permissions
-      </Button>
       {note && <p className="text-muted">{note}</p>}
     </div>
   );

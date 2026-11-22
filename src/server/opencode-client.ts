@@ -69,6 +69,26 @@ export type OpenCodeModel = {
   limit?: { context?: number; input?: number; output?: number };
 };
 
+/** v2 catalog entry from `GET /api/model`. Raw `headers`/`settings`/`body` never leave the controller. */
+export type OpenCodeModelInfo = {
+  id: string;
+  modelID: string;
+  providerID: string;
+  name: string;
+  status?: "alpha" | "beta" | "deprecated" | "active";
+  enabled?: boolean;
+  limit?: { context?: number; input?: number; output?: number };
+  time?: { released?: number };
+  capabilities?: { tools?: boolean; input?: string[]; output?: string[]; temperature?: boolean };
+  variants?: Array<{ id?: string }>;
+};
+
+/** v2 slash-command catalog entry from `GET /api/command`. */
+export type OpenCodeCommand = {
+  name: string;
+  description?: string;
+};
+
 export type OpenCodeFormField = {
   key?: string;
   type?: string;
@@ -268,17 +288,31 @@ export class OpenCodeClient {
     return merged;
   }
 
-  async updateConfig(
-    patch: Record<string, unknown>,
-    directory?: string,
-  ): Promise<Record<string, unknown>> {
-    // v2 only exposes PATCH /api/config/shell-ish writes; keep the v1-shaped
-    // call so callers get an explicit error instead of a silent no-op.
-    const data = await this.request("PATCH", "/api/config", {
+  async listModels(directory?: string): Promise<OpenCodeModelInfo[]> {
+    const data = await this.request("GET", "/api/model", { query: locationQuery(directory) });
+    return asArray<OpenCodeModelInfo>(data);
+  }
+
+  async getDefaultModel(directory?: string): Promise<OpenCodeModelInfo | null> {
+    const data = await this.request("GET", "/api/model/default", {
       query: locationQuery(directory),
-      body: patch,
     });
-    return data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+    return data && typeof data === "object" ? (data as OpenCodeModelInfo) : null;
+  }
+
+  async listCommands(directory?: string): Promise<OpenCodeCommand[]> {
+    const data = await this.request("GET", "/api/command", { query: locationQuery(directory) });
+    return asArray<OpenCodeCommand>(data);
+  }
+
+  async runCommand(
+    _directory: string,
+    sessionId: string,
+    input: { name: string; text: string },
+  ): Promise<void> {
+    await this.request("POST", `/api/session/${encodeURIComponent(sessionId)}/command`, {
+      body: { name: input.name, text: input.text },
+    });
   }
 
   async getProviders(directory?: string): Promise<unknown> {

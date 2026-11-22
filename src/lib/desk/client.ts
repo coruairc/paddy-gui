@@ -49,6 +49,7 @@ export type SessionSummary = {
   additions: number;
   deletions: number;
   files: number;
+  model?: string;
 };
 
 export type ActivityItem = {
@@ -71,6 +72,23 @@ export type ChatMessage = {
 
 export type DiffFile = { file: string; additions: number; deletions: number; patch: string };
 
+/** Browser-safe slash-command catalog entry. */
+export type DeskCommand = { name: string; description: string };
+
+/** Browser-safe projection of an OpenCode v2 model catalog entry. */
+export type DeskModel = {
+  key: string;
+  id: string;
+  providerID: string;
+  name: string;
+  status: string;
+  context: number;
+  released: number;
+  enabled: boolean;
+  tools: boolean;
+  variantCount: number;
+};
+
 export type PermissionPrompt = {
   id: string;
   sessionId: string;
@@ -90,6 +108,8 @@ export type DeskEvent =
   | { type: "session-deleted"; id: string }
   | { type: "status"; sessionId: string; state: "idle" | "working" | "retry" | "error"; detail?: string }
   | { type: "diff"; sessionId: string; files: DiffFile[] }
+  | { type: "model-selected"; sessionId: string; model: string }
+  | { type: "commands-updated" }
   | { type: "error"; message: string; sessionId?: string }
   | { type: "malformed"; message: string };
 
@@ -144,11 +164,16 @@ export const api = {
   retry: (id: string) => request("/api/sessions/" + encodeURIComponent(id) + "/retry", { method: "POST" }),
   diff: (id: string) => request<{ files: DiffFile[] }>("/api/sessions/" + encodeURIComponent(id) + "/diff"),
   providers: () => request<ProvidersResponse>("/api/providers"),
+  models: () => request<{ models: DeskModel[]; default: string }>("/api/models"),
+  commands: () => request<{ commands: DeskCommand[] }>("/api/commands"),
+  runCommand: (id: string, name: string, text: string) =>
+    request("/api/sessions/" + encodeURIComponent(id) + "/command", {
+      method: "POST",
+      body: JSON.stringify({ name, text }),
+    }),
   agents: () => request<unknown>("/api/agents"),
   mcp: () => request<unknown>("/api/mcp"),
   config: () => request<Record<string, unknown>>("/api/config"),
-  patchConfig: (patch: Record<string, unknown>, scope?: "project") =>
-    request("/api/config", { method: "PATCH", body: JSON.stringify({ patch, scope }) }),
   setKey: (providerId: string, key: string) =>
     request("/api/providers/" + encodeURIComponent(providerId) + "/key", {
       method: "PUT",
@@ -179,6 +204,7 @@ export type Bootstrap = {
   appearance: "dark" | "light";
   connectionUrl: string;
   hasConnectionPassword: boolean;
+  deskModel: string;
   sessions: SessionSummary[];
   groups: { label: string; items: SessionSummary[] }[];
   model: string;

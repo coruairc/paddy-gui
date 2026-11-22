@@ -1,21 +1,39 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ArrowDown, ArrowUp, FolderGit2, Plus, Search, Settings, Square } from "lucide-react";
 import { toast } from "sonner";
 import { HelixMark } from "@/components/helix-mark";
 import { Markdown } from "@/components/markdown";
 import { PaddyIdle } from "@/components/paddy-idle";
 import { SettingsPanel } from "@/components/desk/settings";
+import { ModelPicker } from "@/components/desk/model-picker";
+import { CommandPalette } from "@/components/desk/command-palette";
+import { filterCommands, nextCommandIndex, parseCommandInput, shouldAutoLoadCommands } from "@/components/desk/commands";
+import { modelForSend, resolveActiveSource, resolveHeaderModel } from "@/components/desk/models";
+import { ResizeHandle } from "@/components/desk/resize-handle";
+import { createRequestGate } from "@/components/desk/request-gate";
+import { usePanelWidths } from "@/components/desk/use-panel-widths";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn, formatTime } from "@/lib/utils";
-import { appendDelta, mergeMessage, upsertActivity, upsertSession } from "./messages";
+import {
+  appendDelta,
+  dropPendingBubbles,
+  echoToReplace,
+  mergeMessage,
+  replacePendingEcho,
+  settlePendingEcho,
+  upsertActivity,
+  upsertSession,
+} from "./messages";
 import {
   api,
   type ActivityItem,
   type Bootstrap,
   type ChatMessage,
   type ConnectionStatus,
+  type DeskCommand,
   type DeskEvent,
+  type DeskModel,
   type DiffFile,
   type PermissionPrompt,
   type Project,
@@ -40,9 +58,32 @@ export function DeskApp() {
   const [prompts, setPrompts] = useState<PermissionPrompt[]>([]);
   const [loadingSession, setLoadingSession] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const panels = usePanelWidths(!settingsOpen);
   const [inspector, setInspector] = useState<"work" | "changes">("work");
   const [branch, setBranch] = useState<string | null>(null);
   const [model, setModel] = useState("");
+  const [catalog, setCatalog] = useState<{ models: DeskModel[]; default: string; fetchedAt: number } | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [modelLoading, setModelLoading] = useState(false);
+  const [modelLoadError, setModelLoadError] = useState<string | null>(null);
+  const [modelNote, setModelNote] = useState<string | null>(null);
+  const [modelSource, setModelSource] = useState<"desk" | "session">("desk");
+  const [commandCatalog, setCommandCatalog] = useState<DeskCommand[] | null>(null);
+  const [commandLoading, setCommandLoading] = useState(false);
+  const [commandLoadError, setCommandLoadError] = useState<string | null>(null);
+  const [commandIndex, setCommandIndex] = useState(0);
+  const [commandDismissed, setCommandDismissed] = useState(false);
+  const pendingCommandRef = useRef<string | null>(null);
+  // Echo settled by session idle/error before its server user message arrived;
+  // a late message still replaces it instead of showing the prompt twice.
+  const settledCommandRef = useRef<string | null>(null);
+  const commandTurnRef = useRef(false);
+  const commandRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadCommandsRef = useRef<() => Promise<void>>(async () => {});
+  // Per-catalog request gates: a response from before a project switch (or a
+  // newer retry) is dropped instead of showing another project's list.
+  const [modelGate] = useState(createRequestGate);
+  const [commandGate] = useState(createRequestGate);
   const [agent, setAgent] = useState("");
   const [agents, setAgents] = useState<string[]>([]);
   const [stick, setStick] = useState(true);
@@ -71,6 +112,20 @@ export function DeskApp() {
       return;
     }
     if (event.type === "malformed") return;
+    if (event.type === "commands-updated") {
+      if (commandRefreshTimer.current) clearTimeout(commandRefreshTimer.current);
+      commandRefreshTimer.current = setTimeout(() => {
+        void loadCommandsRef.current();
+      }, 300);
+      return;
+    }
+    if (event.type === "model-selected") {
+      const next = resolveHeaderModel(sessionRef.current, event.sessionId, event.model);
+      if (next === null) return;
+      setModel(next);
+      setModelSource("session");
+      return;
+    }
     if (event.type === "permission") {
       setPrompts((current) => (current.some((item) => item.id === event.prompt.id) ? current : [...current, event.prompt]));
       return;
@@ -91,8 +146,32 @@ export function DeskApp() {
       const current = sessionRef.current;
       if (current && event.sessionId && current !== event.sessionId) return;
       setWorking(event.state === "working" || event.state === "retry");
-      if (event.state === "error" && event.detail) setError(event.detail);
-      if (event.state === "idle") setWorking(false);
+      if ((event.state === "error" || event.state === "idle") && pendingCommandRef.current) {
+        const tempId = pendingCommandRef.current;
+        pendingCommandRef.current = null;
+        settledCommandRef.current = tempId;
+        setMessages((list) => settlePendingEcho(list, tempId));
+      }
+      if (event.state === "error" && event.detail) {
+        setError(event.detail);
+        if (commandTurnRef.current) {
+          commandTurnRef.current = false;
+          setMessages((list) => [
+            ...list,
+            {
+              id: `sys_${Date.now()}`,
+              role: "system",
+              text: event.detail ?? "Command failed",
+              created: Date.now(),
+              activity: [],
+            },
+          ]);
+        }
+      }
+      if (event.state === "idle") {
+        commandTurnRef.current = false;
+        setWorking(false);
+      }
       return;
     }
     if (event.type === "diff") {
@@ -108,6 +187,16 @@ export function DeskApp() {
       setWorking(true);
       setInspector("work");
     } else if (event.type === "message") {
+      const tempId =
+        event.message.role === "user"
+          ? echoToReplace({ pending: pendingCommandRef.current, settled: settledCommandRef.current })
+          : null;
+      if (tempId) {
+        pendingCommandRef.current = null;
+        settledCommandRef.current = null;
+        setMessages((list) => replacePendingEcho(list, tempId, event.message));
+        return;
+      }
       setMessages((list) => mergeMessage(list, event.message));
     }
   }, []);
@@ -123,6 +212,7 @@ export function DeskApp() {
       setActiveProjectId(data.activeProjectId);
       setSessions(data.sessions);
       setModel(data.model);
+      setModelSource("desk");
       document.documentElement.dataset.theme = data.appearance;
       if (data.status.error && !data.status.connected) setError(data.status.error);
       if (window.location.search.includes("token=")) {
@@ -178,6 +268,152 @@ export function DeskApp() {
   const groups = useMemo(() => groupByDate(sessions.filter((item) => !item.archived && matches(item, query))), [sessions, query]);
   const active = sessions.find((item) => item.id === sessionId) ?? null;
   const liveActivity = messages.flatMap((message) => message.activity).slice(-8);
+  const catalogLoaded = catalog !== null;
+  const commandQuery = draft.startsWith("/") ? draft.slice(1) : null;
+  const paletteOpen = commandQuery !== null && !commandDismissed;
+  const visibleCommands = filterCommands(commandCatalog ?? [], commandQuery ?? "");
+  const activeCommand = visibleCommands[commandIndex] ?? visibleCommands[0] ?? null;
+  useEffect(() => {
+    if (
+      shouldAutoLoadCommands({
+        open: paletteOpen,
+        catalogLoaded: commandCatalog !== null,
+        loading: commandLoading,
+        error: commandLoadError,
+      })
+    ) {
+      void loadCommandsRef.current();
+    }
+  }, [paletteOpen, commandCatalog, commandLoading, commandLoadError]);
+  useEffect(() => {
+    // Closing the palette forgets the failure, so the next `/` tries once more.
+    if (!paletteOpen) setCommandLoadError(null);
+  }, [paletteOpen]);
+
+  const effective = resolveActiveSource(
+    modelSource,
+    model,
+    catalog?.models ?? [],
+    catalog?.default ?? "",
+    catalogLoaded,
+  );
+
+  async function loadModels(force = false) {
+    if (!force && catalog && Date.now() - catalog.fetchedAt < 30_000) {
+      setModelLoading(false);
+      return;
+    }
+    const ticket = modelGate.begin();
+    setModelLoading(true);
+    try {
+      const data = await api.models();
+      if (!modelGate.isCurrent(ticket)) return;
+      setCatalog({ models: data.models, default: data.default, fetchedAt: Date.now() });
+      setModelLoadError(null);
+    } catch (err) {
+      if (!modelGate.isCurrent(ticket)) return;
+      setModelLoadError(err instanceof Error ? err.message : "Could not load models");
+    } finally {
+      // A stale request leaves the flag to the current one (or to the reset on switch).
+      if (modelGate.isCurrent(ticket)) setModelLoading(false);
+    }
+  }
+
+  function chooseModel(key: string) {
+    setModel(key);
+    setModelSource("desk");
+    setModelNote(null);
+    void api.settings({ deskModel: key }).catch(() => {
+      setModelNote("Model saved for this turn only — it will not survive a reload.");
+    });
+  }
+
+  async function loadCommands() {
+    const ticket = commandGate.begin();
+    setCommandLoading(true);
+    try {
+      const data = await api.commands();
+      if (!commandGate.isCurrent(ticket)) return;
+      setCommandCatalog(data.commands);
+      setCommandLoadError(null);
+    } catch (err) {
+      if (!commandGate.isCurrent(ticket)) return;
+      setCommandLoadError(err instanceof Error ? err.message : "Could not load commands");
+    } finally {
+      if (commandGate.isCurrent(ticket)) setCommandLoading(false);
+    }
+  }
+  loadCommandsRef.current = loadCommands;
+
+  function appendSystem(text: string) {
+    setMessages((current) => [
+      ...current,
+      { id: `sys_${Date.now()}`, role: "system", text, created: Date.now(), activity: [] },
+    ]);
+  }
+
+  /** Forget any in-flight command echo; its server message will never reach this view. */
+  function resetCommandTurn() {
+    pendingCommandRef.current = null;
+    settledCommandRef.current = null;
+    commandTurnRef.current = false;
+  }
+
+  async function ensureSession(): Promise<string | null> {
+    if (sessionId) return sessionId;
+    const created = await api.createSession();
+    const id = created.session.id;
+    setSessionId(id);
+    setSessions((current) => upsertSession(current, created.session));
+    try {
+      localStorage.setItem("paddy:lastSession", id);
+      if (activeProjectId) localStorage.setItem(`paddy:lastSession:${activeProjectId}`, id);
+    } catch {
+      /* ignore storage errors */
+    }
+    return id;
+  }
+
+  async function dispatchCommand(name: string, args: string) {
+    if (working || messages.some((m) => m.pending)) return;
+    if (!project) {
+      setError("Add a project before running a command.");
+      return;
+    }
+    const echo = `/${name}${args ? ` ${args}` : ""}`;
+    setCommandDismissed(false);
+    setCommandIndex(0);
+    setStick(true);
+    setSettingsOpen(false);
+    let id: string | null = null;
+    try {
+      id = await ensureSession();
+    } catch (err) {
+      appendSystem(err instanceof Error ? err.message : "Could not start a chat");
+      return;
+    }
+    if (!id) return;
+    setDraft("");
+    const tempId = `local_${Date.now()}`;
+    pendingCommandRef.current = tempId;
+    settledCommandRef.current = null;
+    commandTurnRef.current = true;
+    setMessages((current) => [
+      ...current,
+      { id: tempId, role: "user", text: echo, created: Date.now(), activity: [], pending: true },
+    ]);
+    setWorking(true);
+    try {
+      await api.runCommand(id, name, args);
+    } catch (err) {
+      pendingCommandRef.current = null;
+      commandTurnRef.current = false;
+      setMessages((current) => current.filter((m) => m.id !== tempId));
+      setDraft(echo);
+      setWorking(false);
+      appendSystem(err instanceof Error ? err.message : "Command could not run");
+    }
+  }
 
   async function refreshSessions() {
     const data = await api.sessions();
@@ -186,18 +422,25 @@ export function DeskApp() {
 
   async function chooseProject(id: string) {
     await api.selectProject(id);
+    resetCommandTurn();
     setActiveProjectId(id);
     setSessionId(null);
     setMessages([]);
+    // Commands and models are fetched per project directory. Drop any request
+    // still in flight for the old project and clear its loading flag.
+    commandGate.invalidate();
+    modelGate.invalidate();
+    setCommandCatalog(null);
+    setCommandLoadError(null);
+    setCommandLoading(false);
+    setCatalog(null);
+    setModelLoadError(null);
+    setModelLoading(false);
     setFiles([]);
     setSettingsOpen(false);
     setStick(true);
-    const [data, config] = await Promise.all([
-      api.sessions(),
-      api.config().catch(() => ({} as Record<string, unknown>)),
-    ]);
+    const data = await api.sessions();
     setSessions(data.sessions);
-    if (typeof config.model === "string") setModel(config.model);
   }
 
   async function addProject(): Promise<Project | null> {
@@ -217,6 +460,8 @@ export function DeskApp() {
 
   async function openSession(id: string) {
     setSettingsOpen(false);
+    resetCommandTurn();
+    setMessages(dropPendingBubbles);
     setSessionId(id);
     setWorking(false);
     setError(null);
@@ -226,6 +471,12 @@ export function DeskApp() {
       setMessages(data.messages);
       setFiles(data.files);
       setSessions((current) => upsertSession(current, data.session));
+      if (data.session.model) {
+        setModel(data.session.model);
+        setModelSource("session");
+      } else {
+        setModelSource("desk");
+      }
       try {
         localStorage.setItem("paddy:lastSession", id);
         if (activeProjectId) localStorage.setItem(`paddy:lastSession:${activeProjectId}`, id);
@@ -249,6 +500,7 @@ export function DeskApp() {
       if (!targetProject) return;
       const created = await api.createSession();
       setSessions((current) => upsertSession(current, created.session));
+      resetCommandTurn();
       setActiveProjectId(targetProject.id);
       setSessionId(created.session.id);
       setMessages([]);
@@ -280,23 +532,25 @@ export function DeskApp() {
       setError("Add a project before starting a chat.");
       return;
     }
+    const parsed = parseCommandInput(text);
+    if (parsed) {
+      await dispatchCommand(parsed.name, parsed.args);
+      return;
+    }
     setDraft("");
     setError(null);
     setStick(true);
     setSettingsOpen(false);
-    let id = sessionId;
-    if (!id) {
-      const created = await api.createSession();
-      id = created.session.id;
-      setSessionId(id);
-      setSessions((current) => upsertSession(current, created.session));
-      try {
-        localStorage.setItem("paddy:lastSession", id);
-        if (activeProjectId) localStorage.setItem(`paddy:lastSession:${activeProjectId}`, id);
-      } catch {
-        /* ignore storage errors */
-      }
+    let id: string | null = null;
+    try {
+      id = await ensureSession();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start a chat");
+      return;
     }
+    if (!id) return;
+    pendingCommandRef.current = null;
+    settledCommandRef.current = null;
     const tempId = `local_${Date.now()}`;
     setMessages((current) => [
       ...current,
@@ -304,7 +558,7 @@ export function DeskApp() {
     ]);
     setWorking(true);
     try {
-      await api.send(id, text, model || undefined, agent || undefined);
+      await api.send(id, text, modelForSend(model, effective) || undefined, agent || undefined);
     } catch (err) {
       setMessages((current) => current.filter((m) => m.id !== tempId));
       setDraft(text);
@@ -347,7 +601,12 @@ export function DeskApp() {
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-bg text-fg">
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <nav aria-label="Paddy" className="flex w-52 shrink-0 flex-col border-r border-border bg-bg sm:w-60">
+        <nav
+          id="desk-sidebar"
+          aria-label="Paddy"
+          className="relative flex w-52 shrink-0 flex-col border-r border-border bg-bg sm:w-60 lg:w-[var(--desk-left)]"
+          style={{ "--desk-left": `${panels.left.width}px` } as CSSProperties}
+        >
           <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3">
             <HelixMark spinning={working} className="size-7 shrink-0 text-accent" />
             <div className="min-w-0">
@@ -431,6 +690,19 @@ export function DeskApp() {
               Settings
             </button>
           </div>
+          {panels.wide && (
+            <ResizeHandle
+              side="left"
+              label="Resize sidebar"
+              controls="desk-sidebar"
+              width={panels.left.width}
+              min={panels.left.min}
+              max={panels.left.max}
+              onResize={panels.left.resize}
+              onCommit={panels.left.commit}
+              onReset={panels.left.reset}
+            />
+          )}
         </nav>
 
         <div className="flex min-w-0 flex-1 flex-col">
@@ -442,6 +714,27 @@ export function DeskApp() {
               </p>
             </div>
             <div className="flex items-center gap-2">
+              {project && (
+                <ModelPicker
+                  open={pickerOpen}
+                  onOpenChange={(next) => {
+                    setPickerOpen(next);
+                    if (next) void loadModels();
+                  }}
+                  models={catalog?.models ?? []}
+                  defaultKey={catalog?.default ?? ""}
+                  active={effective}
+                  catalogLoaded={catalogLoaded}
+                  connected={Boolean(status?.connected)}
+                  loading={modelLoading}
+                  loadError={modelLoadError}
+                  onSelect={(key) => {
+                    chooseModel(key);
+                    setPickerOpen(false);
+                  }}
+                  onRetry={() => void loadModels(true)}
+                />
+              )}
               <span className="hidden items-center gap-1.5 text-xs text-muted sm:flex">
                 <span className={cn("size-1.5 rounded-full", status?.connected ? "bg-ok pulse-live" : "bg-subtle")} />
                 {status?.connected ? "Live" : "Offline"}
@@ -453,7 +746,7 @@ export function DeskApp() {
                     const title = window.prompt("Rename chat", active.title);
                     if (title?.trim()) void api.renameSession(active.id, title.trim()).then(() => refreshSessions());
                   }}>Rename</button>
-                  <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => void api.archiveSession(active.id, true).then(() => { setSessionId(null); setMessages([]); return refreshSessions(); })}>Archive</button>
+                  <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => void api.archiveSession(active.id, true).then(() => { resetCommandTurn(); setSessionId(null); setMessages([]); return refreshSessions(); })}>Archive</button>
                 </div>
               )}
             </div>
@@ -470,7 +763,10 @@ export function DeskApp() {
                 document.documentElement.dataset.theme = appearance;
                 setBoot((current) => (current ? { ...current, appearance } : current));
               }}
-              onModelChange={setModel}
+              onModelChange={(next) => {
+                setModel(next);
+                setModelSource("desk");
+              }}
               onProjectsChange={setProjects}
               onReconnect={() => void api.connect().then(setStatus)}
             />
@@ -581,12 +877,89 @@ export function DeskApp() {
                     void submit();
                   }}
                 >
-                  <div className="mx-auto flex max-w-2xl items-end gap-2 rounded-2xl bg-elevated p-2 shadow-[var(--shadow-border)]">
+                  <div className="relative mx-auto max-w-2xl">
+                    <CommandPalette
+                      open={paletteOpen}
+                      commands={visibleCommands}
+                      hasCatalog={(commandCatalog?.length ?? 0) > 0}
+                      query={commandQuery ?? ""}
+                      activeIndex={commandIndex}
+                      connected={Boolean(status?.connected)}
+                      loading={commandLoading}
+                      loadError={commandLoadError}
+                      onSelect={(name) => {
+                        const args = parseCommandInput(draft)?.args ?? "";
+                        setDraft(`/${name}${args ? ` ${args}` : " "}`);
+                        composer.current?.focus();
+                      }}
+                      onRetry={() => void loadCommands()}
+                      onClear={() => {
+                        setDraft("/");
+                        setCommandIndex(0);
+                        composer.current?.focus();
+                      }}
+                    />
+                    <div className="flex items-end gap-2 rounded-2xl bg-elevated p-2 shadow-[var(--shadow-border)]">
                     <textarea
                       ref={composer}
+                      data-composer
+                      role={paletteOpen ? "combobox" : undefined}
+                      aria-expanded={paletteOpen ? true : undefined}
+                      aria-controls={paletteOpen ? "command-listbox" : undefined}
+                      aria-activedescendant={
+                        paletteOpen && activeCommand
+                          ? `command-option-${activeCommand.name.replace(/[^A-Za-z0-9_-]/g, "_")}`
+                          : undefined
+                      }
+                      aria-autocomplete={paletteOpen ? "list" : undefined}
+                      aria-label="Message Paddy"
                       value={draft}
-                      onChange={(event) => setDraft(event.target.value)}
+                      onChange={(event) => {
+                        setDraft(event.target.value);
+                        setCommandDismissed(false);
+                        setCommandIndex(0);
+                      }}
                       onKeyDown={(event) => {
+                        if (paletteOpen) {
+                          if (
+                            event.key === "ArrowDown" ||
+                            event.key === "ArrowUp" ||
+                            event.key === "Home" ||
+                            event.key === "End"
+                          ) {
+                            event.preventDefault();
+                            const next = nextCommandIndex(commandIndex, visibleCommands.length, event.key);
+                            setCommandIndex(next);
+                            const target = visibleCommands[next];
+                            if (target) {
+                              requestAnimationFrame(() => {
+                                document
+                                  .getElementById(`command-option-${target.name.replace(/[^A-Za-z0-9_-]/g, "_")}`)
+                                  ?.scrollIntoView({ block: "nearest" });
+                              });
+                            }
+                            return;
+                          }
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            setCommandDismissed(true);
+                            return;
+                          }
+                          if (event.key === "Tab" && !event.shiftKey && activeCommand) {
+                            event.preventDefault();
+                            const parsed = parseCommandInput(draft);
+                            setDraft(`/${activeCommand.name}${parsed?.args ? ` ${parsed.args}` : " "}`);
+                            return;
+                          }
+                          if (event.key === "Enter" && !event.shiftKey) {
+                            event.preventDefault();
+                            if (working || messages.some((m) => m.pending)) return;
+                            const parsed = parseCommandInput(draft);
+                            if (activeCommand) void dispatchCommand(activeCommand.name, parsed?.args ?? "");
+                            else if (parsed) void dispatchCommand(parsed.name, parsed.args);
+                            return;
+                          }
+                        }
                         if (event.key === "Enter" && !event.shiftKey) {
                           if (working || messages.some((m) => m.pending)) {
                             event.preventDefault();
@@ -609,14 +982,36 @@ export function DeskApp() {
                         <ArrowUp />
                       </Button>
                     )}
+                    </div>
                   </div>
+                  {modelNote && (
+                    <p className="mx-auto mt-2 max-w-2xl px-2 text-[11px] text-warn">{modelNote}</p>
+                  )}
                   <p className="mx-auto mt-2 max-w-2xl px-2 text-[11px] text-subtle">
                     Enter to send · Shift+Enter for a line · work stays in {project?.name ?? "the selected project"}
                   </p>
                 </form>
               </section>
 
-              <aside className="hidden min-h-0 w-[22rem] shrink-0 flex-col border-l border-border bg-surface lg:flex">
+              <aside
+                id="desk-inspector"
+                aria-label="Inspector"
+                className="relative hidden min-h-0 w-[22rem] shrink-0 flex-col border-l border-border bg-surface lg:flex lg:w-[var(--desk-right)]"
+                style={{ "--desk-right": `${panels.right.width}px` } as CSSProperties}
+              >
+                {panels.wide && (
+                  <ResizeHandle
+                    side="right"
+                    label="Resize inspector"
+                    controls="desk-inspector"
+                    width={panels.right.width}
+                    min={panels.right.min}
+                    max={panels.right.max}
+                    onResize={panels.right.resize}
+                    onCommit={panels.right.commit}
+                    onReset={panels.right.reset}
+                  />
+                )}
                 <div className="flex gap-1 border-b border-border p-2">
                   {(["work", "changes"] as const).map((tab) => (
                     <button
@@ -666,7 +1061,7 @@ function MessageView({ message }: { message: ChatMessage }) {
   }
   if (message.role === "user") {
     return (
-      <article className="rise-in">
+      <article className="rise-in" data-command-echo={message.pending && message.text.startsWith("/") ? "true" : undefined}>
         <div className="flex justify-end">
           <div className="max-w-[min(100%,36rem)] rounded-2xl rounded-br-md bg-elevated px-4 py-3 shadow-[var(--shadow-border)]">
             <p className="text-sm leading-relaxed text-fg">{message.text}</p>

@@ -30,7 +30,7 @@ created: "2026-11-21"
 ## Sampling Rate
 
 - **After every task commit:** Run the touched suite(s), e.g. `node --experimental-strip-types --test src/server/security.test.ts`
-- **After every plan wave:** Run `flock -w 900 /tmp/team-build.lock npm test`
+- **After every plan wave:** Run `npm test`
 - **Before `/gsd-verify-work`:** Full suite green in BOTH environments (live server on 4096 + `unshare -Urn sh -c 'ip link set lo up && npm test'`), plus `npm run typecheck` and `npm run lint`
 - **Max feedback latency:** 30 seconds
 
@@ -49,9 +49,9 @@ created: "2026-11-21"
 | 7-01-02 | 01 | 1 | V2-01 | T-7-05 | Spawn test hermetic via injected probe (both call sites) + three-var env scrub | unit | `node --experimental-strip-types --test src/server/runtime.test.ts` | ✅ (fix test:118-150 in place) | ⬜ pending |
 | 7-02-01 | 02 | 2 | V2-02 | T-7-03 | Old state upgrades silently; deskModel round-trips; publicState exposes it, passwords stay secret | unit | `node --experimental-strip-types --test src/server/state.test.ts` | ✅ (new case in existing file) | ⬜ pending |
 | 7-02-02 | 02 | 2 | V2-02 | T-7-03 | deskModel accepted via PATCH /settings; bootstrap precedence + config fallback; non-string ignored; reset clears | unit | `node --experimental-strip-types --test src/server/api.test.ts src/server/state.test.ts` | ✅ (new cases in existing file) | ⬜ pending |
-| 7-03-01 | 03 | 3 | V2-02 | T-7-04 | Settings Save persists via deskModel with real error surfacing; Agents/Permissions read-only; no 404s | typecheck + lint + UAT | `flock -w 900 /tmp/team-build.lock npm run typecheck` + `npm run lint` + end-of-phase human-check | ✅ (no DOM tooling per project constraint; human-check embedded in task verify) | ⬜ pending |
+| 7-03-01 | 03 | 3 | V2-02 | T-7-04 | Settings Save persists via deskModel with real error surfacing; Agents/Permissions read-only; no 404s | typecheck + lint + UAT | `npm run typecheck` + `npm run lint` + end-of-phase human-check | ✅ (no DOM tooling per project constraint; human-check embedded in task verify) | ⬜ pending |
 | 7-03-02 | 03 | 3 | V2-02 | T-7-04 | Dead chain deleted end-to-end; PATCH /api/config → 404 regression guards reintroduction | unit | `node --experimental-strip-types --test src/server/api.test.ts src/server/opencode-client.test.ts` | ✅ (replace test:138-143 + delete mock:58 in the same task as route deletion — Pitfall 2) | ⬜ pending |
-| 7-03-03 | 03 | 3 | V2-01, V2-02, V2-03 | T-7-05 | Full gate green with live server on 4096 AND in isolated netns; typecheck + lint green | suite | `flock -w 900 /tmp/team-build.lock npm test` + `flock -w 900 /tmp/team-build.lock unshare -Urn sh -c 'ip link set lo up && npm test'` | ✅ | ⬜ pending |
+| 7-03-03 | 03 | 3 | V2-01, V2-02, V2-03 | T-7-05 | Full gate green with live server on 4096 AND in isolated netns; typecheck + lint green | suite | `npm test` + `unshare -Urn sh -c 'ip link set lo up && npm test'` | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 

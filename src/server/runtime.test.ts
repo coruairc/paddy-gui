@@ -118,6 +118,7 @@ test("exit handler guard: natural exit after disconnect does not clobber status"
 test("spawn uses detached:true", async () => {
   const file = tempStateFile();
   const spawnCalls: any[] = [];
+  const probeCalls: string[] = [];
   const child = makeChild(7777);
   // Injected down-probe forces the spawn path regardless of what holds port
   // 4096; make child never ready so connect resolves quickly-ish.
@@ -129,7 +130,10 @@ test("spawn uses detached:true", async () => {
       spawnCalls.push({ cmd, args, opts });
       return child as any;
     },
-    probe: async () => "down",
+    probe: async (url) => {
+      probeCalls.push(url);
+      return "down";
+    },
   });
   const prevBin = process.env.OPENCODE_BIN;
   // Scrub ambient redirects for the test duration (D-01): OPENCODE_URL
@@ -158,6 +162,8 @@ test("spawn uses detached:true", async () => {
       /* ignore */
     }
   }
+  assert.ok(probeCalls.length > 0, "injected probe was used — the seam is not bypassed");
+  assert.equal(probeCalls[0], "http://127.0.0.1:4096", "probe received the loopback endpoint");
   assert.ok(spawnCalls.length > 0, "spawn invoked");
   assert.equal(spawnCalls[0].opts.detached, true, "detached true");
 });

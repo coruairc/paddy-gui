@@ -6,28 +6,28 @@
     {
       "number": "7",
       "name": "v2 Hardening Foundation",
-      "status": "pending"
+      "status": "complete"
     },
     {
       "number": "8",
       "name": "Chat Model Picker",
-      "status": "pending"
+      "status": "complete"
     },
     {
       "number": "9",
       "name": "Slash Command Palette",
-      "status": "pending"
+      "status": "complete"
     },
     {
       "number": "10",
       "name": "v1.1 End-to-End Verification",
-      "status": "pending"
+      "status": "complete"
     }
   ],
   "next": {
-    "command": "/gsd-progress --next",
-    "label": "Advance to the next step",
-    "reason": "Phase 1 of 4 · executing"
+    "command": "/gsd-new-milestone",
+    "label": "Start a new milestone",
+    "reason": "All phases complete — start a new milestone"
   },
-  "updated_at": "2026-11-21T22:16:33.315Z"
+  "updated_at": "2026-11-22T05:42:45.253Z"
 }

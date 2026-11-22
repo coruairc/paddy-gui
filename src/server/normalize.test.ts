@@ -176,3 +176,122 @@ test("diffs keep added and removed counts", () => {
   assert.equal(v2.additions, 3);
   assert.equal(v2.deletions, 2);
 });
+
+test("session.model.selected normalizes to one additive variant", () => {
+  const first = normalizeEvent({
+    type: "session.model.selected",
+    data: { sessionID: "ses_x", model: { id: "gemini-4-neon", providerID: "google" } },
+  });
+  assert.deepEqual(first, {
+    type: "model-selected",
+    sessionId: "ses_x",
+    model: "google/gemini-4-neon",
+  });
+
+  // A later switch carries `previous`; only the new model is read.
+  const switched = normalizeEvent({
+    type: "session.model.selected",
+    data: {
+      sessionID: "ses_x",
+      model: { id: "gemini-4-neon", providerID: "opencode" },
+      previous: { id: "gemini-4-neon", providerID: "google", variant: "high" },
+    },
+  });
+  assert.deepEqual(switched, {
+    type: "model-selected",
+    sessionId: "ses_x",
+    model: "opencode/gemini-4-neon",
+  });
+});
+
+test("partial model-selected payloads are dropped", () => {
+  assert.equal(
+    normalizeEvent({
+      type: "session.model.selected",
+      data: { sessionID: "ses_x", model: { id: "gemini-4-neon" } },
+    }),
+    null,
+  );
+  assert.equal(
+    normalizeEvent({
+      type: "session.model.selected",
+      data: { sessionID: "ses_x", model: { providerID: "google" } },
+    }),
+    null,
+  );
+  assert.equal(
+    normalizeEvent({
+      type: "session.model.selected",
+      data: { model: { id: "gemini-4-neon", providerID: "google" } },
+    }),
+    null,
+  );
+});
+
+test("session summaries project the session's own model without a variant", () => {
+  const withVariant = summarizeSession({
+    id: "ses_1",
+    model: { id: "gpt-6.2-astra-fast", providerID: "openai", variant: "high" },
+  });
+  assert.equal(withVariant.model, "openai/gpt-6.2-astra-fast");
+
+  const normalized = summarizeSession({
+    id: "ses_1",
+    model: { id: "gpt-6.2-astra-fast", providerID: "openai", variant: "default" },
+  });
+  assert.equal(normalized.model, "openai/gpt-6.2-astra-fast");
+  assert.equal(JSON.stringify(normalized).includes("default"), false);
+
+  assert.equal(summarizeSession({ id: "ses_1" }).model, undefined);
+  assert.equal(summarizeSession({ id: "ses_1", model: { providerID: "openai" } }).model, undefined);
+  assert.equal(summarizeSession({ id: "ses_1", model: { id: "x" } }).model, undefined);
+});
+
+test("command.updated normalizes to an invalidation event", () => {
+  assert.deepEqual(
+    normalizeEvent({ type: "command.updated", location: { directory: "/work/app" }, data: {} }),
+    { type: "commands-updated" },
+  );
+});
+
+test("session.inbox.enqueued maps the expanded user message", () => {
+  const event = normalizeEvent({
+    type: "session.inbox.enqueued",
+    data: {
+      inboxID: "msg_1",
+      sessionID: "ses_1",
+      item: { type: "user", payload: { text: "Repeat: hello world" }, delivery: "steer" },
+    },
+  });
+  assert.equal(event?.type, "message");
+  if (event?.type === "message") {
+    assert.equal(event.sessionId, "ses_1");
+    assert.equal(event.message.id, "msg_1");
+    assert.equal(event.message.role, "user");
+    assert.equal(event.message.text, "Repeat: hello world");
+    assert.deepEqual(event.message.activity, []);
+  }
+});
+
+test("partial or non-user inbox events are dropped", () => {
+  const base = {
+    type: "session.inbox.enqueued",
+    data: { inboxID: "msg_1", sessionID: "ses_1", item: { type: "user", payload: { text: "x" } } },
+  };
+  assert.equal(
+    normalizeEvent({ ...base, data: { ...base.data, inboxID: undefined } }),
+    null,
+  );
+  assert.equal(
+    normalizeEvent({ ...base, data: { ...base.data, sessionID: undefined } }),
+    null,
+  );
+  assert.equal(
+    normalizeEvent({ ...base, data: { ...base.data, item: { type: "assistant", payload: { text: "x" } } } }),
+    null,
+  );
+  assert.equal(
+    normalizeEvent({ ...base, data: { ...base.data, item: { type: "user", payload: {} } } }),
+    null,
+  );
+});

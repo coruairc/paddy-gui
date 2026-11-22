@@ -2,19 +2,19 @@
 gsd_state_version: "1.0"
 milestone: v1.1
 milestone_name: OpenCode v2 Desk
-current_phase: 7
-current_phase_name: v2 Hardening Foundation
-status: executing
-stopped_at: v1.1 roadmap created (phases 7-10); Phase 7 ready to plan
-last_updated: "2026-11-21T22:16:33.297Z"
-last_activity: 2026-11-21
-last_activity_desc: Phase 7 execution started
-state_head: 2a6ca95cb71ec54d80cc1e57464b8fe6b9cd3af7
+current_phase: 10
+status: milestone_complete
+stopped_at: v1.1 milestone complete (archived, tagged)
+last_updated: "2026-11-22T05:42:45.241Z"
+last_activity: 2026-11-22
+last_activity_desc: Phase 10 complete
+state_head: 78cef746c968d4bc70b015641df1e72acbb60d53
 progress:
   total_phases: 4
-  completed_phases: 0
-  total_plans: 3
-  completed_plans: 0
+  completed_phases: 4
+  total_plans: 9
+  completed_plans: 9
+  percent: 100
 ---
 
 # Project State
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-11-21)
 
 **Core value:** A browser UI you can point at a real project and drive an OpenCode session through, start to finish, with no surprises.
-**Current focus:** Phase 7 — v2 Hardening Foundation
+**Current focus:** Phase 09 — Slash Command Palette
 
 ## Current Position
 
-Phase: 7 (v2 Hardening Foundation) — EXECUTING
-Plan: 1 of 3
-Status: Executing Phase 7
-Last activity: 2026-11-21 — Phase 7 execution started
+Phase: 10
+Plan: Not started
+Status: All phases complete
+Last activity: 2026-11-22 — Phase 10 complete
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -46,16 +46,22 @@ Progress: [░░░░░░░░░░] 0%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 7 | 0/? | - | - |
-| 8 | 0/? | - | - |
-| 9 | 0/? | - | - |
-| 10 | 0/? | - | - |
+| 07 | 3 | - | - |
+| 08 | 3 | - | - |
+| 09 | 2 | - | - |
+| 10 | 1 | - | - |
 
 **Recent Trend:**
 - Last 5 plans: —
 - Trend: —
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 07 P02 | 20 min | 2 tasks | 5 files |
+| Phase 07 P03 | 86 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -69,6 +75,10 @@ Recent decisions affecting current work:
 - [Roadmap v1.1]: V2-03 redaction hardening lands in Phase 7, before any new model/command routes route identifier-shaped payloads through `redactSecrets`.
 - [Roadmap v1.1]: Feature verticals (model picker, commands) land data path before UI, per the four-layer pattern; sequentially to keep review surface one-feature-wide.
 - [Roadmap v1.1]: Zero new dependencies — both widgets are hand-built WAI-ARIA APG comboboxes (research SUMMARY.md).
+- [Phase 07]: deskModel accepts any string; no model-list validation in the controller (OpenCode authoritative, Phase 8 reconciles)
+- [Phase 07]: bootstrap seeds model from persisted deskModel and keeps both model and raw deskModel; reset clears deskModel
+- [Phase 07]: Settings model Save persists via api.settings({ deskModel }) with inline error surfacing; Agents/Permissions are read-only with honest notes
+- [Phase 07]: Dead updateConfig/patchConfig chain deleted end-to-end behind a 404 regression; no try/catch wrapper
 
 ### Pending Todos
 
@@ -77,7 +87,8 @@ None yet.
 ### Blockers/Concerns
 
 - Phase 9: command endpoint shapes are MEDIUM confidence — published OpenAPI targets a newer server than installed v2.3.2; capture `/openapi.json` from the local server before planning Phase 9 (recommend `/gsd-plan-phase --research-phase 9`). Also settle `text` semantics (args-only vs full input) and zero-arg commands live.
-- Phase 7: open decision — Agents/Permissions Settings sections: read-only with explanatory note (research recommendation) vs removal.
+- Phase 7: resolved — Agents/Permissions Settings sections are read-only with explanatory notes (07-03). Phase verification still owns the Settings save/reload/restart UAT.
+- Phase 7: `/tmp/team-build.lock` was held by a foreign cargo gate during 07-03; lock-free verify commands were used per the amended plan (see 07-03-SUMMARY.md).
 
 ## Deferred Items
 
@@ -85,6 +96,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 | Category | Item | Status | Deferred At | Milestone |
 |----------|------|--------|-------------|-----------|
+| Automation | PRE-01 Pre-existing repo-wide `prettier --check` drift (ESLint clean; accepted) | v2 | 2026-11-22 | v1.1 |
 | Automation | AUTO-01 Playwright smoke tests in CI | v2 | 2026-11-03 | v1.0 |
 | Automation | AUTO-02 Automated `~/.config/opencode-web` upgrade path | v2 | 2026-11-03 | v1.0 |
 | Experience | UX-01 Theme customization beyond light/dark | v2 | 2026-11-03 | v1.0 |
@@ -92,8 +104,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-21
-Stopped at: v1.1 roadmap created (phases 7-10); Phase 7 ready to plan
+Last session: 2026-11-22T00:38:15.194Z
+Stopped at: Phase 10 complete — all phases complete
 Resume file: None
 
 ## Operator Next Steps

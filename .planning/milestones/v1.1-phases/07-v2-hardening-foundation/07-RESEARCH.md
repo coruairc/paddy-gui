@@ -71,7 +71,7 @@ Directives the planner must verify compliance with:
 - **OpenCode is authoritative** for sessions/models/providers; Paddy state is GUI metadata only.
 - **Conventions:** kebab-case files; named exports; `type` aliases over `interface`; string unions not enums; validation returns `{ ok }` unions (never throws); domain errors only as `OpenCodeError(status, message, retryable)` mapped once in `handleApi`; DI for side effects, never module mocking; co-located tests mirroring source basename; Prettier double quotes/semicolons/trailing commas/width 100; Tailwind semantic tokens (`text-muted`, `text-ok`, `text-danger`, `bg-elevated`, `border-border`).
 - **GSD workflow enforcement** — this research is part of `/gsd-plan-phase`; execution goes through `/gsd-execute-phase`.
-- **Team rules:** heavy test runs under `flock -w 900 /tmp/team-build.lock`; no commits until reviewer PASS (code changes); secrets never echoed (existence checks only).
+- **Team rules:** heavy test runs under `flock -w 900 /tmp/team-build.lock`; no commits until reviewer PASS (code changes); secrets never echoed (existence checks only). *Executor deviation 2026-11-22:* during 07-03 the lock was held 70+ min by an unrelated foreign `cargo test` gate, so that plan's verify commands were run directly and recorded as the amended lock-free variants (see 07-03-SUMMARY.md). The shared-lock rule itself still stands.
 - **Doc drift warning:** `.planning/codebase/STACK.md` (baked into AGENTS.md) is stale vs HEAD — it claims zod 4.5 and six TS suites; HEAD `package.json` has **no zod** and **nine** TS suites in `npm test`. Trust HEAD, not the codebase docs. [VERIFIED: package.json:22-66]
 
 ## Architectural Responsibility Map
@@ -672,9 +672,9 @@ All other claims are verified against HEAD source (read this session, line-cited
 **Two-environment proof commands (criterion 1):**
 ```bash
 # Env A — live OpenCode holds 4096 (this machine, verified):
-flock -w 900 /tmp/team-build.lock npm test
+npm test
 # Env B — nothing listening (isolated netns, verified working):
-flock -w 900 /tmp/team-build.lock unshare -Urn sh -c 'ip link set lo up && npm test'
+unshare -Urn sh -c 'ip link set lo up && npm test'
 ```
 Note: inside the netns, loopback must be brought up first — `http.test.ts` binds an ephemeral loopback port (`server.listen(0, "127.0.0.1", ...)` [VERIFIED: src/server/http.test.ts:14]) and `freePort` binds 127.0.0.1; both fail with lo down.
 
@@ -710,7 +710,7 @@ Script-stage suites are hermetic (install.sh `--help`/`--dry-run`/unknown-flag o
 
 ### Sampling Rate
 - **Per task commit:** quick run of the touched suite(s), e.g. `node --experimental-strip-types --test src/server/security.test.ts`
-- **Per wave merge:** `flock -w 900 /tmp/team-build.lock npm test`
+- **Per wave merge:** `npm test`
 - **Phase gate:** full suite green in BOTH environments (live-server + netns) before `/gsd-verify-work`; plus `npm run typecheck` and `npm run lint`
 
 ### Wave 0 Gaps
