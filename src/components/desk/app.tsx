@@ -13,7 +13,7 @@ import { ResizeHandle } from "@/components/desk/resize-handle";
 import { createRequestGate, runLatest } from "@/components/desk/request-gate";
 import { usePanelWidths } from "@/components/desk/use-panel-widths";
 import { ChangesPanel, FilesChangedBlock, type TurnDiffs } from "@/components/desk/files-changed";
-import { changesFailed, changesLoaded, changesLoading, changesSettled, EMPTY_CHANGES, type SessionChanges, visibleChanges } from "@/components/desk/session-changes";
+import { changesFailed, changesLoaded, changesLoading, changesSettled, EMPTY_CHANGES, type SessionChanges } from "@/components/desk/session-changes";
 import { createTurnDiffCache, createTurnTracker, latestTurnFiles, mergeStepFiles, turnFiles, turnStateKey } from "@/components/desk/diff";
 import {
   belongsToProject,
@@ -385,8 +385,6 @@ export function DeskApp() {
     }).kind !== "go";
   const liveActivity = messages.flatMap((message) => message.activity).slice(-8);
   const turns = useMemo(() => turnFiles(messages), [messages]);
-  // Only the open chat's changes, never a previous chat's (archive, delete, ensureSession).
-  const shownChanges = visibleChanges(changes, sessionId);
   // Footer count from snapshot data in the chat: current even while the Changes tab is hidden.
   const latestFileCount = useMemo(() => latestTurnFiles(messages, turns).length, [messages, turns]);
   const catalogLoaded = catalog !== null;
@@ -789,8 +787,10 @@ export function DeskApp() {
     }
   }
 
+  // relative: gives absolutely positioned descendants (sr-only labels) a containing
+  // block inside the clipped shell, so they can't extend the document's scroll area.
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-bg text-fg">
+    <div className="relative flex h-dvh flex-col overflow-hidden bg-bg text-fg">
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <nav
           id="desk-sidebar"
@@ -1091,7 +1091,8 @@ export function DeskApp() {
                     onClick={() => setInspector("changes")}
                   >
                     <FolderGit2 className="size-3.5" />
-                    {latestFileCount} file{latestFileCount === 1 ? "" : "s"} changed
+                    {/* Snapshot-based (touched); the Changes tab it opens shows the net diff. */}
+                    ~{latestFileCount} file{latestFileCount === 1 ? "" : "s"} touched
                   </button>
                 )}
                 {showJump && (
@@ -1270,9 +1271,8 @@ export function DeskApp() {
                     <WorkList items={liveActivity} working={working} />
                   ) : (
                     <ChangesPanel
-                      files={shownChanges.files}
-                      loading={shownChanges.loading}
-                      error={shownChanges.error}
+                      changes={changes}
+                      openSessionId={sessionId}
                       onRetry={() => {
                         if (sessionId) refreshLatestFiles(sessionId);
                       }}

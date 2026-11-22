@@ -264,3 +264,14 @@ export function changeCounts(additions: number, deletions: number): Array<{ kind
   if (deletions > 0) out.push({ kind: "del", text: `−${deletions}` });
   return out;
 }
+
+/**
+ * Header for a turn's "Files changed" block. `net` is the loaded diff's file
+ * count (what is on disk); before it loads only the snapshot's touched paths
+ * are known, which can be more (touched then reverted), so that number is
+ * labelled as an approximation of a different thing.
+ */
+export function turnFilesLabel(net: number | undefined, touched: number): string {
+  if (net !== undefined) return `Files changed (${net})`;
+  return `~${touched} file${touched === 1 ? "" : "s"} touched`;
+}

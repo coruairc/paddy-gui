@@ -43,3 +43,19 @@ export function visibleChanges(state: SessionChanges, openSessionId: string | nu
   if (!openSessionId || state.sessionId !== openSessionId) return NOTHING;
   return { files: state.files, loading: state.loading, error: state.error };
 }
+
+/** What the Changes tab renders. */
+export type ChangesView = { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; files: DiffFile[] };
+
+/**
+ * The Changes tab's displayed state, computed from the raw session-tagged
+ * state and the open chat. ChangesPanel calls this itself (it takes the raw
+ * state, not files), so there is no props path that can render another
+ * chat's files.
+ */
+export function changesPanelView(state: SessionChanges, openSessionId: string | null): ChangesView {
+  const shown = visibleChanges(state, openSessionId);
+  if (shown.error) return { kind: "error", message: shown.error };
+  if (shown.loading && !shown.files.length) return { kind: "loading" };
+  return { kind: "ready", files: shown.files };
+}

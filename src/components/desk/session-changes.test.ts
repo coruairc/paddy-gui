@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { DiffFile } from "@/lib/desk/client";
-import { changesFailed, changesLoaded, changesLoading, changesSettled, EMPTY_CHANGES, visibleChanges } from "./session-changes.ts";
+import { readFileSync } from "node:fs";
+import { changesFailed, changesLoaded, changesLoading, changesPanelView, changesSettled, EMPTY_CHANGES, visibleChanges } from "./session-changes.ts";
 
 const file = (path: string): DiffFile => ({ file: path, additions: 1, deletions: 0, patch: "@@ -0,0 +1 @@\n+x\n", status: "added", binary: false, truncated: false });
 
@@ -44,4 +45,34 @@ test("a refresh for the same chat keeps its files while loading, and a stale set
   assert.equal(changesSettled(loading, "ses_B"), loading);
   assert.equal(visibleChanges(changesSettled(loading, "ses_A"), "ses_A").loading, false);
   assert.deepEqual(visibleChanges(EMPTY_CHANGES, null).files, []);
+});
+
+test("changesPanelView (what ChangesPanel renders) never shows another chat's files or errors", () => {
+  const archived = changesLoaded("ses_A", [file("old.ts")]);
+  assert.deepEqual(changesPanelView(archived, "ses_A"), { kind: "ready", files: [file("old.ts")] });
+  assert.deepEqual(changesPanelView(archived, null), { kind: "ready", files: [] }, "after archive");
+  assert.deepEqual(changesPanelView(archived, "ses_B"), { kind: "ready", files: [] }, "after archive → send");
+  assert.deepEqual(changesPanelView(changesLoading(archived, "ses_B"), "ses_B"), { kind: "loading" });
+  const failed = changesFailed(archived, "ses_A", "too large");
+  assert.deepEqual(changesPanelView(failed, "ses_A"), { kind: "error", message: "too large" });
+  assert.deepEqual(changesPanelView(failed, "ses_B"), { kind: "ready", files: [] });
+  // INFO-1: a failure tagged for B must not carry A's files along.
+  assert.deepEqual(changesFailed(archived, "ses_B", "x").files, []);
+});
+
+// The panel takes the raw session-tagged state and filters it itself; this pins
+// app.tsx to that contract (pass the raw state and the *open* chat's id), so
+// swapping in unfiltered data or another id fails here, not only in a browser.
+test("app.tsx hands ChangesPanel the raw state and the open session id", () => {
+  const app = readFileSync(new URL("./app.tsx", import.meta.url), "utf8");
+  const usage = /<ChangesPanel\b([\s\S]*?)\/>/.exec(app)?.[1] ?? "";
+  assert.match(usage, /\bchanges=\{changes\}/);
+  assert.match(usage, /\bopenSessionId=\{sessionId\}/);
+  assert.doesNotMatch(usage, /\bfiles=/, "no props path for unfiltered files");
+});
+
+test("ChangesPanel renders through changesPanelView with the open session id", () => {
+  const panel = readFileSync(new URL("./files-changed.tsx", import.meta.url), "utf8");
+  const body = /export function ChangesPanel\b[\s\S]*?\n}\n/.exec(panel)?.[0] ?? "";
+  assert.match(body, /changesPanelView\(changes, openSessionId\)/);
 });
