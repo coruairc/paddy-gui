@@ -14,7 +14,7 @@ import { createRequestGate, runLatest } from "@/components/desk/request-gate";
 import { usePanelWidths } from "@/components/desk/use-panel-widths";
 import { ChangesPanel, FilesChangedBlock, type TurnDiffs } from "@/components/desk/files-changed";
 import { changesFailed, changesLoaded, changesLoading, changesSettled, EMPTY_CHANGES, type SessionChanges } from "@/components/desk/session-changes";
-import { createArchiveUndo, type ArchiveNotice } from "@/components/desk/archive-undo";
+import { createArchiveUndo, shouldReturnFocus, type ArchiveNotice, type NoticeHold } from "@/components/desk/archive-undo";
 import { createTurnDiffCache, createTurnTracker, latestTurnFiles, mergeStepFiles, turnFiles, turnStateKey } from "@/components/desk/diff";
 import {
   belongsToProject,
@@ -71,6 +71,11 @@ export function DeskApp() {
   const [archiveUndo] = useState(() => createArchiveUndo((id, archived) => api.archiveSession(id, archived)));
   const [archiveNotice, setArchiveNotice] = useState<(ArchiveNotice & { projectId: string | null }) | null>(null);
   const undoButton = useRef<HTMLButtonElement>(null);
+  /** Archive/undo failures show here, in the notice — not in the connection error bar (no Reconnect). */
+  const [archiveFailure, setArchiveFailure] = useState<{ sessionId: string; text: string } | null>(null);
+  /** Always mounted (empty when idle) so screen readers announce text added to it. */
+  const noticeRegion = useRef<HTMLDivElement>(null);
+  const focusUndoNext = useRef(false);
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState("");
   const [working, setWorking] = useState(false);
@@ -192,6 +197,11 @@ export function DeskApp() {
     if (event.type === "session-deleted") {
       setSessions((current) => current.filter((item) => item.id !== event.id));
       forgetSession(browserStorage(), event.id);
+      // Deleted elsewhere while its archive notice is up: no dead Undo (it would only 404).
+      archiveUndo.forget(event.id);
+      if (noticeRegion.current?.dataset.session === event.id) returnNoticeFocus();
+      setArchiveNotice((current) => (current?.sessionId === event.id ? null : current));
+      setArchiveFailure((current) => (current?.sessionId === event.id ? null : current));
       if (sessionRef.current === event.id) {
         // The open chat is gone: the next send must start a new one, not reuse a dead id.
         cancelOpen(openTarget);
@@ -368,13 +378,22 @@ export function DeskApp() {
     void api.agents().then((payload) => setAgents(agentNames(payload))).catch(() => setAgents([]));
   }, [project, status?.connected]);
 
-  // The notice times out; and since the Archive button that was clicked is gone,
-  // move keyboard focus to Undo (only if focus was dropped, never stealing it).
+  // The Archive button that was clicked is gone: move keyboard focus to Undo
+  // (only if focus was dropped, never stealing it), once per new notice.
   useEffect(() => {
-    if (!archiveNotice) return;
+    if (!archiveNotice || !focusUndoNext.current) return;
+    focusUndoNext.current = false;
     if (!document.activeElement || document.activeElement === document.body) undoButton.current?.focus();
+  }, [archiveNotice]);
+
+  // The notice times out, but never while hovered or focused (the controller holds it).
+  useEffect(() => {
+    if (!archiveNotice || archiveNotice.paused) return;
     const timer = window.setTimeout(() => {
-      if (archiveUndo.expire()) setArchiveNotice(null);
+      if (!archiveUndo.expire()) return;
+      returnNoticeFocus();
+      setArchiveNotice(null);
+      setArchiveFailure(null);
     }, Math.max(0, archiveNotice.until - Date.now()) + 50);
     return () => window.clearTimeout(timer);
   }, [archiveNotice, archiveUndo]);
@@ -562,21 +581,54 @@ export function DeskApp() {
     }
   }
 
+  /** Closing the notice must not drop keyboard focus to <body>: hand it to the composer. */
+  function returnNoticeFocus() {
+    const active = document.activeElement;
+    if (shouldReturnFocus(active, document.body, Boolean(noticeRegion.current?.contains(active)))) composer.current?.focus();
+  }
+
+  function closeNotice() {
+    returnNoticeFocus();
+    archiveUndo.dismiss();
+    setArchiveNotice(null);
+    setArchiveFailure(null);
+  }
+
+  /** Hover/focus hold the countdown (WCAG 2.2.1); mirror the controller's notice into state. */
+  function holdNotice(hold: NoticeHold, held: boolean) {
+    const next = held ? archiveUndo.pause(hold) : archiveUndo.resume(hold);
+    setArchiveNotice((current) =>
+      current && next?.sessionId === current.sessionId ? { ...next, projectId: current.projectId } : current,
+    );
+  }
+
   /** Restore the chat named in the archive notice and, if its project is still open, reopen it. */
   function undoArchive() {
     const notice = archiveNotice;
+    setArchiveFailure(null);
     void archiveUndo
       .undo()
       .then(async (id) => {
-        setArchiveNotice(null);
+        // A newer archive's notice (if any) stays, and keeps focus.
+        if (!archiveUndo.notice) returnNoticeFocus();
+        setArchiveNotice((current) => (current?.sessionId === notice?.sessionId ? null : current));
         if (!id) return;
         await refreshSessions();
         if (notice?.projectId === activeProjectId) await openSessionOrReport(id);
       })
       .catch((err: unknown) => {
-        // undo() put the notice back: keep offering Undo.
-        if (archiveUndo.notice && notice) setArchiveNotice({ ...archiveUndo.notice, projectId: notice.projectId });
-        setError(err instanceof Error ? err.message : "Could not restore that chat");
+        const back = archiveUndo.notice;
+        if (back && notice && back.sessionId === notice.sessionId) {
+          // undo() put the notice back: keep offering Undo, with the reason in the notice.
+          setArchiveNotice({ ...back, projectId: notice.projectId });
+          setArchiveFailure({
+            sessionId: back.sessionId,
+            text: `Could not restore it: ${err instanceof Error ? err.message : "unknown error"}`,
+          });
+        } else if (!back) {
+          returnNoticeFocus();
+          setArchiveNotice(null);
+        }
       });
   }
 
@@ -973,7 +1025,10 @@ export function DeskApp() {
                   }}>Rename</button>
                   <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => {
                     const archivedId = active.id;
-                    void archiveUndo.archive({ id: archivedId, title: active.title }).then((notice) => {
+                    const archivedTitle = active.title;
+                    void archiveUndo.archive({ id: archivedId, title: archivedTitle }).then((notice) => {
+                      focusUndoNext.current = true;
+                      setArchiveFailure(null);
                       setArchiveNotice({ ...notice, projectId: activeProjectId });
                       forgetSession(browserStorage(), archivedId);
                       // A slow archive must not clear a chat the user picked in the meantime.
@@ -987,7 +1042,11 @@ export function DeskApp() {
                       return refreshSessions();
                     }).catch((err: unknown) => {
                       // Only the chat being archived shows the failure; the user may have moved on.
-                      if (sessionRef.current === archivedId) setError(err instanceof Error ? err.message : "Could not archive that chat");
+                      if (sessionRef.current !== archivedId) return;
+                      setArchiveFailure({
+                        sessionId: archivedId,
+                        text: `Could not archive “${archivedTitle}”: ${err instanceof Error ? err.message : "unknown error"}`,
+                      });
                     });
                   }}>Archive</button>
                 </div>
@@ -1080,36 +1139,69 @@ export function DeskApp() {
                     </div>
                   )}
                 </div>
-                {archiveNotice && (
-                  <div
-                    role="status"
-                    aria-live="polite"
-                    className="flex items-center gap-2 border-t border-border px-4 py-1.5 text-[11px] text-muted"
-                  >
-                    <span className="min-w-0 flex-1 truncate" title={archiveNotice.title}>
-                      Chat archived · {archiveNotice.title}
-                    </span>
-                    <button
-                      ref={undoButton}
-                      type="button"
-                      onClick={undoArchive}
-                      className="shrink-0 rounded-md border border-border bg-surface px-2 py-0.5 text-fg hover:bg-elevated focus-visible:outline-2 focus-visible:outline-accent"
-                    >
-                      Undo
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Dismiss"
-                      onClick={() => {
-                        archiveUndo.dismiss();
-                        setArchiveNotice(null);
-                      }}
-                      className="shrink-0 rounded-md px-1.5 py-0.5 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
-                    >
-                      ×
-                    </button>
-                  </div>
-                )}
+                <div
+                  ref={noticeRegion}
+                  role="status"
+                  aria-live="polite"
+                  data-session={archiveNotice?.sessionId ?? archiveFailure?.sessionId}
+                  onMouseEnter={() => holdNotice("hover", true)}
+                  onMouseLeave={() => holdNotice("hover", false)}
+                  onFocus={() => holdNotice("focus", true)}
+                  onBlur={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) holdNotice("focus", false);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Escape" || (!archiveNotice && !archiveFailure)) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeNotice();
+                  }}
+                  className={
+                    archiveNotice || archiveFailure
+                      ? "flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border px-4 py-1.5 text-[11px] text-muted"
+                      : undefined
+                  }
+                >
+                  {archiveNotice ? (
+                    <>
+                      <span className="min-w-0 flex-1 truncate" title={archiveNotice.title}>
+                        Chat archived · {archiveNotice.title}
+                      </span>
+                      <button
+                        ref={undoButton}
+                        type="button"
+                        aria-label={`Undo archive of ${archiveNotice.title}`}
+                        onClick={undoArchive}
+                        className="shrink-0 rounded-md border border-border bg-surface px-2 py-0.5 text-fg hover:bg-elevated focus-visible:outline-2 focus-visible:outline-accent"
+                      >
+                        Undo
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Dismiss archive notice"
+                        onClick={closeNotice}
+                        className="shrink-0 rounded-md px-1.5 py-0.5 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+                      >
+                        ×
+                      </button>
+                      {archiveFailure?.sessionId === archiveNotice.sessionId && (
+                        <span className="w-full break-words text-danger">{archiveFailure.text}</span>
+                      )}
+                    </>
+                  ) : archiveFailure ? (
+                    <>
+                      <span className="min-w-0 flex-1 break-words text-danger">{archiveFailure.text}</span>
+                      <button
+                        type="button"
+                        aria-label="Dismiss"
+                        onClick={closeNotice}
+                        className="shrink-0 rounded-md px-1.5 py-0.5 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+                      >
+                        ×
+                      </button>
+                    </>
+                  ) : null}
+                </div>
                 {error && status?.authRequired ? (
                   <form
                     className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-1.5 text-[11px]"
