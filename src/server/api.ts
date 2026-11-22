@@ -13,7 +13,7 @@ import {
   type SessionSummary,
 } from "./normalize.ts";
 import { redactSecrets, safeJson, validateWorkspacePath } from "./security.ts";
-import { newId, publicState } from "./state.ts";
+import { newId, publicState, validateDeskModel } from "./state.ts";
 import { CONTROLLER_VERSION, type ControllerRuntime } from "./runtime.ts";
 
 export type ApiResult = { status: number; body: unknown; stream?: ReadableStream<Uint8Array> };
@@ -506,21 +506,6 @@ function decodeParam(value: string): string {
   } catch {
     throw new OpenCodeError(400, "Malformed path parameter");
   }
-}
-
-const DESK_MODEL_MAX_LENGTH = 256;
-// `provider/model`: provider has no slash; the model id may (e.g. `openrouter/x/y`).
-const DESK_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@+-]*\/[A-Za-z0-9._:@+-]+(?:\/[A-Za-z0-9._:@+-]+)*$/;
-
-/** `null`/`""` clears the desk default; otherwise a bounded `provider/model` key. */
-function validateDeskModel(value: unknown): { ok: true; value: string } | { ok: false; error: string } {
-  if (value === null || value === "") return { ok: true, value: "" };
-  if (typeof value !== "string") return { ok: false, error: "deskModel must be a provider/model string or null" };
-  if (value.length > DESK_MODEL_MAX_LENGTH) {
-    return { ok: false, error: `deskModel must be at most ${DESK_MODEL_MAX_LENGTH} characters` };
-  }
-  if (!DESK_MODEL_PATTERN.test(value)) return { ok: false, error: "deskModel must look like provider/model" };
-  return { ok: true, value };
 }
 
 /**
