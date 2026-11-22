@@ -161,6 +161,17 @@ export function turnFiles(messages: readonly TurnMessage[]): Map<string, TurnFil
   return out;
 }
 
+/**
+ * Paths changed by the newest turn, from snapshot data already in the chat.
+ * Empty when the newest turn changed nothing (never the previous turn's list).
+ */
+export function latestTurnFiles(messages: readonly TurnMessage[], turns: Map<string, TurnFiles> = turnFiles(messages)): string[] {
+  const newest = messages.reduce((count, message) => count + (message.role === "user" ? 1 : 0), 0) - 1;
+  if (newest < 0) return [];
+  for (const group of turns.values()) if (group.turn === newest) return group.files;
+  return [];
+}
+
 /** Fold a live `step-files` event into the assistant message it belongs to. */
 export function mergeStepFiles<T extends { id: string; files?: string[] }>(list: T[], messageId: string, files: string[]): T[] {
   let changed = false;

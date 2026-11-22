@@ -390,11 +390,21 @@ test("one enormous line is shortened, not dropped down to the hunk header", () =
   assert.ok(lines[2].length > MAX_PATCH_CHARS - 100);
 });
 
-test("maskSecrets replaces every occurrence of long secrets and ignores short ones", () => {
+test("maskSecrets replaces every occurrence of each secret of 4+ chars", () => {
   const pw = "ocw_" + "k".repeat(40);
   assert.equal(maskSecrets(`a${pw}b ${pw}`, [pw]), "a[redacted]b [redacted]");
-  assert.equal(maskSecrets("token=short123", ["short123"]), "token=short123");
+  assert.equal(maskSecrets("token=short123", ["short123"]), "token=[redacted]");
+  assert.equal(maskSecrets("pw=abcd;", ["abcd"]), "pw=[redacted];");
+  assert.equal(maskSecrets("let abc = 1;", ["abc"]), "let abc = 1;", "under 4 chars is left alone");
   assert.equal(maskSecrets("nothing here", [pw, ""]), "nothing here");
+});
+
+test("maskSecrets masks the longer of two overlapping secrets whole, whatever the input order", () => {
+  const short = "prefix-secret";
+  const long = "prefix-secret-tail-very-secret";
+  for (const order of [[short, long], [long, short], [short, long, short]]) {
+    assert.equal(maskSecrets(`x=${long};y=${short}`, order), "x=[redacted];y=[redacted]", order.join(","));
+  }
 });
 
 test("masking happens before the per-file cap so a cut never leaks a secret prefix", () => {

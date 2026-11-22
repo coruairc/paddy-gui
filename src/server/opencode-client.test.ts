@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { OpenCodeClient, OpenCodeError, SESSION_PAGE_LIMIT } from "./opencode-client.ts";
+import { MAX_DIFF_UPSTREAM_BYTES, OpenCodeClient, OpenCodeError, readCapped, SESSION_PAGE_LIMIT } from "./opencode-client.ts";
 
 function mockFetch(handler: (url: string, init?: RequestInit) => { status?: number; body?: unknown }) {
   const calls: { url: string; init?: RequestInit }[] = [];
@@ -394,4 +394,57 @@ test("getDiff asks for hunks with context and forwards the turn range", async ()
   await client.getDiff("/work/app", "ses_1", { from: "msg_u1", to: "msg_u9" });
   assert.match(calls[1].url, /from=msg_u1/);
   assert.match(calls[1].url, /to=msg_u9/);
+});
+
+function chunkedResponse(chunks: number, chunkBytes: number, headers?: Record<string, string>) {
+  let pulled = 0;
+  const chunk = new TextEncoder().encode("x".repeat(chunkBytes));
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (pulled >= chunks) return controller.close();
+      pulled += 1;
+      controller.enqueue(chunk);
+    },
+  });
+  return { response: new Response(body, { status: 200, headers }), pulled: () => pulled };
+}
+
+test("readCapped streams under the cap and aborts past it without buffering the rest", async () => {
+  const small = chunkedResponse(3, 10);
+  assert.equal(await readCapped(small.response, 100), "x".repeat(30));
+  const big = chunkedResponse(1000, 10);
+  await assert.rejects(readCapped(big.response, 95), (err: unknown) => err instanceof OpenCodeError && err.status === 502 && !err.retryable);
+  assert.ok(big.pulled() <= 12, `pulled ${big.pulled()} chunks`);
+  const declared = chunkedResponse(1, 10, { "content-length": "5000" });
+  await assert.rejects(readCapped(declared.response, 100), /too large/);
+  assert.equal(declared.pulled(), 0, "a declared oversize body is never read");
+});
+
+test("readCapped decodes multi-byte characters split across chunks", async () => {
+  const bytes = new TextEncoder().encode("é✓");
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const byte of bytes) controller.enqueue(new Uint8Array([byte]));
+      controller.close();
+    },
+  });
+  assert.equal(await readCapped(new Response(body), 100), "é✓");
+});
+
+test("getDiff fails cleanly (502, nothing parsed) when the upstream body passes the ceiling", async () => {
+  let pulled = 0;
+  const chunk = new TextEncoder().encode('{"data":[' + " ".repeat(1024 * 1024));
+  const fetchImpl: typeof fetch = async () =>
+    new Response(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulled += 1;
+          controller.enqueue(chunk);
+        },
+      }),
+      { status: 200 },
+    );
+  const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: fetchImpl });
+  await assert.rejects(client.getDiff("/work/app", "ses_1"), (err: unknown) => err instanceof OpenCodeError && err.status === 502 && /too large/.test(err.message));
+  assert.ok(pulled <= Math.ceil(MAX_DIFF_UPSTREAM_BYTES / chunk.byteLength) + 2, `pulled ${pulled} MB`);
 });

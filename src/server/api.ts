@@ -253,7 +253,7 @@ async function sessionRoute(runtime: ControllerRuntime, request: Request, id: st
     const range = diffRange(new URL(request.url).searchParams);
     if (!range.ok) return json(400, { error: range.error });
     const diff = await client.getDiff(project.path, id, range.value);
-    // Known secrets (>= 16 chars) are masked anywhere in the patch text, e.g. a
+    // Known secrets (>= 4 chars) are masked anywhere in the patch text, e.g. a
     // `+OPENCODE_SERVER_PASSWORD=<pw>` line; total patch text is capped.
     const files: DiffFile[] = toDiffFiles(diff, secretNeedles(runtime));
     return json(200, { files: redactSecrets(files, secretNeedles(runtime)) });
