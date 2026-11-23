@@ -658,7 +658,18 @@ function ProviderCard({
                 {pickerNote && <p role="status" className="text-xs text-ok">{pickerNote}</p>}
                 {pickerError && <p role="alert" className="text-xs text-danger">{pickerError}</p>}
               </>
-            ) : <p className="text-xs text-subtle">OpenCode reports no models for this provider.</p>}
+            ) : (
+              <div role="note" className="space-y-1 rounded-lg border border-border bg-bg px-3 py-2">
+                <p className="flex items-start gap-1.5 text-xs text-warn">
+                  <Info size={14} className="mt-px shrink-0" aria-hidden="true" />
+                  <span>OpenCode hasn&apos;t loaded any models for this provider.</span>
+                </p>
+                <p className="text-xs text-muted">
+                  This can happen with free or limited subscriptions (for example Copilot Free) or
+                  an upstream model-sync issue. Try re-authenticating, or restart OpenCode.
+                </p>
+              </div>
+            )}
           </section>
         </div>
         {note && <p className="text-xs text-ok">{note}</p>}
