@@ -5,6 +5,8 @@
 
 import {
   OpenCodeError,
+  projectAuthMethod,
+  type OpenCodeIntegration,
   type OpenCodeModelInfo,
   type OpenCodeOAuthAttempt,
   type OpenCodeOAuthAttemptStatus,
@@ -13,6 +15,11 @@ import {
 import { readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import {
+  getProviderDirectory,
+  type DirectoryModel,
+  type ProviderDirectory,
+} from "./provider-directory.ts";
 import {
   groupSessionsByDate,
   summarizeSession,
@@ -28,9 +35,16 @@ import { CONTROLLER_VERSION, type ControllerRuntime } from "./runtime.ts";
 
 export type ApiResult = { status: number; body: unknown; stream?: ReadableStream<Uint8Array> };
 
+/** Composition hook: tests supply a fixture-backed directory; production uses the process cache. */
+export type ApiDependencies = { providerDirectory?: ProviderDirectory };
+
 const encoder = new TextEncoder();
 
-export async function handleApi(runtime: ControllerRuntime, request: Request): Promise<ApiResult> {
+export async function handleApi(
+  runtime: ControllerRuntime,
+  request: Request,
+  deps: ApiDependencies = {},
+): Promise<ApiResult> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const route = path.startsWith("/api") ? path.slice(4) || "/" : path;
@@ -56,6 +70,9 @@ export async function handleApi(runtime: ControllerRuntime, request: Request): P
     const session = route.match(/^\/sessions\/([^/]+)(?:\/(.+))?$/);
     if (session) return await sessionRoute(runtime, request, decodeParam(session[1]), session[2]);
     if (request.method === "GET" && (route === "/models")) return await listModels(runtime);
+    if (request.method === "GET" && route === "/provider-directory") {
+      return await readProviderDirectory(runtime, deps.providerDirectory ?? getProviderDirectory());
+    }
     if (request.method === "GET" && route === "/commands") return await listCommands(runtime);
     if (request.method === "GET" && (route === "/config" || route === "/providers" || route === "/agents" || route === "/mcp" || route === "/vcs" || route === "/files/status" || route === "/permissions")) {
       return await readOpenCode(runtime, route);
@@ -414,6 +431,107 @@ async function editPrompt(
   }
   await client.sendMessage(directory, id, { text });
   return json(202, { ok: true });
+}
+
+// ── Provider directory (models.dev catalog ∩ OpenCode integrations) ────────
+// Display metadata only. The configured tab comes from `/api/providers`; this
+// route exists so the Not configured tab can name OpenCode-supported providers
+// without the browser ever contacting models.dev or a provider API host.
+
+type ProviderDirectoryEntry = {
+  id: string;
+  name: string;
+  doc?: string;
+  modelCount: number;
+  models: DirectoryModel[];
+  integrationID: string;
+  configured: boolean;
+  auth: Array<Record<string, unknown>>;
+};
+
+type ProviderDirectoryBody = {
+  directory: ProviderDirectoryEntry[];
+  error?: string;
+  fetchedAt?: number;
+};
+
+const OPENCODE_INVENTORY_ERROR = "OpenCode integrations are unavailable";
+
+async function readProviderDirectory(
+  runtime: ControllerRuntime,
+  directory: ProviderDirectory,
+): Promise<ApiResult> {
+  const catalog = await directory.get();
+  const response: ProviderDirectoryBody = { directory: [] };
+  if (catalog.fetchedAt !== undefined) response.fetchedAt = catalog.fetchedAt;
+  if (catalog.error) {
+    response.error = catalog.error;
+    return json(200, redactSecrets(response, secretNeedles(runtime)));
+  }
+  if (!catalog.providers.length) return json(200, response);
+
+  const client = runtime.client;
+  if (!runtime.status.connected || !client) {
+    response.error = OPENCODE_INVENTORY_ERROR;
+    return json(200, redactSecrets(response, secretNeedles(runtime)));
+  }
+
+  const projectPath = activeProject(runtime)?.path;
+  const [integrations, providers] = await Promise.all([
+    client.listIntegrations(projectPath).catch(() => null),
+    client.getProviderCatalog(projectPath).catch(() => null),
+  ]);
+  // Without the inventory we cannot tell OpenCode-supported providers from
+  // arbitrary models.dev entries; return the retryable error rather than
+  // mislabeling the Not configured tab (AC-C1).
+  if (!integrations) {
+    response.error = OPENCODE_INVENTORY_ERROR;
+    return json(200, redactSecrets(response, secretNeedles(runtime)));
+  }
+
+  const active = new Set<string>();
+  for (const provider of providers ?? []) {
+    if (typeof provider.id === "string" && provider.id) active.add(provider.id);
+    if (typeof provider.integrationID === "string" && provider.integrationID) {
+      active.add(provider.integrationID);
+    }
+  }
+  const integrationsByID = new Map<string, OpenCodeIntegration>();
+  for (const integration of integrations) {
+    if (typeof integration.id === "string" && integration.id) {
+      integrationsByID.set(integration.id, integration);
+    }
+  }
+
+  const needles = secretNeedles(runtime);
+  const entries: ProviderDirectoryEntry[] = [];
+  for (const provider of catalog.providers) {
+    const integration = integrationsByID.get(provider.id);
+    if (!integration) continue;
+    // Redact the untrusted display metadata only: auth method objects carry a
+    // legitimate `key` field that whole-response key redaction would clobber.
+    const safe = redactSecrets(
+      {
+        id: provider.id,
+        name: provider.name,
+        ...(provider.doc ? { doc: provider.doc } : {}),
+        modelCount: provider.modelCount,
+        models: provider.models,
+      },
+      needles,
+    );
+    entries.push({
+      ...safe,
+      integrationID: provider.id,
+      configured: active.has(provider.id),
+      auth: (Array.isArray(integration.methods) ? integration.methods : []).map((method) =>
+        projectAuthMethod(method),
+      ),
+    });
+  }
+  entries.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  response.directory = entries;
+  return json(200, response);
 }
 
 async function listModels(runtime: ControllerRuntime): Promise<ApiResult> {

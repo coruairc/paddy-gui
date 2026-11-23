@@ -206,8 +206,9 @@ run parallel implementers.
 - [x] Implemented (Parts A/B + nav icons + responsive grid; committed `77df95e`, pushed)
 - [x] Reviewed (backend scope PASS_WITH_NOTES; reviewer reproduced 107 focused tests)
 - [x] Committed (`77df95e`)
-- [ ] Part C (Configured / Not configured tabs) — deferred
-- [ ] Live Add validation defect — OPEN (see below)
+- [x] Part A/B fix reviewed + committed (`ae85ab1`, pushed; 335/335 full suite)
+- [ ] Part C (Configured / Not configured tabs) — IN PROGRESS (contract below)
+- [x] Live Add validation defect — FIXED (`ae85ab1`)
 
 ## Live defect found post-commit (orchestrator investigation)
 
@@ -251,3 +252,78 @@ Reproduced against the running controller (fresh process, healthy connection):
   must succeed (mirrors live). Existing populated-inline tests must still pass.
 - Re-verify live: add a real catalog key, confirm it appears in `/api/models`
   with default unchanged, remove it, restore original `availableModels: []`.
+
+## Part C implementation contract (orchestrator design, grounded live)
+
+Live facts (OpenCode 2.4.0, models.dev fetched once under approved host):
+- models.dev `GET https://models.dev/api.json?type=all` → 200, provider-keyed
+  map of **328** providers. Provider fields: `id, env, npm, name, doc, models`.
+  Model fields include `id, name, description, family, limit, cost, ...` (no
+  reliable `type`; chat filtering is OpenCode's job once active).
+- OpenCode `/api/integration` inventory: **334** integration IDs.
+- Intersection (models.dev ∩ integration IDs) = **326** OpenCode-supported
+  model providers. Active `/api/provider` = **15** (6 `console-*` aggregators
+  are NOT in models.dev). Not-configured candidates = **317**.
+
+### Backend (round 1)
+
+- New module `src/server/provider-directory.ts` (models.dev is NOT OpenCode, so
+  keep it out of opencode-client.ts). Injectable `fetch`/clock for tests; no
+  network in tests.
+  - Constant URL `https://models.dev/api.json?type=all` (the ONLY new outbound
+    host; user-approved). Request timeout 5s; response byte cap (e.g. 8 MiB);
+    in-memory cache TTL 24h; brief negative-cache (e.g. 60s) on failure.
+  - Project ONLY safe display metadata per provider:
+    `{ id, name, doc?, modelCount, models: [{ id, name? }] }`. Ignore
+    `env`/`npm`/`api`/`cost`/base-URL/credential-shaped fields. Bound models
+    per provider (e.g. 200) and total providers; never fetch provider API URLs.
+  - On fetch/parse failure return `{ providers: [], error }` (retryable); do
+    not throw into the whole Providers page.
+- New route `GET /api/provider-directory` in api.ts (behind handleNode auth):
+  - Combine cached directory + OpenCode `listIntegrations` (auth methods, reuse
+    the existing allowlist projection) + active provider id/integrationID set.
+  - Response:
+    `{ directory: Array<{ id, name, doc?, modelCount, models:[{id,name?}],
+       integrationID, configured: boolean, auth: ProviderAuthMethod[] }>,
+       error?: string, fetchedAt?: number }`.
+  - Include only models.dev providers whose id is in OpenCode's integration
+    inventory (AC-C1). `configured` = id (or its integrationID) is in the active
+    provider set. `auth` = that integration's projected methods (empty if
+    OpenCode read fails). Sort by name.
+  - Catalog failure → `{ directory: [], error }`. OpenCode integration read
+    failure or disconnected → `{ directory: [], error }` (retryable). DECISION
+    (R2, orchestrator): returning an empty directory + error when the inventory
+    is unavailable is ACCEPTED and preferred over unfiltered models.dev entries,
+    because AC-C1 forbids labeling providers OpenCode does not list. The
+    Configured tab stays usable regardless. (Supersedes the earlier "auth: []
+    best-effort" wording.)
+  - Apply `redactSecrets` to the response; no tokens/credentials.
+- Typed client method `api.providerDirectory()` + types in client.ts.
+- Tests (fixture-based, red-first): projection allowlist (env/npm/cost/base-URL
+  never cross), intersection filtering, configured marking, cache TTL hit/miss,
+  timeout/byte-cap/failure → error field, models bound. No live network in tests.
+
+### Frontend (round 2, after backend handoff)
+
+- Settings → Providers: two accessible tabs "Configured" / "Not configured"
+  with counts (role=tablist/tab/tabpanel, keyboard arrow navigation). Configured
+  = existing active provider cards (unchanged behavior). Not configured =
+  `providerDirectory().directory.filter(!configured)`.
+- Search/filter applies within the active tab (and across both if existing
+  search is global). Keep the responsive grid + nav icons.
+- Not-configured card: reuse ProviderCard auth UI (OAuth/key connect via the
+  existing Part B / key flows using `integrationID`). Models section shows
+  "Connect to load models" (catalog model ids/names may be listed read-only as
+  a preview, but NO Add-to-picker until active — AC-C5). If no usable auth
+  method, show "Configure in OpenCode" explanation, not an inert button (AC-C4).
+- On successful connection, refresh providers + directory so the provider moves
+  to Configured. On directory error, show a retryable message in the Not
+  configured tab; Configured tab stays functional (AC-C2).
+- No separate Models section (AC-C6). No new outbound host from browser.
+
+### Verification (Part C)
+
+- AC-V6 fixture tests green; full typecheck/lint/npm test under flock when free.
+- Live: Configured shows 15, Not configured shows ~317 with counts; search works
+  in each; a not-configured provider exposes its OpenCode auth methods; catalog
+  error path degrades gracefully. Do NOT complete real sign-ins; restore state.

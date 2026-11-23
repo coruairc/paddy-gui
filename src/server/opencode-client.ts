@@ -930,8 +930,9 @@ function projectProviderModel(model: OpenCodeProviderModel, id: string): Record<
 }
 
 /** Project an integration auth method: keep the id/type/label/form schema the
- *  UI needs, never `connections` or any credential value. */
-function projectAuthMethod(method: OpenCodeIntegrationMethod): Record<string, unknown> {
+ *  UI needs, never `connections` or any credential value. Exported for the
+ *  provider-directory route, which shares this allowlist. */
+export function projectAuthMethod(method: OpenCodeIntegrationMethod): Record<string, unknown> {
   const type = typeof method.type === "string" ? method.type : "";
   const names = Array.isArray(method.names) ? method.names.filter((item) => typeof item === "string") : [];
   const projected: Record<string, unknown> = {

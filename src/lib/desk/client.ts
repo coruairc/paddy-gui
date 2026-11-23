@@ -108,6 +108,33 @@ export type ProvidersResponse = {
   auth?: Record<string, ProviderAuthMethod[]>;
 };
 
+export type ProviderDirectoryModel = { id: string; name?: string };
+
+/** One models.dev provider that OpenCode also lists as an integration. */
+export type ProviderDirectoryEntry = {
+  id: string;
+  name: string;
+  doc?: string;
+  /** Total models the source listed; `models` may be capped by the controller. */
+  modelCount: number;
+  models: ProviderDirectoryModel[];
+  /** OpenCode integration that owns auth/credentials for this provider. */
+  integrationID: string;
+  /** True when OpenCode's active provider list already includes it. */
+  configured: boolean;
+  /** OpenCode auth methods; empty when the integration read was unavailable. */
+  auth: ProviderAuthMethod[];
+};
+
+export type ProviderDirectoryResponse = {
+  /** Only providers present in OpenCode's integration inventory (AC-C1). */
+  directory: ProviderDirectoryEntry[];
+  /** Retryable catalog/inventory failure; the Configured tab stays usable. */
+  error?: string;
+  /** Epoch ms of the successful models.dev fetch (absent on failure). */
+  fetchedAt?: number;
+};
+
 export type SessionSummary = {
   id: string;
   title: string;
@@ -268,6 +295,8 @@ export const api = {
       "/api/sessions/" + encodeURIComponent(id) + "/diff" + (from ? "?from=" + encodeURIComponent(from) : ""),
     ),
   providers: () => request<ProvidersResponse>("/api/providers"),
+  /** models.dev catalog (controller-cached) intersected with OpenCode integrations. */
+  providerDirectory: () => request<ProviderDirectoryResponse>("/api/provider-directory"),
   /** Start an OpenCode-owned OAuth attempt. The controller validates the
    *  integration/method against OpenCode before proxying. */
   startOAuth: (

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import {
   Blocks,
   Bot,
@@ -24,6 +24,7 @@ import {
   type Project,
   type ProviderAuthFormField,
   type ProviderAuthMethod,
+  type ProviderDirectoryEntry,
   type RuntimeProvider,
 } from "@/lib/desk/client";
 
@@ -218,6 +219,13 @@ function Connection({ status, onReconnect, hasConnectionPassword = false }: { st
   );
 }
 
+const PROVIDER_TABS = [
+  { id: "configured", label: "Configured" },
+  { id: "available", label: "Not configured" },
+] as const;
+
+type ProviderTab = (typeof PROVIDER_TABS)[number]["id"];
+
 function Providers({
   model,
   onModelChange,
@@ -237,9 +245,19 @@ function Providers({
   const [connected, setConnected] = useState<string[]>([]);
   /** Keys currently offered by the composer catalog (`/api/models`), or null when unknown. */
   const [pickerKeys, setPickerKeys] = useState<Set<string> | null>(null);
+  const [directory, setDirectory] = useState<ProviderDirectoryEntry[] | null>(null);
+  const [directoryError, setDirectoryError] = useState<string | null>(null);
+  const [directoryLoading, setDirectoryLoading] = useState(true);
+  const [tab, setTab] = useState<ProviderTab>("configured");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const tabId = useId();
+  const tabRefs = useRef<Record<ProviderTab, HTMLButtonElement | null>>({
+    configured: null,
+    available: null,
+  });
 
   async function load() {
     setError(null);
@@ -264,9 +282,55 @@ function Providers({
     setLoading(false);
   }
 
+  async function loadDirectory() {
+    setDirectoryLoading(true);
+    setDirectoryError(null);
+    try {
+      const payload = await api.providerDirectory();
+      setDirectory(payload.directory);
+      // The controller returns a retryable catalog error with an empty list;
+      // the Configured tab keeps working from its own data (AC-C2).
+      setDirectoryError(payload.error ?? null);
+    } catch (err) {
+      setDirectory([]);
+      setDirectoryError(
+        err instanceof Error ? err.message : "Could not load the provider catalog.",
+      );
+    } finally {
+      setDirectoryLoading(false);
+    }
+  }
+
   useEffect(() => {
     void load();
+    void loadDirectory();
   }, []);
+
+  /** A connection can move a provider between tabs, so refresh both sources. */
+  function refreshAll() {
+    void load();
+    void loadDirectory();
+    onCatalogChange?.();
+  }
+
+  function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    const order = PROVIDER_TABS.map((item) => item.id);
+    const index = order.indexOf(tab);
+    let next: ProviderTab | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      next = order[(index + 1) % order.length];
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      next = order[(index - 1 + order.length) % order.length];
+    } else if (event.key === "Home") {
+      next = order[0];
+    } else if (event.key === "End") {
+      next = order[order.length - 1];
+    }
+    if (!next) return;
+    event.preventDefault();
+    setTab(next);
+    tabRefs.current[next]?.focus();
+  }
 
   const needle = query.trim().toLowerCase();
   const visible = providers
@@ -275,39 +339,123 @@ function Providers({
     )
     .sort((a, b) => Number(connected.includes(b.id)) - Number(connected.includes(a.id)) || (a.name ?? a.id).localeCompare(b.name ?? b.id));
 
+  const notConfigured = (directory ?? []).filter((entry) => !entry.configured);
+  const unconfiguredVisible = notConfigured.filter(
+    (entry) => !needle || `${entry.name} ${entry.id}`.toLowerCase().includes(needle),
+  );
+  const notConfiguredCount = directoryError ? null : directory ? notConfigured.length : null;
+  const configuredCount = loading ? null : providers.length;
+
   return (
     <div className="space-y-4">
       <div className="space-y-1 text-sm text-muted">
-        <p>Each provider below is reported by OpenCode. Credentials stay with OpenCode; selecting a model sets the desk default.</p>
+        <p>Configured providers are reported by OpenCode. Not configured providers are supported by OpenCode and listed in its public model catalog. Credentials stay with OpenCode.</p>
         {model && <p>Current desk default: <span className="font-mono text-xs text-fg">{model}</span></p>}
       </div>
-      <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter providers" className="max-w-md" />
-      {error && <p className="text-sm text-danger">{error}</p>}
-      {loading && <p className="text-sm text-muted">Loading providers from OpenCode…</p>}
-      {!loading && !visible.length && <p className="text-sm text-muted">No providers match this filter.</p>}
-      <div className="grid items-start gap-3 lg:grid-cols-2">
-        {visible.map((provider) => (
-          <ProviderCard
-            key={provider.id}
-            provider={provider}
-            authMethods={auth[provider.integrationID ?? provider.id] ?? auth[provider.id] ?? []}
-            connected={connected.includes(provider.id)}
-            defaultModel={defaults[provider.id] ?? ""}
-            deskModel={model}
-            availableModels={availableModels}
-            pickerKeys={pickerKeys}
-            onModelChange={onModelChange}
-            onAvailableModelsChange={(next) => {
-              onAvailableModelsChange?.(next);
-              onCatalogChange?.();
-            }}
-            onRefresh={() => {
-              void load();
-              onCatalogChange?.();
-            }}
-          />
-        ))}
+      <div
+        role="tablist"
+        aria-label="Provider status"
+        className="flex gap-1 border-b border-border pb-2"
+      >
+        {PROVIDER_TABS.map((item) => {
+          const active = item.id === tab;
+          const count = item.id === "configured" ? configuredCount : notConfiguredCount;
+          return (
+            <button
+              key={item.id}
+              ref={(element) => {
+                tabRefs.current[item.id] = element;
+              }}
+              type="button"
+              role="tab"
+              id={`${tabId}-${item.id}-tab`}
+              aria-controls={active ? `${tabId}-${item.id}-panel` : undefined}
+              aria-selected={active}
+              tabIndex={active ? 0 : -1}
+              className={cn(
+                "rounded-lg px-3 py-1.5 text-sm transition-colors",
+                active ? "bg-elevated text-fg" : "text-muted hover:bg-surface hover:text-fg",
+              )}
+              onClick={() => setTab(item.id)}
+              onKeyDown={onTabKeyDown}
+            >
+              {item.label}
+              {" "}
+              <span className="text-xs text-subtle">{count ?? "…"}</span>
+            </button>
+          );
+        })}
       </div>
+      <Input
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Filter providers"
+        aria-label="Filter providers"
+        className="max-w-md"
+      />
+      {tab === "configured" ? (
+        <div
+          role="tabpanel"
+          id={`${tabId}-configured-panel`}
+          aria-labelledby={`${tabId}-configured-tab`}
+          tabIndex={0}
+          className="space-y-4 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+          {loading && <p role="status" className="text-sm text-muted">Loading providers from OpenCode…</p>}
+          {!loading && !visible.length && <p className="text-sm text-muted">No providers match this filter.</p>}
+          <div className="grid items-start gap-3 lg:grid-cols-2">
+            {visible.map((provider) => (
+              <ProviderCard
+                key={provider.id}
+                provider={provider}
+                authMethods={auth[provider.integrationID ?? provider.id] ?? auth[provider.id] ?? []}
+                connected={connected.includes(provider.id)}
+                defaultModel={defaults[provider.id] ?? ""}
+                deskModel={model}
+                availableModels={availableModels}
+                pickerKeys={pickerKeys}
+                onModelChange={onModelChange}
+                onAvailableModelsChange={(next) => {
+                  onAvailableModelsChange?.(next);
+                  onCatalogChange?.();
+                }}
+                onRefresh={refreshAll}
+              />
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div
+          role="tabpanel"
+          id={`${tabId}-available-panel`}
+          aria-labelledby={`${tabId}-available-tab`}
+          tabIndex={0}
+          className="space-y-4 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          {directoryLoading && <p role="status" className="text-sm text-muted">Loading the provider catalog…</p>}
+          {!directoryLoading && directoryError && (
+            <div className="space-y-2">
+              <p role="alert" className="text-sm text-danger">{directoryError}</p>
+              <Button size="sm" variant="outline" onClick={() => void loadDirectory()}>
+                Retry
+              </Button>
+            </div>
+          )}
+          {!directoryLoading && !directoryError && !unconfiguredVisible.length && (
+            <p className="text-sm text-muted">
+              {needle ? "No providers match this filter." : "Every OpenCode-supported provider is configured."}
+            </p>
+          )}
+          {!directoryError && (
+            <div className="grid items-start gap-3 lg:grid-cols-2">
+              {unconfiguredVisible.map((entry) => (
+                <DirectoryCard key={entry.id} entry={entry} onConnected={refreshAll} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -361,18 +509,15 @@ function ProviderCard({
   const initialChoice = currentForProvider || providerDefault || models[0]?.id || "";
   const [selected, setSelected] = useState(initialChoice);
   const [modelQuery, setModelQuery] = useState("");
-  const [keyDraft, setKeyDraft] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pickerNote, setPickerNote] = useState<string | null>(null);
   const [pickerError, setPickerError] = useState<string | null>(null);
-  const [savingKey, setSavingKey] = useState(false);
   const [savingModel, setSavingModel] = useState(false);
   const [savingPicker, setSavingPicker] = useState(false);
 
   useEffect(() => setSelected(currentForProvider || providerDefault || models[0]?.id || ""), [currentForProvider, providerDefault, provider.id]);
 
-  const keyMethod = authMethods.some((method) => method.type === "key" || method.type === "api");
   const filteredModels = models.filter((item) => {
     const filter = modelQuery.trim().toLowerCase();
     return !filter || `${item.name} ${item.id}`.toLowerCase().includes(filter);
@@ -383,38 +528,6 @@ function ProviderCard({
   const inPicker = selectedKey !== "" && (pickerKeys?.has(selectedKey) ?? false);
   const addable =
     selectedModel !== undefined && selectedModel.type === "chat" && selectedModel.enabled !== false;
-
-  async function saveKey() {
-    if (!keyDraft.trim()) return;
-    setSavingKey(true);
-    setError(null);
-    setNote(null);
-    try {
-      await api.setKey(integrationID, keyDraft.trim());
-      setKeyDraft("");
-      setNote("Credential saved in OpenCode.");
-      onRefresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save this provider credential.");
-    } finally {
-      setSavingKey(false);
-    }
-  }
-
-  async function removeKey() {
-    setSavingKey(true);
-    setError(null);
-    setNote(null);
-    try {
-      await api.removeKey(integrationID);
-      setNote("Provider credential removed from OpenCode.");
-      onRefresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not remove this provider credential.");
-    } finally {
-      setSavingKey(false);
-    }
-  }
 
   async function setDeskDefault() {
     if (!selected) return;
@@ -486,46 +599,13 @@ function ProviderCard({
             {provider.env?.length ? (
               <p className="text-xs text-subtle">OpenCode environment keys: <span className="font-mono">{provider.env.join(", ")}</span></p>
             ) : null}
-            {authMethods.length ? (
-              <ul className="space-y-2 text-xs text-muted">
-                {authMethods.map((method, index) => (
-                  <li key={`${method.id ?? method.type ?? "auth"}-${index}`}>
-                    {method.type === "oauth" ? (
-                      <OAuthSignIn
-                        integrationID={integrationID}
-                        method={method}
-                        providerName={provider.name || provider.id}
-                        onRefresh={onRefresh}
-                      />
-                    ) : (
-                      <div className="space-y-0.5">
-                        <p>{method.label || method.type || "Authentication supported"}</p>
-                        {method.type === "env" && (
-                          <p className="text-subtle">OpenCode reads this credential from the environment.</p>
-                        )}
-                        {method.type === "external" && (
-                          <p className="text-subtle">Sign in through this provider outside Paddy, then reconnect.</p>
-                        )}
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            ) : <p className="text-xs text-subtle">OpenCode reports no interactive authentication methods for this provider.</p>}
-            {keyMethod ? (
-              <>
-                <Input type="password" value={keyDraft} onChange={(event) => setKeyDraft(event.target.value)} placeholder={`API key for ${provider.name || provider.id}`} autoComplete="off" />
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" onClick={() => void saveKey()} disabled={!keyDraft.trim() || savingKey}>
-                    {savingKey ? "Saving…" : "Save credential"}
-                  </Button>
-                  {connected && <Button size="sm" variant="outline" onClick={() => void removeKey()} disabled={savingKey}>Remove credential</Button>}
-                </div>
-              </>
-            ) : null}
-            {!keyMethod && !authMethods.some((method) => method.type === "oauth") && (
-              <p className="text-xs text-subtle">Configure this provider using its OpenCode sign-in method.</p>
-            )}
+            <ProviderAuthMethods
+              integrationID={integrationID}
+              providerName={provider.name || provider.id}
+              authMethods={authMethods}
+              connected={connected}
+              onRefresh={onRefresh}
+            />
           </section>
           <section className="space-y-2">
             <div className="flex items-center justify-between gap-2">
@@ -583,6 +663,171 @@ function ProviderCard({
         </div>
         {note && <p className="text-xs text-ok">{note}</p>}
         {error && <p className="text-xs text-danger">{error}</p>}
+      </div>
+    </details>
+  );
+}
+
+/** Shared auth UI for active and catalog-only provider cards. */
+function ProviderAuthMethods({
+  integrationID,
+  providerName,
+  authMethods,
+  connected,
+  onRefresh,
+  emptyHint = "OpenCode reports no interactive authentication methods for this provider.",
+  configureHint = "Configure this provider using its OpenCode sign-in method.",
+}: {
+  integrationID: string;
+  providerName: string;
+  authMethods: ProviderAuthMethod[];
+  connected: boolean;
+  onRefresh: () => void;
+  emptyHint?: string;
+  configureHint?: string;
+}) {
+  const [keyDraft, setKeyDraft] = useState("");
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [savingKey, setSavingKey] = useState(false);
+  const keyMethod = authMethods.some((method) => method.type === "key" || method.type === "api");
+
+  async function saveKey() {
+    if (!keyDraft.trim()) return;
+    setSavingKey(true);
+    setError(null);
+    setNote(null);
+    try {
+      await api.setKey(integrationID, keyDraft.trim());
+      setKeyDraft("");
+      setNote("Credential saved in OpenCode.");
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save this provider credential.");
+    } finally {
+      setSavingKey(false);
+    }
+  }
+
+  async function removeKey() {
+    setSavingKey(true);
+    setError(null);
+    setNote(null);
+    try {
+      await api.removeKey(integrationID);
+      setNote("Provider credential removed from OpenCode.");
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove this provider credential.");
+    } finally {
+      setSavingKey(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      {authMethods.length ? (
+        <ul className="space-y-2 text-xs text-muted">
+          {authMethods.map((method, index) => (
+            <li key={`${method.id ?? method.type ?? "auth"}-${index}`}>
+              {method.type === "oauth" ? (
+                <OAuthSignIn
+                  integrationID={integrationID}
+                  method={method}
+                  providerName={providerName}
+                  onRefresh={onRefresh}
+                />
+              ) : (
+                <div className="space-y-0.5">
+                  <p>{method.label || method.type || "Authentication supported"}</p>
+                  {method.type === "env" && (
+                    <p className="text-subtle">OpenCode reads this credential from the environment.</p>
+                  )}
+                  {method.type === "external" && (
+                    <p className="text-subtle">Sign in through this provider outside Paddy, then reconnect.</p>
+                  )}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : <p className="text-xs text-subtle">{emptyHint}</p>}
+      {keyMethod ? (
+        <>
+          <Input type="password" value={keyDraft} onChange={(event) => setKeyDraft(event.target.value)} placeholder={`API key for ${providerName}`} autoComplete="off" />
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => void saveKey()} disabled={!keyDraft.trim() || savingKey}>
+              {savingKey ? "Saving…" : "Save credential"}
+            </Button>
+            {connected && <Button size="sm" variant="outline" onClick={() => void removeKey()} disabled={savingKey}>Remove credential</Button>}
+          </div>
+        </>
+      ) : null}
+      {!keyMethod && !authMethods.some((method) => method.type === "oauth") && (
+        <p className="text-xs text-subtle">{configureHint}</p>
+      )}
+      {note && <p role="status" className="text-xs text-ok">{note}</p>}
+      {error && <p role="alert" className="text-xs text-danger">{error}</p>}
+    </div>
+  );
+}
+
+/** One OpenCode-supported provider the user has not configured yet (AC-C4/C5). */
+function DirectoryCard({
+  entry,
+  onConnected,
+}: {
+  entry: ProviderDirectoryEntry;
+  onConnected: () => void;
+}) {
+  return (
+    <details className="group rounded-xl border border-border bg-elevated shadow-[var(--shadow-border)]">
+      <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3 [&::-webkit-details-marker]:hidden">
+        <span className="size-2 shrink-0 rounded-full bg-subtle" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-fg">{entry.name}</span>
+          <span className="block truncate font-mono text-[11px] text-subtle">{entry.id}</span>
+        </span>
+        <span className="shrink-0 text-xs text-muted">Not connected</span>
+        <span className="shrink-0 text-xs text-subtle">{entry.modelCount} models</span>
+        <span className="shrink-0 text-muted transition-transform group-open:rotate-180">⌄</span>
+      </summary>
+      <div className="space-y-4 border-t border-border px-4 py-4">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <section className="space-y-2">
+            <h3 className="text-xs font-medium tracking-wide text-muted uppercase">Provider configuration</h3>
+            <ProviderAuthMethods
+              integrationID={entry.integrationID}
+              providerName={entry.name}
+              authMethods={entry.auth}
+              connected={false}
+              onRefresh={onConnected}
+              emptyHint="OpenCode reported no authentication methods for this provider."
+              configureHint="Configure in OpenCode to use this provider, then reconnect to load its models."
+            />
+          </section>
+          <section className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-xs font-medium tracking-wide text-muted uppercase">Models</h3>
+              <span className="truncate text-[11px] text-subtle">{entry.modelCount} in the catalog</span>
+            </div>
+            <p className="text-xs text-muted">Connect to load models.</p>
+            {entry.models.length ? (
+              <details className="text-xs text-subtle">
+                <summary className="cursor-pointer">Preview catalog models</summary>
+                <ul className="mt-1 space-y-0.5">
+                  {entry.models.slice(0, 8).map((item) => (
+                    <li key={item.id} className="truncate">{item.name ?? item.id}</li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-[11px]">
+                  {entry.modelCount > 8 ? `Showing 8 of ${entry.modelCount}. ` : ""}
+                  Catalog metadata only — models become available after OpenCode connects this provider.
+                </p>
+              </details>
+            ) : null}
+          </section>
+        </div>
       </div>
     </details>
   );

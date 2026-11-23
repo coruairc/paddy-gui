@@ -5,6 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { handleApi } from "./api.ts";
 import { OpenCodeError } from "./opencode-client.ts";
+import { ProviderDirectory } from "./provider-directory.ts";
 import { ControllerRuntime } from "./runtime.ts";
 import { newId } from "./state.ts";
 
@@ -231,13 +232,19 @@ function runtimeWithProject() {
   return { runtime, calls, project };
 }
 
-async function call(runtime: ControllerRuntime, method: string, path: string, body?: unknown) {
+async function call(
+  runtime: ControllerRuntime,
+  method: string,
+  path: string,
+  body?: unknown,
+  deps?: { providerDirectory?: ProviderDirectory },
+) {
   const request = new Request("http://127.0.0.1:8080" + path, {
     method,
     body: body === undefined ? undefined : JSON.stringify(body),
     headers: body === undefined ? undefined : { "content-type": "application/json" },
   });
-  const result = await handleApi(runtime, request);
+  const result = await handleApi(runtime, request, deps);
   return result;
 }
 
@@ -1600,4 +1607,211 @@ test("edit rejects empty text and a session with no prompt", async () => {
   assert.equal(none.status, 400);
   assert.equal((none.body as { error: string }).error, "Nothing to edit");
   assert.deepEqual(spy.calls, []);
+});
+
+// ── GET /api/provider-directory (Configured / Not configured tabs) ────────
+// models.dev is public display metadata; only providers OpenCode also lists as
+// integrations may appear, and credential/env/base-URL fields never cross.
+function directoryFrom(body: unknown, now = 1_700_000_000_000) {
+  return new ProviderDirectory({
+    fetch: (async () =>
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch,
+    now: () => now,
+  });
+}
+
+const DIRECTORY_FIXTURE = {
+  openai: {
+    id: "openai",
+    name: "OpenAI",
+    doc: "https://platform.openai.com/docs/models",
+    env: ["OPENAI_API_KEY"],
+    npm: "@ai-sdk/openai",
+    api: "https://api.openai.com/v1",
+    models: {
+      "gpt-5": { id: "gpt-5", name: "GPT-5", cost: { input: 1.25 }, limit: { context: 400_000 } },
+    },
+  },
+  xai: {
+    id: "xai",
+    name: "XAI",
+    models: { "grok-5": { id: "grok-5", name: "Grok 5" } },
+  },
+  zeta: { id: "zeta", name: "Zeta", models: {} },
+  "not-an-integration": {
+    id: "not-an-integration",
+    name: "Not OpenCode",
+    models: { m: { id: "m", name: "M" } },
+  },
+};
+
+type DirectoryBody = {
+  directory: Array<{
+    id: string;
+    name: string;
+    doc?: string;
+    modelCount: number;
+    models: Array<{ id: string; name?: string }>;
+    integrationID: string;
+    configured: boolean;
+    auth: Array<Record<string, unknown>>;
+  }>;
+  error?: string;
+  fetchedAt?: number;
+};
+
+test("provider directory intersects integrations, marks configured, and projects auth methods", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.client = {
+    ...(runtime.client as object),
+    listIntegrations: async () => [
+      {
+        id: "openai",
+        methods: [
+          {
+            id: "oauth-chatgpt",
+            type: "oauth",
+            label: "Sign in with ChatGPT",
+            form: [{ key: "label", type: "string", title: "Account label" }],
+          },
+        ],
+      },
+      { id: "xai", methods: [{ id: "supergrok", type: "oauth", label: "SuperGrok Subscription" }] },
+      { id: "zeta", methods: [{ id: "api-key", type: "key", label: "API key" }] },
+    ],
+    getProviderCatalog: async () => [{ id: "openai", integrationID: "openai" }],
+  } as unknown as ControllerRuntime["client"];
+
+  const result = await call(runtime, "GET", "/api/provider-directory", undefined, {
+    providerDirectory: directoryFrom(DIRECTORY_FIXTURE),
+  });
+  assert.equal(result.status, 200);
+  const body = result.body as DirectoryBody;
+  assert.equal(body.error, undefined);
+  assert.equal(body.fetchedAt, 1_700_000_000_000);
+  assert.deepEqual(
+    body.directory.map((entry) => entry.id),
+    ["openai", "xai", "zeta"],
+    "only models.dev providers with an OpenCode integration, sorted by name",
+  );
+  assert.equal(body.directory.some((entry) => entry.id === "not-an-integration"), false);
+
+  const [openai, xai, zeta] = body.directory;
+  assert.deepEqual(Object.keys(openai).sort(), [
+    "auth",
+    "configured",
+    "doc",
+    "id",
+    "integrationID",
+    "modelCount",
+    "models",
+    "name",
+  ]);
+  assert.equal(openai.integrationID, "openai");
+  assert.equal(openai.configured, true);
+  assert.equal(openai.modelCount, 1);
+  assert.deepEqual(openai.models, [{ id: "gpt-5", name: "GPT-5" }]);
+  assert.deepEqual(openai.auth, [
+    {
+      type: "oauth",
+      label: "Sign in with ChatGPT",
+      id: "oauth-chatgpt",
+      form: [{ type: "string", key: "label", title: "Account label" }],
+    },
+  ]);
+
+  assert.equal(xai.configured, false);
+  assert.deepEqual(xai.auth, [{ type: "oauth", label: "SuperGrok Subscription", id: "supergrok" }]);
+  assert.equal(zeta.configured, false);
+  assert.deepEqual(zeta.auth, [{ type: "key", label: "API key", id: "api-key" }]);
+
+  const json = JSON.stringify(body);
+  for (const banned of ["OPENAI_API_KEY", "@ai-sdk/openai", "api.openai.com", '"cost"', '"limit"', '"env"', '"npm"']) {
+    assert.equal(json.includes(banned), false, `${banned} must not cross the boundary`);
+  }
+});
+
+test("provider directory reports a retryable catalog failure without failing the route", async () => {
+  const { runtime } = runtimeWithProject();
+  const failing = new ProviderDirectory({
+    fetch: (async () => new Response("{}", { status: 500 })) as typeof fetch,
+    now: () => 5,
+  });
+  const result = await call(runtime, "GET", "/api/provider-directory", undefined, {
+    providerDirectory: failing,
+  });
+  assert.equal(result.status, 200);
+  const body = result.body as DirectoryBody;
+  assert.deepEqual(body.directory, []);
+  assert.match(body.error ?? "", /failed \(500\)/);
+  assert.equal(body.fetchedAt, undefined);
+});
+
+test("provider directory degrades when the OpenCode integration inventory cannot be read", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.client = {
+    ...(runtime.client as object),
+    listIntegrations: async () => {
+      throw new OpenCodeError(500, "integration listing failed");
+    },
+    getProviderCatalog: async () => [],
+  } as unknown as ControllerRuntime["client"];
+  const result = await call(runtime, "GET", "/api/provider-directory", undefined, {
+    providerDirectory: directoryFrom(DIRECTORY_FIXTURE),
+  });
+  assert.equal(result.status, 200);
+  const body = result.body as DirectoryBody;
+  // Without the inventory the intersection cannot be asserted; do not label
+  // arbitrary models.dev entries as OpenCode-supported (AC-C1).
+  assert.deepEqual(body.directory, []);
+  assert.match(body.error ?? "", /integration/i);
+  assert.equal(body.fetchedAt, 1_700_000_000_000);
+});
+
+test("provider directory stays available while OpenCode is disconnected", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.status.connected = false;
+  runtime.client = null;
+  const result = await call(runtime, "GET", "/api/provider-directory", undefined, {
+    providerDirectory: directoryFrom(DIRECTORY_FIXTURE),
+  });
+  assert.equal(result.status, 200);
+  const body = result.body as DirectoryBody;
+  assert.deepEqual(body.directory, []);
+  assert.equal(typeof body.error, "string");
+});
+
+test("provider directory redacts display metadata but keeps auth form field keys usable", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.state.connectionPassword = "label"; // also the fixture's display name and form field key
+  runtime.client = {
+    ...(runtime.client as object),
+    listIntegrations: async () => [
+      {
+        id: "openai",
+        methods: [{ id: "oauth-chatgpt", type: "oauth", label: "Sign in", form: [{ key: "label", type: "string" }] }],
+      },
+    ],
+    getProviderCatalog: async () => [],
+  } as unknown as ControllerRuntime["client"];
+  const result = await call(runtime, "GET", "/api/provider-directory", undefined, {
+    providerDirectory: directoryFrom({
+      openai: {
+        id: "openai",
+        name: "label",
+        models: { m: { id: "m", name: "label" } },
+      },
+    }),
+  });
+  assert.equal(result.status, 200);
+  const body = result.body as DirectoryBody;
+  const entry = body.directory[0];
+  assert.equal(entry.name, "[redacted]");
+  assert.equal(entry.models[0].name, "[redacted]");
+  // Whole-response redaction would clobber the form field key `key: "label"`.
+  const form = entry.auth[0].form as Array<Record<string, unknown>>;
+  assert.equal(form[0].key, "label");
 });
