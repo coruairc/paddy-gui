@@ -1,7 +1,9 @@
-import http from "node:http";
+import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import { Readable } from "node:stream";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handleNode } from "./http.ts";
+import { REQUEST_BODY_MAX_BYTES } from "./api.ts";
 
 function startServer() {
   const server = http.createServer((req, res) => {
@@ -182,6 +184,85 @@ test("a malformed paddy_token cookie is treated as absent, not a 500", async () 
     assert.equal(res.status, 401);
   } finally {
     await stopServer(server);
+    restoreEnv(saved);
+  }
+});
+
+// ── Body cap on the Node adapter (R-NEW-2) ────────────────────────────────
+// A fake request/response pair drives handleNode directly. The probe path is
+// unknown to handleApi (which would answer 404), so a 400 proves the cap fired
+// before the body reached the API layer.
+function fakeNodePair(chunks: Buffer[], headers: Record<string, string>) {
+  const req = Object.assign(Readable.from(chunks), {
+    method: "POST",
+    url: "/api/adapter-cap-probe",
+    headers: { host: "127.0.0.1:8080", ...headers },
+    socket: { remoteAddress: "127.0.0.1" },
+  }) as unknown as IncomingMessage;
+  const sent = { status: 0, body: "" };
+  const res = {
+    statusCode: 200,
+    setHeader() {},
+    writeHead() {},
+    write() {},
+    end(body?: string) {
+      sent.status = res.statusCode;
+      sent.body = body ?? "";
+    },
+  } as unknown as ServerResponse;
+  return { req, res, sent };
+}
+
+test("an over-cap declared content-length is rejected 400 before handleApi runs", async () => {
+  const saved = saveEnv();
+  process.env.OPENCODE_WEB_HOST = "127.0.0.1";
+  delete process.env.OPENCODE_WEB_TOKEN;
+  try {
+    const oversized = Buffer.alloc(REQUEST_BODY_MAX_BYTES + 1, 0x61);
+    const { req, res, sent } = fakeNodePair([oversized], {
+      "content-type": "application/json",
+      "content-length": String(oversized.length),
+    });
+    await handleNode(req, res);
+    assert.equal(sent.status, 400);
+    assert.match(JSON.parse(sent.body).error, /too large/i);
+    assert.doesNotMatch(sent.body, /Not found/, "handleApi was not reached");
+  } finally {
+    restoreEnv(saved);
+  }
+});
+
+test("a streamed body over the cap is rejected 400 even without a content-length", async () => {
+  const saved = saveEnv();
+  process.env.OPENCODE_WEB_HOST = "127.0.0.1";
+  delete process.env.OPENCODE_WEB_TOKEN;
+  try {
+    const half = Buffer.alloc(REQUEST_BODY_MAX_BYTES / 2 + 1, 0x61);
+    const { req, res, sent } = fakeNodePair([half, half, half], {
+      "content-type": "application/json",
+    });
+    await handleNode(req, res);
+    assert.equal(sent.status, 400);
+    assert.match(JSON.parse(sent.body).error, /too large/i);
+  } finally {
+    restoreEnv(saved);
+  }
+});
+
+test("a streamed body that under-declares content-length is still capped", async () => {
+  const saved = saveEnv();
+  process.env.OPENCODE_WEB_HOST = "127.0.0.1";
+  delete process.env.OPENCODE_WEB_TOKEN;
+  try {
+    const big = Buffer.alloc(REQUEST_BODY_MAX_BYTES + 10, 0x61);
+    const { req, res, sent } = fakeNodePair([big], {
+      "content-type": "application/json",
+      "content-length": "2",
+    });
+    await handleNode(req, res);
+    assert.equal(sent.status, 400);
+    assert.match(JSON.parse(sent.body).error, /too large/i);
+  } finally {
     restoreEnv(saved);
   }
 });

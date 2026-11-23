@@ -207,7 +207,12 @@ run parallel implementers.
 - [x] Reviewed (backend scope PASS_WITH_NOTES; reviewer reproduced 107 focused tests)
 - [x] Committed (`77df95e`)
 - [x] Part A/B fix reviewed + committed (`ae85ab1`, pushed; 335/335 full suite)
-- [ ] Part C (Configured / Not configured tabs) — IN PROGRESS (contract below)
+- [x] Part C (Configured / Not configured tabs) — committed (`1a1366c`)
+- [x] Zero-model provider hint (Copilot Free) — committed (`60a039e`)
+- [x] Code review (`docs/tasks/provider-model-availability-and-oauth-REVIEW.md`):
+      0 Critical / 7 Warning / 8 Info — all warnings + actionable info fixed
+      (`2780b6b`); residual LOW items R-NEW-1/R-NEW-2 closed (this commit).
+      Full suite 369/369, typecheck + lint clean.
 - [x] Live Add validation defect — FIXED (`ae85ab1`)
 
 ## Live defect found post-commit (orchestrator investigation)

@@ -863,8 +863,22 @@ async function integrationOAuth(
       ...(answer === undefined ? {} : { answer }),
       ...(label ? { label } : {}),
     });
+    let projected: Record<string, unknown>;
+    try {
+      projected = projectOAuthAttempt(attempt);
+    } catch (error) {
+      // Paddy refuses this attempt, so OpenCode must not keep it alive. Cancel
+      // best-effort when the id is usable; a cancel failure never masks the 502.
+      const orphanID = typeof attempt?.attemptID === "string" ? attempt.attemptID : "";
+      if (OAUTH_ATTEMPT.test(orphanID)) {
+        await client
+          .cancelOAuthConnect(directory, integrationID, orphanID)
+          .catch(() => undefined);
+      }
+      throw error;
+    }
     return json(200, {
-      attempt: redactSecrets(projectOAuthAttempt(attempt), secretNeedles(runtime)),
+      attempt: redactSecrets(projected, secretNeedles(runtime)),
     });
   }
 

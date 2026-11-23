@@ -1906,6 +1906,51 @@ test("OAuth start rejects an unusable attempt id or a non-web sign-in link", asy
   assert.equal(plainHttp.status, 200, "a local http sign-in link stays usable");
 });
 
+test("a rejected OAuth start with a usable attempt id cancels the upstream attempt before 502", async () => {
+  const { runtime } = runtimeWithProject();
+  const cancels: unknown[][] = [];
+  runtime.client = withOAuthClient(runtime, {
+    startOAuthConnect: async () => ({ ...OAUTH_ATTEMPT_OK, url: "javascript:alert(1)" }),
+    cancelOAuthConnect: async (...args: unknown[]) => {
+      cancels.push(args);
+    },
+  });
+  const start = await call(runtime, "POST", "/api/integrations/openai/oauth", {
+    methodID: "oauth-chatgpt",
+  });
+  assert.equal(start.status, 502);
+  assert.match((start.body as { error: string }).error, /unusable sign-in link/i);
+  assert.equal(cancels.length, 1, "the orphaned upstream attempt is cancelled once");
+  assert.deepEqual(cancels[0].slice(1), ["openai", "con_1"]);
+
+  // A cancel failure must never mask the 502 the caller is owed.
+  runtime.client = withOAuthClient(runtime, {
+    startOAuthConnect: async () => ({ ...OAUTH_ATTEMPT_OK, url: "javascript:alert(1)" }),
+    cancelOAuthConnect: async () => {
+      throw new OpenCodeError(500, "cancel failed");
+    },
+  });
+  const masked = await call(runtime, "POST", "/api/integrations/openai/oauth", {
+    methodID: "oauth-chatgpt",
+  });
+  assert.equal(masked.status, 502);
+  assert.match((masked.body as { error: string }).error, /unusable sign-in link/i);
+
+  // An unusable attempt id gives nothing to cancel.
+  let unusableCancels = 0;
+  runtime.client = withOAuthClient(runtime, {
+    startOAuthConnect: async () => ({ ...OAUTH_ATTEMPT_OK, attemptID: "not-an-attempt" }),
+    cancelOAuthConnect: async () => {
+      unusableCancels += 1;
+    },
+  });
+  const unusable = await call(runtime, "POST", "/api/integrations/openai/oauth", {
+    methodID: "oauth-chatgpt",
+  });
+  assert.equal(unusable.status, 502);
+  assert.equal(unusableCancels, 0);
+});
+
 test("OAuth responses are redacted like every other proxy route", async () => {
   const { runtime } = runtimeWithProject();
   runtime.state.connectionPassword = "super-secret-password";
