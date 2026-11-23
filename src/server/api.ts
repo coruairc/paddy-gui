@@ -5,6 +5,7 @@
 
 import {
   OpenCodeError,
+  type OpenCodeModelInfo,
   type OpenCodeOAuthAttempt,
   type OpenCodeOAuthAttemptStatus,
   type OpenCodeProviderInfo,
@@ -458,11 +459,12 @@ async function listModels(runtime: ControllerRuntime): Promise<ApiResult> {
       variantCount: Array.isArray(entry.variants) ? entry.variants.length : 0,
     });
   }
-  // Curated additions come only from OpenCode's provider catalog. A saved key
-  // that disappeared upstream is omitted here but kept in state, so a temporary
-  // provider outage does not erase the user's selection.
+  // Curated additions resolve against OpenCode's authoritative chat catalog
+  // (`/api/model`, already fetched) unioned with inline provider models. A saved
+  // key that disappeared upstream is omitted here but kept in state, so a
+  // temporary provider outage does not erase the user's selection.
   if (available.length) {
-    const index = modelIndexFromProviders(providerCatalog);
+    const index = modelIndex(catalog, providerCatalog);
     for (const key of available) {
       if (seen.has(key)) continue;
       const model = index.get(key);
@@ -594,8 +596,50 @@ type ProviderCatalogModel = {
   variants?: unknown[];
 };
 
-/** Canonical `providerID/modelID` index of everything OpenCode's provider
- *  catalog lists (not just the smaller picker catalog). */
+/** Canonical `providerID/...` keys registered for one model. The picker
+ *  catalog keys entries by `id`; provider cards may key them by `modelID`, so
+ *  both real identifiers are accepted when they differ. */
+function modelKeys(providerID: string, id: string, modelID?: string): string[] {
+  const keys = [`${providerID}/${id}`];
+  if (modelID && modelID !== id) keys.push(`${providerID}/${modelID}`);
+  return keys;
+}
+
+/** Project an `/api/model` chat catalog entry into the validation shape. */
+function modelFromCatalogEntry(entry: OpenCodeModelInfo): ProviderCatalogModel | null {
+  if (!entry?.id || !entry.providerID) return null;
+  return {
+    id: entry.id,
+    providerID: entry.providerID,
+    ...(typeof entry.name === "string" ? { name: entry.name } : {}),
+    // The v2 chat catalog only lists chat models.
+    type: "chat",
+    ...(typeof entry.enabled === "boolean" ? { enabled: entry.enabled } : {}),
+    ...(typeof entry.status === "string" ? { status: entry.status } : {}),
+    ...(entry.limit ? { limit: { context: entry.limit.context } } : {}),
+    ...(entry.time ? { time: { released: entry.time.released } } : {}),
+    ...(entry.capabilities ? { capabilities: { tools: entry.capabilities.tools } } : {}),
+    ...(Array.isArray(entry.variants) ? { variants: entry.variants } : {}),
+  };
+}
+
+/** Index of the authoritative chat catalog (`GET /api/model`). Live OpenCode
+ *  2.x does not populate inline `models` on `/api/provider`, so this is the
+ *  primary source for validating additions. */
+function modelIndexFromCatalog(models: OpenCodeModelInfo[]): Map<string, ProviderCatalogModel> {
+  const index = new Map<string, ProviderCatalogModel>();
+  for (const entry of models) {
+    const model = modelFromCatalogEntry(entry);
+    if (!model) continue;
+    for (const key of modelKeys(model.providerID, model.id, entry.modelID)) {
+      if (!index.has(key)) index.set(key, model);
+    }
+  }
+  return index;
+}
+
+/** Canonical index of any inline provider models a server still embeds on
+ *  `/api/provider` (forward-compat; live 2.x returns none). */
 function modelIndexFromProviders(providers: OpenCodeProviderInfo[]): Map<string, ProviderCatalogModel> {
   const index = new Map<string, ProviderCatalogModel>();
   for (const provider of providers) {
@@ -611,9 +655,10 @@ function modelIndexFromProviders(providers: OpenCodeProviderInfo[]): Map<string,
         (typeof model.id === "string" && model.id) ||
         modelKey;
       if (!providerID || !id) continue;
-      const key = `${providerID}/${id}`;
-      if (index.has(key)) continue;
-      index.set(key, {
+      const modelID = typeof model.modelID === "string" ? model.modelID : undefined;
+      const keys = modelKeys(providerID, id, modelID);
+      if (keys.some((key) => index.has(key))) continue;
+      const projected: ProviderCatalogModel = {
         id,
         providerID,
         ...(typeof model.name === "string" ? { name: model.name } : {}),
@@ -624,15 +669,36 @@ function modelIndexFromProviders(providers: OpenCodeProviderInfo[]): Map<string,
         ...(model.time ? { time: { released: model.time.released } } : {}),
         ...(model.capabilities ? { capabilities: { tools: model.capabilities.tools } } : {}),
         ...(Array.isArray(model.variants) ? { variants: model.variants } : {}),
-      });
+      };
+      for (const key of keys) index.set(key, projected);
     }
   }
   return index;
 }
 
+/** Validation/merge index: the `/api/model` chat catalog first (authoritative),
+ *  then any inline provider models a server still embeds. */
+function modelIndex(
+  models: OpenCodeModelInfo[],
+  providers: OpenCodeProviderInfo[],
+): Map<string, ProviderCatalogModel> {
+  const index = modelIndexFromCatalog(models);
+  for (const [key, model] of modelIndexFromProviders(providers)) {
+    if (!index.has(key)) index.set(key, model);
+  }
+  return index;
+}
+
 async function providerModelIndex(runtime: ControllerRuntime): Promise<Map<string, ProviderCatalogModel>> {
-  const providers = await runtime.requireClient().getProviderCatalog(activeProject(runtime)?.path);
-  return modelIndexFromProviders(providers);
+  const client = runtime.requireClient();
+  const directory = activeProject(runtime)?.path;
+  // A failed `/api/provider` read must not reject a model the authoritative
+  // chat catalog already proves; inline provider models are optional metadata.
+  const [models, providers] = await Promise.all([
+    client.listModels(directory),
+    client.getProviderCatalog(directory).catch(() => [] as OpenCodeProviderInfo[]),
+  ]);
+  return modelIndex(models, providers);
 }
 
 // Integration.AttemptID in the v2.3.2 schema is `con_` + a generated id.

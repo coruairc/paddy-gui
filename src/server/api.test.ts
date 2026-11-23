@@ -407,6 +407,95 @@ test("availableModels rejects unknown, non-chat, disabled and malformed keys wit
   }
 });
 
+test("availableModels validates catalog models when providers carry no inline models", async () => {
+  // Live OpenCode 2.x returns `/api/provider` entries with no inline `models`;
+  // only the `/api/model` chat catalog lists them. This fake mirrors live: the
+  // provider catalog is empty, so validation must use `listModels()`.
+  const { runtime } = runtimeWithProject();
+  runtime.state.deskModel = "google/gemini-3";
+  runtime.client = {
+    ...(runtime.client as object),
+    getProviderCatalog: async () => [{ id: "console-openrouter", name: "OpenRouter" }],
+    listModels: async () => [
+      {
+        id: "radixark/daisyrose-27b",
+        modelID: "radixark/daisyrose-27b",
+        providerID: "console-openrouter",
+        name: "DaisyRose 27B",
+        status: "active",
+        enabled: true,
+        limit: { context: 131072 },
+        time: { released: 1795000000000 },
+        capabilities: { tools: true },
+        variants: [{ id: "low" }, { id: "high" }],
+      },
+      {
+        id: "retired-model",
+        modelID: "retired-model",
+        providerID: "console-openrouter",
+        name: "Retired",
+        enabled: false,
+      },
+    ],
+  } as unknown as ControllerRuntime["client"];
+
+  const disabled = await call(runtime, "PATCH", "/api/settings", {
+    availableModels: ["console-openrouter/retired-model"],
+  });
+  assert.equal(disabled.status, 400);
+  assert.deepEqual(runtime.state.availableModels, []);
+
+  const added = await call(runtime, "PATCH", "/api/settings", {
+    availableModels: ["console-openrouter/radixark/daisyrose-27b"],
+  });
+  assert.equal(added.status, 200);
+  assert.deepEqual(runtime.state.availableModels, ["console-openrouter/radixark/daisyrose-27b"]);
+  assert.equal(runtime.state.deskModel, "google/gemini-3");
+
+  const result = await call(runtime, "GET", "/api/models");
+  assert.equal(result.status, 200);
+  const body = result.body as { models: Record<string, unknown>[]; default: string };
+  const curated = body.models.filter(
+    (model) => model.key === "console-openrouter/radixark/daisyrose-27b",
+  );
+  assert.equal(curated.length, 1);
+  assert.equal(curated[0].name, "DaisyRose 27B");
+  assert.equal(curated[0].providerID, "console-openrouter");
+  assert.equal(curated[0].context, 131072);
+  assert.equal(curated[0].enabled, true);
+  assert.equal(body.default, "google/gemini-3");
+});
+
+test("availableModels resolves a catalog model by its modelID key and merges it once", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.client = {
+    ...(runtime.client as object),
+    getProviderCatalog: async () => [],
+    listModels: async () => [
+      {
+        id: "daisyrose-27b",
+        modelID: "daisyrose-27b-preview",
+        providerID: "console-openrouter",
+        name: "DaisyRose 27B",
+        enabled: true,
+      },
+    ],
+  } as unknown as ControllerRuntime["client"];
+
+  const added = await call(runtime, "PATCH", "/api/settings", {
+    availableModels: ["console-openrouter/daisyrose-27b-preview"],
+  });
+  assert.equal(added.status, 200);
+  assert.deepEqual(runtime.state.availableModels, ["console-openrouter/daisyrose-27b-preview"]);
+
+  const result = await call(runtime, "GET", "/api/models");
+  const keys = (result.body as { models: { key: string }[] }).models.map((model) => model.key);
+  assert.deepEqual(keys, [
+    "console-openrouter/daisyrose-27b",
+    "console-openrouter/daisyrose-27b-preview",
+  ]);
+});
+
 test("availableModels bounds the stored list and dedupes before capping", async () => {
   const { runtime } = runtimeWithProject();
   const models = Object.fromEntries(

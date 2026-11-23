@@ -203,6 +203,51 @@ run parallel implementers.
 
 ## Status
 
-- [ ] Implemented
-- [ ] Reviewed
-- [ ] Committed
+- [x] Implemented (Parts A/B + nav icons + responsive grid; committed `77df95e`, pushed)
+- [x] Reviewed (backend scope PASS_WITH_NOTES; reviewer reproduced 107 focused tests)
+- [x] Committed (`77df95e`)
+- [ ] Part C (Configured / Not configured tabs) — deferred
+- [ ] Live Add validation defect — OPEN (see below)
+
+## Live defect found post-commit (orchestrator investigation)
+
+Reproduced against the running controller (fresh process, healthy connection):
+
+- `PATCH /api/settings {availableModels:["console-openrouter/radixark/daisyrose-27b"]}`
+  → 400 `That model is not listed by OpenCode`, even though that exact key is
+  present in `GET /api/models` (703 entries) and is the current catalog sample.
+  Same rejection for `openai/gpt-6.2-sol` and `opencode-go/gemini-4-neon`.
+- Temporary instrumentation of `providerModelIndex` (api.ts) logged:
+  `getProviderCatalog` returned **9 providers, indexSize=0, firstProviderModels=0**.
+  Meanwhile `GET /api/providers` (via `getProviders`) reports **15 providers /
+  1,253 models** and `GET /api/models` reports **703**.
+- Root cause: `modelIndexFromProviders` builds the validation index ONLY from
+  raw `/api/provider` entries' inline `models` record. Live OpenCode 2.3.2 does
+  not reliably populate inline `models` on `/api/provider` (observed 0). The
+  backend's assumption that `/api/provider` embeds the full provider model
+  catalog came from embedded schema strings, not the live response. The 1,253
+  figure in `getProviders` is produced by its `/api/model` fallback (and alias
+  double-counting across cards), NOT by raw inline provider models.
+- Consequence: the validation index is empty → every addition rejected
+  (AC-A1/A4/V3 unmet live). The mocked tests passed because their fake
+  `getProviderCatalog` returned populated inline `models`, unlike live.
+- Note: on this install every canonical provider key already appears in
+  `/api/models` (frontend observed 0 natural Add candidates), so the Add action
+  has no extra candidates here; the machinery must still validate real catalog
+  keys correctly and not reject them.
+
+### Required fix (backend)
+
+- Build the add-validation index (and the `/api/models` curated merge) from the
+  authoritative chat catalog `client.listModels()` (`/api/model`, carries
+  `providerID`, `id`/`modelID`, `enabled`, `status`), UNION any raw provider
+  inline `models` when a server actually provides them (forward-compat). Do not
+  rely solely on inline provider `models`.
+- Keep AC-A4 semantics: only chat models, `enabled !== false`, canonical
+  `providerID/modelID`, dedupe/cap, additions require connection, removals
+  offline-safe, default unchanged.
+- Add a regression test whose fake `getProviderCatalog` returns providers with
+  NO inline models but whose `listModels` returns the catalog entry → addition
+  must succeed (mirrors live). Existing populated-inline tests must still pass.
+- Re-verify live: add a real catalog key, confirm it appears in `/api/models`
+  with default unchanged, remove it, restore original `availableModels: []`.
