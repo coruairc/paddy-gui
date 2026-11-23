@@ -5,7 +5,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { timingSafeEqual } from "node:crypto";
-import { handleApi } from "./api.ts";
+import { handleApi, REQUEST_BODY_MAX_BYTES } from "./api.ts";
 import { authorizePeer, isLoopbackAddress, isLoopbackHost, originAllowed } from "./security.ts";
 import { getRuntime } from "./runtime.ts";
 
@@ -45,10 +45,19 @@ export async function handleNode(req: IncomingMessage, res: ServerResponse): Pro
     }
   }
   const proto = "http";
+  let raw: Buffer | null = null;
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    const body = await readBodyCapped(req);
+    if (!body.ok) {
+      sendJson(res, 400, { error: body.error });
+      return;
+    }
+    raw = body.body;
+  }
   const request = new Request(`${proto}://${host}${req.url ?? "/"}`, {
     method: req.method,
     headers: toHeaders(req),
-    body: req.method === "GET" || req.method === "HEAD" ? undefined : new Uint8Array(await readRaw(req)),
+    body: raw ? new Uint8Array(raw) : undefined,
   });
   const result = await handleApi(getRuntime(), request);
   if (result.stream) {
@@ -110,11 +119,39 @@ function toHeaders(req: IncomingMessage): Headers {
   return headers;
 }
 
-function readRaw(req: IncomingMessage): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
+/** Reject an oversized body before buffering anything (same cap as api.ts). */
+const BODY_TOO_LARGE = "Request body is too large";
+
+type BodyRead = { ok: true; body: Buffer | null } | { ok: false; error: string };
+
+function readBodyCapped(req: IncomingMessage): Promise<BodyRead> {
+  return new Promise((resolve) => {
+    const declared = Number(req.headers["content-length"]);
+    if (Number.isFinite(declared) && declared > REQUEST_BODY_MAX_BYTES) {
+      req.resume(); // drain so the socket is not left half-read
+      resolve({ ok: false, error: BODY_TOO_LARGE });
+      return;
+    }
     const chunks: Buffer[] = [];
-    req.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
+    let received = 0;
+    let settled = false;
+    const finish = (result: BodyRead) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    req.on("data", (chunk: Buffer) => {
+      if (settled) return;
+      received += chunk.length;
+      if (received > REQUEST_BODY_MAX_BYTES) {
+        chunks.length = 0;
+        finish({ ok: false, error: BODY_TOO_LARGE });
+        req.resume();
+        return;
+      }
+      chunks.push(Buffer.from(chunk));
+    });
+    req.on("end", () => finish({ ok: true, body: Buffer.concat(chunks) }));
+    req.on("error", () => finish({ ok: false, error: "Request could not be read" }));
   });
 }

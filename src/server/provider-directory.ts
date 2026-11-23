@@ -128,7 +128,9 @@ export class ProviderDirectory {
       if (!parsed.ok)
         return this.rememberFailure("The provider catalog response was not valid JSON");
       const providers = projectDirectory(parsed.value);
-      if (providers === null) return this.rememberFailure(SHAPE_ERROR);
+      // A valid JSON object with no usable provider is not a catalog: cache it
+      // as a failure so the UI never claims everything is configured for 24h.
+      if (providers === null || providers.length === 0) return this.rememberFailure(SHAPE_ERROR);
       const fetchedAt = this.nowImpl();
       const result: ProviderDirectoryResult = { providers, fetchedAt };
       this.cache = { result, expiresAt: fetchedAt + PROVIDER_DIRECTORY_TTL_MS };
@@ -166,10 +168,10 @@ function projectDirectory(value: unknown): DirectoryProvider[] | null {
     if (providers.length >= PROVIDER_DIRECTORY_MAX_PROVIDERS) break;
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
     const entry = raw as Record<string, unknown>;
-    const id = boundedString(entry.id, MAX_PROVIDER_ID) ?? boundedString(key, MAX_PROVIDER_ID);
+    const id = boundedIdentifier(entry.id, MAX_PROVIDER_ID) ?? boundedIdentifier(key, MAX_PROVIDER_ID);
     if (!id || seen.has(id)) continue;
     const name = boundedString(entry.name, MAX_PROVIDER_NAME) ?? id;
-    const doc = boundedString(entry.doc, MAX_PROVIDER_DOC);
+    const doc = httpsDoc(entry.doc, MAX_PROVIDER_DOC);
     const { models, total } = projectModels(entry.models);
     seen.add(id);
     providers.push({
@@ -192,7 +194,9 @@ function projectModels(raw: unknown): { models: DirectoryModel[]; total: number 
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return;
     const record = candidate as Record<string, unknown>;
     const id =
-      boundedString(record.id, MAX_MODEL_ID) ?? boundedString(fallbackID, MAX_MODEL_ID) ?? "";
+      boundedIdentifier(record.id, MAX_MODEL_ID) ??
+      boundedIdentifier(fallbackID, MAX_MODEL_ID) ??
+      "";
     if (!id || seen.has(id)) return;
     seen.add(id);
     total += 1;
@@ -209,12 +213,34 @@ function projectModels(raw: unknown): { models: DirectoryModel[]; total: number 
   return { models, total };
 }
 
-/** Trimmed, non-empty, bounded string; anything else is absent. */
+/** Trimmed, non-empty, bounded string; anything else is absent. Display-only: truncates. */
 function boundedString(value: unknown, max: number): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   return trimmed.length > max ? trimmed.slice(0, max) : trimmed;
+}
+
+/**
+ * Identifiers must be real source ids, so an overlong value is rejected, never
+ * truncated: two long ids sharing a prefix would otherwise collapse.
+ */
+function boundedIdentifier(value: unknown, max: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > max) return undefined;
+  return trimmed;
+}
+
+/** A display link is only kept when it is an absolute https: URL. */
+function httpsDoc(value: unknown, max: number): string | undefined {
+  const raw = boundedIdentifier(value, max);
+  if (!raw) return undefined;
+  try {
+    return new URL(raw).protocol === "https:" ? raw : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

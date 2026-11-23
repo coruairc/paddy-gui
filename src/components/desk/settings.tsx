@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { browserStorage, clearAllLastSessions, forgetProject } from "@/components/desk/last-session";
 import { modelSaveFailure } from "@/components/desk/models";
+import { createRequestGate } from "@/components/desk/request-gate";
 import {
   api,
   type ConnectionStatus,
@@ -248,6 +249,8 @@ function Providers({
   const [directory, setDirectory] = useState<ProviderDirectoryEntry[] | null>(null);
   const [directoryError, setDirectoryError] = useState<string | null>(null);
   const [directoryLoading, setDirectoryLoading] = useState(true);
+  /** A newer catalog refresh (or Retry) supersedes an in-flight one. */
+  const [directoryGate] = useState(createRequestGate);
   const [tab, setTab] = useState<ProviderTab>("configured");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -283,21 +286,25 @@ function Providers({
   }
 
   async function loadDirectory() {
+    const ticket = directoryGate.begin();
     setDirectoryLoading(true);
     setDirectoryError(null);
     try {
       const payload = await api.providerDirectory();
+      if (!directoryGate.isCurrent(ticket)) return;
       setDirectory(payload.directory);
       // The controller returns a retryable catalog error with an empty list;
       // the Configured tab keeps working from its own data (AC-C2).
       setDirectoryError(payload.error ?? null);
     } catch (err) {
+      if (!directoryGate.isCurrent(ticket)) return;
       setDirectory([]);
       setDirectoryError(
         err instanceof Error ? err.message : "Could not load the provider catalog.",
       );
     } finally {
-      setDirectoryLoading(false);
+      // A stale response leaves loading to the request that superseded it.
+      if (directoryGate.isCurrent(ticket)) setDirectoryLoading(false);
     }
   }
 
@@ -305,6 +312,7 @@ function Providers({
     void load();
     void loadDirectory();
   }, []);
+  useEffect(() => () => directoryGate.invalidate(), [directoryGate]);
 
   /** A connection can move a provider between tabs, so refresh both sources. */
   function refreshAll() {
@@ -976,6 +984,9 @@ function OAuthSignIn({
       const next = data.attempt;
       if (next.status === "pending") {
         setStatusMessage(next.message || "Waiting for you to finish signing in…");
+        // Only one chain may own the timer. A poll that was in flight when
+        // complete() replaced the chain must not schedule a second timer (WR-06).
+        if (timerRef.current !== null) return;
         timerRef.current = window.setTimeout(() => {
           timerRef.current = null;
           void poll(attemptID);
@@ -1072,6 +1083,9 @@ function OAuthSignIn({
     try {
       await api.completeOAuth(integrationID, attempt.attemptID, trimmed);
       if (!aliveRef.current || attemptRef.current !== attempt.attemptID) return;
+      // Replace the scheduled 2s poll: two chains would overwrite timerRef and
+      // leave an orphan timer that cancel/unmount cannot clear (WR-06).
+      stopPolling();
       setCode("");
       void poll(attempt.attemptID);
     } catch (err) {

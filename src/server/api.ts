@@ -122,7 +122,7 @@ async function bootstrap(runtime: ControllerRuntime) {
   if (status.connected && project) {
     try {
       const page = await runtime.requireClient().listSessionsPage(project.path);
-      sessions = page.sessions.map(summarizeSession).filter((item) => !item.archived || true);
+      sessions = page.sessions.map(summarizeSession);
       sessionsComplete = !page.hasMore;
     } catch (err) {
       sessionsComplete = false;
@@ -481,16 +481,17 @@ async function readProviderDirectory(
     client.listIntegrations(projectPath).catch(() => null),
     client.getProviderCatalog(projectPath).catch(() => null),
   ]);
-  // Without the inventory we cannot tell OpenCode-supported providers from
-  // arbitrary models.dev entries; return the retryable error rather than
-  // mislabeling the Not configured tab (AC-C1).
-  if (!integrations) {
+  // Without the inventory or the active-provider list we cannot tell
+  // OpenCode-supported providers from arbitrary models.dev entries, nor which
+  // ones are configured; return the retryable error rather than mislabeling the
+  // Not configured tab (AC-C1).
+  if (!integrations || !providers) {
     response.error = OPENCODE_INVENTORY_ERROR;
     return json(200, redactSecrets(response, secretNeedles(runtime)));
   }
 
   const active = new Set<string>();
-  for (const provider of providers ?? []) {
+  for (const provider of providers) {
     if (typeof provider.id === "string" && provider.id) active.add(provider.id);
     if (typeof provider.integrationID === "string" && provider.integrationID) {
       active.add(provider.integrationID);
@@ -850,7 +851,7 @@ async function integrationOAuth(
     const method = methods.find((item) => item.id === methodID && item.type === "oauth");
     if (!method) return json(400, { error: "That integration does not list this OAuth method" });
     const answer = oauthAnswer(body.answer);
-    if (answer === null) return json(400, { error: "answer must be a form answer object" });
+    if (answer === null) return json(400, { error: "answer is not a valid form answer" });
     let label: string | undefined;
     if (body.label !== undefined) {
       if (typeof body.label !== "string") return json(400, { error: "label must be a string" });
@@ -862,7 +863,9 @@ async function integrationOAuth(
       ...(answer === undefined ? {} : { answer }),
       ...(label ? { label } : {}),
     });
-    return json(200, { attempt: projectOAuthAttempt(attempt) });
+    return json(200, {
+      attempt: redactSecrets(projectOAuthAttempt(attempt), secretNeedles(runtime)),
+    });
   }
 
   if (!OAUTH_ATTEMPT.test(attemptID)) return json(400, { error: "Invalid OAuth attempt id" });
@@ -883,7 +886,9 @@ async function integrationOAuth(
 
   if (request.method === "GET") {
     const status = await client.getOAuthConnectStatus(directory, integrationID, attemptID);
-    return json(200, { attempt: projectOAuthStatus(status) });
+    return json(200, {
+      attempt: redactSecrets(projectOAuthStatus(status), secretNeedles(runtime)),
+    });
   }
   if (request.method === "DELETE") {
     await client.cancelOAuthConnect(directory, integrationID, attemptID);
@@ -891,6 +896,9 @@ async function integrationOAuth(
   }
   return json(404, { error: "Not found" });
 }
+
+/** Per-value bound for an OAuth form answer; matches the request-body cap's spirit. */
+const OAUTH_ANSWER_MAX_VALUE_LENGTH = 4096;
 
 /** Form.Answer is a record of scalar/array values keyed by form field. */
 function oauthAnswer(value: unknown): Record<string, unknown> | undefined | null {
@@ -914,15 +922,42 @@ function oauthAnswer(value: unknown): Record<string, unknown> | undefined | null
 }
 
 function isScalarAnswer(value: unknown): boolean {
-  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+  if (typeof value === "string") return value.length <= OAUTH_ANSWER_MAX_VALUE_LENGTH;
+  return typeof value === "number" || typeof value === "boolean";
+}
+
+/**
+ * Only absolute http(s) links may reach `<a href>` or the clipboard; a
+ * `javascript:`/`data:` URL from a misbehaving upstream is refused.
+ */
+function safeHttpUrl(value: unknown): string {
+  if (typeof value !== "string" || !value) return "";
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === "https:" || protocol === "http:" ? value : "";
+  } catch {
+    return "";
+  }
 }
 
 /** Allowlist the attempt fields the browser may see; nothing credential-shaped. */
-function projectOAuthAttempt(attempt: OpenCodeOAuthAttempt): Record<string, unknown> {
+function projectOAuthAttempt(
+  attempt: OpenCodeOAuthAttempt | null | undefined,
+): Record<string, unknown> {
+  // A 204 (or any non-object payload) is a protocol failure, not a TypeError.
+  if (!attempt || typeof attempt !== "object" || Array.isArray(attempt)) {
+    throw new OpenCodeError(502, "OpenCode returned no sign-in attempt");
+  }
+  const attemptID = typeof attempt.attemptID === "string" ? attempt.attemptID : "";
+  if (!OAUTH_ATTEMPT.test(attemptID)) {
+    throw new OpenCodeError(502, "OpenCode returned an unusable sign-in attempt");
+  }
+  const url = safeHttpUrl(attempt.url);
+  if (!url) throw new OpenCodeError(502, "OpenCode returned an unusable sign-in link");
   const time = projectOAuthTime(attempt.time);
   return {
-    attemptID: typeof attempt.attemptID === "string" ? attempt.attemptID : "",
-    url: typeof attempt.url === "string" ? attempt.url : "",
+    attemptID,
+    url,
     ...(typeof attempt.instructions === "string" ? { instructions: attempt.instructions } : {}),
     mode: attempt.mode === "code" ? "code" : "auto",
     paste: attempt.paste === true,
@@ -930,12 +965,21 @@ function projectOAuthAttempt(attempt: OpenCodeOAuthAttempt): Record<string, unkn
   };
 }
 
-function projectOAuthStatus(attempt: OpenCodeOAuthAttemptStatus): Record<string, unknown> {
+function projectOAuthStatus(
+  attempt: OpenCodeOAuthAttemptStatus | null | undefined,
+): Record<string, unknown> {
+  if (!attempt || typeof attempt !== "object" || Array.isArray(attempt)) {
+    throw new OpenCodeError(502, "OpenCode returned no sign-in status");
+  }
   const time = projectOAuthTime(attempt.time);
+  // An unexpected terminal status must not keep the UI polling for ten minutes.
   const status =
-    attempt.status === "complete" || attempt.status === "failed" || attempt.status === "expired"
+    attempt.status === "complete" ||
+    attempt.status === "failed" ||
+    attempt.status === "expired" ||
+    attempt.status === "pending"
       ? attempt.status
-      : "pending";
+      : "failed";
   return {
     status,
     ...(typeof attempt.message === "string" ? { message: attempt.message } : {}),
@@ -1024,8 +1068,11 @@ function requireProject(runtime: ControllerRuntime) {
   return project;
 }
 
+/** Browser request bodies are small JSON payloads; never buffer more than this. */
+export const REQUEST_BODY_MAX_BYTES = 64 * 1024;
+
 async function readBody(request: Request): Promise<Record<string, unknown>> {
-  const text = await request.text();
+  const text = await readBodyText(request);
   if (!text.trim()) return {};
   const parsed = safeJson(text);
   if (!parsed.ok) throw new OpenCodeError(400, parsed.error);
@@ -1033,6 +1080,35 @@ async function readBody(request: Request): Promise<Record<string, unknown>> {
     throw new OpenCodeError(400, "Malformed JSON");
   }
   return parsed.value as Record<string, unknown>;
+}
+
+/**
+ * Read the request body with a hard byte cap: reject a declared oversized body
+ * before reading, and abort a streamed body once it passes the cap.
+ */
+async function readBodyText(request: Request): Promise<string> {
+  const tooLarge = () => new OpenCodeError(400, "Request body is too large");
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > REQUEST_BODY_MAX_BYTES) {
+    await request.body?.cancel().catch(() => undefined);
+    throw tooLarge();
+  }
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    received += value.byteLength;
+    if (received > REQUEST_BODY_MAX_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      throw tooLarge();
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
 }
 
 /** Route params are percent-encoded; a malformed escape is a client error, not a 500. */

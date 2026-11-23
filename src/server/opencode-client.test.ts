@@ -414,6 +414,43 @@ test("getProviderAuth preserves method ids, exact types, labels and form schema"
   assert.equal(JSON.stringify(auth).includes("connections"), false);
 });
 
+test("visible form fields never echo a credential-shaped default", async () => {
+  const { fetchImpl } = mockFetch(() => ({
+    body: {
+      location: {},
+      data: [
+        {
+          id: "openai",
+          methods: [
+            {
+              id: "api-key",
+              type: "key",
+              label: "API key",
+              form: [
+                { key: "api_key", type: "string", title: "API key", default: "sk-visible-must-not-leak" },
+                { key: "token", type: "string", title: "Token", default: "tok-visible-must-not-leak" },
+                { key: "label", type: "string", title: "Label", default: "Work" },
+                { key: "baseURL", type: "string", title: "Base URL", default: "https://example.invalid" },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  }));
+  const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: fetchImpl });
+  const auth = (await client.getProviderAuth("/work/app")) as Record<string, Array<{ form: Array<Record<string, unknown>> }>>;
+  const form = auth.openai[0].form;
+  const byKey = Object.fromEntries(form.map((field) => [field.key, field.default]));
+  assert.equal(byKey.api_key, undefined);
+  assert.equal(byKey.token, undefined);
+  assert.equal(byKey.label, "Work", "a non-credential default still reaches the form");
+  assert.equal(byKey.baseURL, "https://example.invalid");
+  const json = JSON.stringify(auth);
+  assert.equal(json.includes("sk-visible-must-not-leak"), false);
+  assert.equal(json.includes("tok-visible-must-not-leak"), false);
+});
+
 test("OAuth integration proxy uses the exact v2 routes, order and payloads", async () => {
   const { fetchImpl, calls } = mockFetch((url, init) => {
     if (url.includes("/connect/oauth/con_1/complete") && init?.method === "POST") return { status: 204 };
@@ -444,6 +481,7 @@ test("OAuth integration proxy uses the exact v2 routes, order and payloads", asy
     answer: { label: "Work" },
     label: "ChatGPT work",
   });
+  assert.ok(attempt, "OAuth start must return an attempt");
   assert.equal(attempt.attemptID, "con_1");
   assert.equal(attempt.mode, "code");
   assert.equal(attempt.paste, true);

@@ -307,6 +307,64 @@ test("a redirect is never followed and becomes a retryable catalog error", async
   assert.equal(calls.includes("https://attacker.example/api.json"), false);
 });
 
+test("an empty or unusable catalog is a shape failure, never a 24h success", async () => {
+  for (const body of [{}, { x: null }]) {
+    let now = 0;
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return jsonResponse(body);
+    }) as typeof fetch;
+    const directory = new ProviderDirectory({ fetch: fetchImpl, now: () => now });
+    const result = await directory.get();
+    assert.deepEqual(result.providers, [], JSON.stringify(body));
+    assert.match(result.error ?? "", /unexpected shape/i, JSON.stringify(body));
+    assert.equal(result.fetchedAt, undefined);
+
+    now += PROVIDER_DIRECTORY_NEGATIVE_TTL_MS - 1;
+    await directory.get();
+    assert.equal(calls, 1, "cached as a failure");
+    now += 1;
+    await directory.get();
+    assert.equal(calls, 2, "retried after the 60s negative TTL, not a 24h success TTL");
+  }
+});
+
+test("only https doc links survive the projection", async () => {
+  const { fetchImpl } = fixtureFetch({
+    script: { id: "script", name: "Script", doc: "javascript:alert(1)", models: {} },
+    plain: { id: "plain", name: "Plain", doc: "http://example.invalid/docs", models: {} },
+    embedded: { id: "embedded", name: "Embedded", doc: "data:text/html,<script>", models: {} },
+    secure: { id: "secure", name: "Secure", doc: "https://example.invalid/docs", models: {} },
+  });
+  const directory = new ProviderDirectory({ fetch: fetchImpl, now: () => 0 });
+  const { providers } = await directory.get();
+  const docs = Object.fromEntries(providers.map((provider) => [provider.id, provider.doc]));
+  assert.deepEqual(docs, {
+    script: undefined,
+    plain: undefined,
+    embedded: undefined,
+    secure: "https://example.invalid/docs",
+  });
+});
+
+test("overlong provider and model ids are rejected instead of truncated", async () => {
+  const longID = "m".repeat(300);
+  const { fetchImpl } = fixtureFetch({
+    good: { id: "good", name: "Good", models: { [longID]: { id: longID, name: "Long" } } },
+    [longID]: { id: longID, name: "Long provider", models: {} },
+  });
+  const directory = new ProviderDirectory({ fetch: fetchImpl, now: () => 0 });
+  const { providers } = await directory.get();
+  assert.deepEqual(
+    providers.map((provider) => provider.id),
+    ["good"],
+    "an overlong provider id is skipped, not truncated",
+  );
+  assert.deepEqual(providers[0].models, []);
+  assert.equal(providers[0].modelCount, 0);
+});
+
 test("a streamed body over the byte cap without content-length is rejected", async () => {
   const chunk = new Uint8Array(256 * 1024).fill(0x20);
   let sent = 0;

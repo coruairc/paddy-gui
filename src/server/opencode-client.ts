@@ -558,7 +558,7 @@ export class OpenCodeClient {
     directory: string | undefined,
     integrationID: string,
     input: { methodID: string; answer?: Record<string, unknown>; label?: string },
-  ): Promise<OpenCodeOAuthAttempt> {
+  ): Promise<OpenCodeOAuthAttempt | null> {
     const body: Record<string, unknown> = { methodID: input.methodID };
     if (input.answer !== undefined) body.answer = input.answer;
     if (input.label !== undefined) body.label = input.label;
@@ -566,19 +566,19 @@ export class OpenCodeClient {
       "POST",
       `/api/integration/${encodeURIComponent(integrationID)}/connect/oauth`,
       { query: locationQuery(directory), body },
-    )) as OpenCodeOAuthAttempt;
+    )) as OpenCodeOAuthAttempt | null;
   }
 
   async getOAuthConnectStatus(
     directory: string | undefined,
     integrationID: string,
     attemptID: string,
-  ): Promise<OpenCodeOAuthAttemptStatus> {
+  ): Promise<OpenCodeOAuthAttemptStatus | null> {
     return (await this.request(
       "GET",
       `/api/integration/${encodeURIComponent(integrationID)}/connect/oauth/${encodeURIComponent(attemptID)}`,
       { query: locationQuery(directory) },
-    )) as OpenCodeOAuthAttemptStatus;
+    )) as OpenCodeOAuthAttemptStatus | null;
   }
 
   async completeOAuthConnect(
@@ -950,6 +950,13 @@ export function projectAuthMethod(method: OpenCodeIntegrationMethod): Record<str
   return projected;
 }
 
+/**
+ * Mirrors the SECRET_KEY pattern in security.ts. Form defaults are a
+ * defence-in-depth risk even on a visible field, so a credential-shaped key
+ * never carries one to the browser.
+ */
+const CREDENTIAL_FIELD_KEY = /(^key$|api[_-]?key|token|password|secret|authorization|credential|private[_-]?key)/i;
+
 function projectAuthFormField(field: OpenCodeAuthFormField): Record<string, unknown> | null {
   if (!field || typeof field !== "object") return null;
   const type = typeof field.type === "string" ? field.type : "";
@@ -964,8 +971,12 @@ function projectAuthFormField(field: OpenCodeAuthFormField): Record<string, unkn
   for (const key of ["minLength", "maxLength", "minimum", "maximum", "minItems", "maxItems"] as const) {
     if (typeof field[key] === "number") projected[key] = field[key];
   }
-  // Hidden fields are filled by OpenCode; never echo a possible default.
-  if (!field.hidden && isScalarOrScalarArray(field.default)) projected.default = field.default;
+  // Hidden fields are filled by OpenCode; never echo a possible default. A
+  // visible credential-shaped field is treated the same way.
+  const credentialKey = typeof field.key === "string" && CREDENTIAL_FIELD_KEY.test(field.key);
+  if (!field.hidden && !credentialKey && isScalarOrScalarArray(field.default)) {
+    projected.default = field.default;
+  }
   if (Array.isArray(field.options)) {
     projected.options = field.options
       .slice(0, 200)

@@ -1815,3 +1815,204 @@ test("provider directory redacts display metadata but keeps auth form field keys
   const form = entry.auth[0].form as Array<Record<string, unknown>>;
   assert.equal(form[0].key, "label");
 });
+
+test("provider directory reports an active-provider failure instead of marking everything unconfigured", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.client = {
+    ...(runtime.client as object),
+    listIntegrations: async () => [
+      { id: "openai", methods: [] },
+      { id: "xai", methods: [] },
+    ],
+    getProviderCatalog: async () => {
+      throw new OpenCodeError(500, "active provider listing failed");
+    },
+  } as unknown as ControllerRuntime["client"];
+  const result = await call(runtime, "GET", "/api/provider-directory", undefined, {
+    providerDirectory: directoryFrom(DIRECTORY_FIXTURE),
+  });
+  assert.equal(result.status, 200);
+  const body = result.body as DirectoryBody;
+  // Without the active-provider list, configured cannot be decided: never show
+  // every integration as "Not configured" (AC-C1).
+  assert.deepEqual(body.directory, []);
+  assert.match(body.error ?? "", /integration/i);
+  assert.equal(body.fetchedAt, 1_700_000_000_000);
+});
+
+// ── OAuth projection robustness (WR-03/WR-04/WR-05) ───────────────────────
+function withOAuthClient(
+  runtime: ControllerRuntime,
+  overrides: Record<string, unknown>,
+): ControllerRuntime["client"] {
+  return { ...(runtime.client as object), ...overrides } as unknown as ControllerRuntime["client"];
+}
+
+const OAUTH_ATTEMPT_OK = {
+  attemptID: "con_1",
+  url: "https://auth.example.invalid/authorize?state=abc",
+  mode: "auto",
+  paste: false,
+  time: { created: 1, expires: 2 },
+};
+
+test("OAuth projections turn empty or non-object upstream payloads into a 502", async () => {
+  const { runtime } = runtimeWithProject();
+  for (const payload of [null, "nope", 42, []]) {
+    runtime.client = withOAuthClient(runtime, {
+      startOAuthConnect: async () => payload,
+    });
+    const start = await call(runtime, "POST", "/api/integrations/openai/oauth", {
+      methodID: "oauth-chatgpt",
+    });
+    assert.equal(start.status, 502, `start ${JSON.stringify(payload)}`);
+    assert.match((start.body as { error: string }).error, /no sign-in attempt/i);
+
+    runtime.client = withOAuthClient(runtime, {
+      getOAuthConnectStatus: async () => payload,
+    });
+    const status = await call(runtime, "GET", "/api/integrations/openai/oauth/con_1");
+    assert.equal(status.status, 502, `status ${JSON.stringify(payload)}`);
+    assert.match((status.body as { error: string }).error, /no sign-in status/i);
+  }
+});
+
+test("OAuth start rejects an unusable attempt id or a non-web sign-in link", async () => {
+  const { runtime } = runtimeWithProject();
+  const cases: Array<[Record<string, unknown>, RegExp]> = [
+    [{ ...OAUTH_ATTEMPT_OK, url: "javascript:alert(1)" }, /unusable sign-in link/i],
+    [{ ...OAUTH_ATTEMPT_OK, url: "data:text/html,<script>alert(1)</script>" }, /unusable sign-in link/i],
+    [{ ...OAUTH_ATTEMPT_OK, url: "" }, /unusable sign-in link/i],
+    [{ ...OAUTH_ATTEMPT_OK, url: "not a url" }, /unusable sign-in link/i],
+    [{ ...OAUTH_ATTEMPT_OK, attemptID: "" }, /unusable sign-in attempt/i],
+    [{ ...OAUTH_ATTEMPT_OK, attemptID: "not-an-attempt" }, /unusable sign-in attempt/i],
+    [{ ...OAUTH_ATTEMPT_OK, attemptID: 42 }, /unusable sign-in attempt/i],
+  ];
+  for (const [attempt, message] of cases) {
+    runtime.client = withOAuthClient(runtime, { startOAuthConnect: async () => attempt });
+    const result = await call(runtime, "POST", "/api/integrations/openai/oauth", {
+      methodID: "oauth-chatgpt",
+    });
+    assert.equal(result.status, 502, JSON.stringify(attempt));
+    assert.match((result.body as { error: string }).error, message);
+  }
+
+  runtime.client = withOAuthClient(runtime, {
+    startOAuthConnect: async () => ({ ...OAUTH_ATTEMPT_OK, url: "http://127.0.0.1:4096/authorize" }),
+  });
+  const plainHttp = await call(runtime, "POST", "/api/integrations/openai/oauth", {
+    methodID: "oauth-chatgpt",
+  });
+  assert.equal(plainHttp.status, 200, "a local http sign-in link stays usable");
+});
+
+test("OAuth responses are redacted like every other proxy route", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.state.connectionPassword = "super-secret-password";
+  runtime.client = withOAuthClient(runtime, {
+    startOAuthConnect: async () => ({
+      ...OAUTH_ATTEMPT_OK,
+      instructions: "super-secret-password",
+    }),
+    getOAuthConnectStatus: async () => ({
+      status: "pending",
+      message: "super-secret-password",
+    }),
+  });
+  const start = await call(runtime, "POST", "/api/integrations/openai/oauth", {
+    methodID: "oauth-chatgpt",
+  });
+  assert.equal(start.status, 200);
+  assert.equal(JSON.stringify(start.body).includes("super-secret-password"), false);
+  assert.equal((start.body as { attempt: { instructions: string } }).attempt.instructions, "[redacted]");
+
+  const status = await call(runtime, "GET", "/api/integrations/openai/oauth/con_1");
+  assert.equal(status.status, 200);
+  assert.equal(JSON.stringify(status.body).includes("super-secret-password"), false);
+  assert.equal((status.body as { attempt: { message: string } }).attempt.message, "[redacted]");
+});
+
+test("an unknown OAuth status is projected as failed, not pending", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.client = withOAuthClient(runtime, {
+    getOAuthConnectStatus: async () => ({ status: "weird", time: { created: 1, expires: 2 } }),
+  });
+  const status = await call(runtime, "GET", "/api/integrations/openai/oauth/con_1");
+  assert.equal(status.status, 200);
+  assert.deepEqual(status.body, { attempt: { status: "failed", time: { created: 1, expires: 2 } } });
+});
+
+// ── Bounded request bodies (WR-07) ────────────────────────────────────────
+test("oversized request bodies are rejected before parsing", async () => {
+  const { runtime } = runtimeWithProject();
+  const oversized = JSON.stringify({ title: "x".repeat(70 * 1024) });
+  const request = new Request("http://127.0.0.1:8080/api/projects", {
+    method: "POST",
+    body: oversized,
+    headers: {
+      "content-type": "application/json",
+      "content-length": String(Buffer.byteLength(oversized)),
+    },
+  });
+  const result = await handleApi(runtime, request);
+  assert.equal(result.status, 400);
+  assert.match((result.body as { error: string }).error, /too large/i);
+});
+
+test("OAuth answers are bounded per value", async () => {
+  const { runtime } = runtimeWithProject();
+  let started = 0;
+  runtime.client = withOAuthClient(runtime, {
+    startOAuthConnect: async () => {
+      started += 1;
+      return OAUTH_ATTEMPT_OK;
+    },
+  });
+  const tooLong = await call(runtime, "POST", "/api/integrations/openai/oauth", {
+    methodID: "oauth-chatgpt",
+    answer: { label: "x".repeat(4097) },
+  });
+  assert.equal(tooLong.status, 400);
+  assert.match((tooLong.body as { error: string }).error, /answer/i);
+
+  const longItem = await call(runtime, "POST", "/api/integrations/openai/oauth", {
+    methodID: "oauth-chatgpt",
+    answer: { scopes: ["x".repeat(4097)] },
+  });
+  assert.equal(longItem.status, 400);
+  assert.match((longItem.body as { error: string }).error, /answer/i);
+  assert.equal(started, 0, "an invalid answer never reaches OpenCode");
+
+  const bounded = await call(runtime, "POST", "/api/integrations/openai/oauth", {
+    methodID: "oauth-chatgpt",
+    answer: { label: "x".repeat(4096) },
+  });
+  assert.equal(bounded.status, 200);
+  assert.equal(started, 1);
+});
+
+// ── Session listing keeps archived sessions out of the date groups ────────
+test("session listing keeps archived sessions in their own list", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.client = {
+    ...(runtime.client as object),
+    listSessions: async () => [
+      { id: "ses_1", title: "Live", time: { created: 10, updated: 20 } },
+      { id: "ses_old", title: "Old", time: { created: 5, updated: 6, archived: 7 } },
+    ],
+  } as unknown as ControllerRuntime["client"];
+  const result = await call(runtime, "GET", "/api/sessions");
+  assert.equal(result.status, 200);
+  const body = result.body as {
+    sessions: { id: string }[];
+    groups: { items: { id: string }[] }[];
+    archived: { id: string }[];
+  };
+  assert.equal(body.sessions.length, 2, "both sessions stay in the flat list");
+  assert.deepEqual(body.archived.map((session) => session.id), ["ses_old"]);
+  assert.equal(
+    body.groups.some((group) => group.items.some((session) => session.id === "ses_old")),
+    false,
+    "archived sessions never appear in a date group",
+  );
+});
