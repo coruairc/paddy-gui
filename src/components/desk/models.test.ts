@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_AGENT_ID, agentChoices, agentOptions, defaultAgentName } from "./agents.ts";
+import { DEFAULT_AGENT_ID, agentChoices, agentOptions, agentRows, defaultAgentName } from "./agents.ts";
 import {
   canSelectModel,
   filterModels,
@@ -274,4 +274,19 @@ test("the select shows Build exactly once and every other agent once", () => {
 test("defaultAgentName falls back to Build when the payload has no default agent", () => {
   assert.equal(defaultAgentName([]), "Build");
   assert.equal(defaultAgentName(agentOptions([{ id: "general", name: "General" }])), "Build");
+});
+
+test("agentRows puts the default row first and never repeats the default agent", () => {
+  const rows = agentRows(agentOptions(AGENT_PAYLOAD));
+  assert.deepEqual(rows, [
+    { id: "", name: "Build" },
+    { id: "general", name: "General" },
+    { id: "orchestrator", name: "orchestrator" },
+  ]);
+  assert.equal(rows.filter((row) => row.name === "Build").length, 1);
+  assert.equal(rows.filter((row) => row.id === "").length, 1);
+});
+
+test("agentRows labels the default row Build before the payload has loaded", () => {
+  assert.deepEqual(agentRows([]), [{ id: "", name: "Build" }]);
 });

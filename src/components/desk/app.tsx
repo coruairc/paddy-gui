@@ -16,7 +16,8 @@ import { usePanelWidths } from "@/components/desk/use-panel-widths";
 import { ChangesPanel, FilesChangedBlock, type TurnDiffs } from "@/components/desk/files-changed";
 import { changesFailed, changesLoaded, changesLoading, changesSettled, EMPTY_CHANGES, type SessionChanges } from "@/components/desk/session-changes";
 import { createArchiveUndo, shouldReturnFocus, type ArchiveNotice, type NoticeHold } from "@/components/desk/archive-undo";
-import { agentChoices, agentOptions, defaultAgentName, type AgentOption } from "@/components/desk/agents";
+import { agentOptions, type AgentOption } from "@/components/desk/agents";
+import { AgentPicker } from "@/components/desk/agent-picker";
 import { createTurnDiffCache, createTurnTracker, latestTurnFiles, mergeStepFiles, turnFiles, turnStateKey } from "@/components/desk/diff";
 import {
   belongsToProject,
@@ -1103,20 +1104,6 @@ export function DeskApp() {
             {!groups.length && <p className="px-2.5 py-2 text-xs text-subtle">No chats yet.</p>}
           </div>
           <div className="border-t border-border p-2">
-            <label htmlFor="desk-agent" className="px-2.5 text-[11px] tracking-wide text-muted uppercase">Agent</label>
-            <select
-              id="desk-agent"
-              className="mt-1 h-10 w-full rounded-md border border-border bg-surface px-2.5 text-sm text-fg"
-              value={agent}
-              onChange={(event) => setAgent(event.target.value)}
-            >
-              {/* "" sends no agent param, which runs OpenCode's default agent — so
-                  the default agent's own row would only duplicate this label. */}
-              <option value="">{defaultAgentName(agents)}</option>
-              {agentChoices(agents).map((item) => (
-                <option key={item.id} value={item.id}>{item.name}</option>
-              ))}
-            </select>
             <button
               type="button"
               onClick={() => setSettingsOpen(true)}
@@ -1427,7 +1414,8 @@ export function DeskApp() {
                         composer.current?.focus();
                       }}
                     />
-                    <div className="flex items-end gap-2 rounded-2xl bg-elevated p-2 shadow-[var(--shadow-border)]">
+                    <div className="rounded-2xl bg-elevated p-2 shadow-[var(--shadow-border)]">
+                    <div className="flex items-end gap-2">
                     <textarea
                       ref={composer}
                       data-composer
@@ -1510,6 +1498,12 @@ export function DeskApp() {
                         <ArrowUp />
                       </Button>
                     )}
+                    </div>
+                    {/* Agent control sits inside the box but below the input row:
+                        the textarea keeps its full width at narrow viewports. */}
+                    <div className="mt-1 flex items-center gap-1 px-1">
+                      <AgentPicker agents={agents} agent={agent} onChange={setAgent} />
+                    </div>
                     </div>
                   </div>
                   {modelNote && (

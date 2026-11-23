@@ -50,3 +50,11 @@ export function agentChoices(options: AgentOption[]): AgentOption[] {
 export function defaultAgentName(options: AgentOption[]): string {
   return options.find((option) => option.id === DEFAULT_AGENT_ID)?.name ?? "Build";
 }
+
+/**
+ * Rows for the agent dropdown: the "" default row first (no agent param tells
+ * OpenCode to run its default agent), then every other agent once.
+ */
+export function agentRows(options: AgentOption[]): AgentOption[] {
+  return [{ id: "", name: defaultAgentName(options) }, ...agentChoices(options)];
+}
