@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { DEFAULT_AGENT_ID, agentChoices, agentOptions, defaultAgentName } from "./agents.ts";
 import {
   canSelectModel,
   filterModels,
@@ -218,4 +219,59 @@ test("modelSaveFailure rejects only a server 400; other failures keep the choice
   assert.equal(modelSaveFailure(Object.assign(new Error("down"), { status: 503 })), "keep-for-turn");
   assert.equal(modelSaveFailure(new Error("Failed to fetch")), "keep-for-turn");
   assert.equal(modelSaveFailure(null), "keep-for-turn");
+});
+
+// ── Agents ─────────────────────────────────────────────────────────────────
+// The sidebar's agent select is built by agents.ts. Its tests live here because
+// `npm test` lists suites explicitly (scripts/test-list.test.mjs) and this is the
+// listed suite for picker-catalogue helpers.
+
+const AGENT_PAYLOAD = [
+  { id: "build", name: "Build", mode: "primary", description: "The default agent." },
+  { id: "general", name: "General", mode: "subagent" },
+  { id: "orchestrator", name: "orchestrator", mode: "primary" },
+];
+
+test("agentOptions sends OpenCode the payload id, not the display-cased name", () => {
+  assert.deepEqual(agentOptions(AGENT_PAYLOAD), [
+    { id: "build", name: "Build" },
+    { id: "general", name: "General" },
+    { id: "orchestrator", name: "orchestrator" },
+  ]);
+  assert.equal(DEFAULT_AGENT_ID, "build");
+});
+
+test("agentOptions dedupes by id, skips junk entries, and falls back to the id as the label", () => {
+  assert.deepEqual(
+    agentOptions([
+      { id: "build", name: "Build" },
+      { id: "build", name: "Build again" },
+      { id: "custom" },
+      null,
+      "not an agent",
+      { name: "no id" },
+    ]),
+    [
+      { id: "build", name: "Build" },
+      { id: "custom", name: "custom" },
+    ],
+  );
+  assert.deepEqual(agentOptions({ agents: [] }), []);
+  assert.deepEqual(agentOptions(undefined), []);
+});
+
+test("the select shows Build exactly once and every other agent once", () => {
+  const options = agentOptions(AGENT_PAYLOAD);
+  // "" is the default row (no agent param); it is labelled with the default
+  // agent's own name, and that agent is then dropped from the list.
+  const labels = [defaultAgentName(options), ...agentChoices(options).map((option) => option.name)];
+  assert.deepEqual(labels, ["Build", "General", "orchestrator"]);
+  assert.equal(labels.filter((label) => label === "Build").length, 1);
+  assert.equal(new Set(labels).size, labels.length);
+  assert.deepEqual(agentChoices(options).map((option) => option.id), ["general", "orchestrator"]);
+});
+
+test("defaultAgentName falls back to Build when the payload has no default agent", () => {
+  assert.equal(defaultAgentName([]), "Build");
+  assert.equal(defaultAgentName(agentOptions([{ id: "general", name: "General" }])), "Build");
 });

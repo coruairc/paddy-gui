@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ArrowDown, ArrowUp, FolderGit2, Plus, Search, Settings, Square } from "lucide-react";
 import { toast } from "sonner";
 import { HelixMark } from "@/components/helix-mark";
@@ -16,6 +16,7 @@ import { usePanelWidths } from "@/components/desk/use-panel-widths";
 import { ChangesPanel, FilesChangedBlock, type TurnDiffs } from "@/components/desk/files-changed";
 import { changesFailed, changesLoaded, changesLoading, changesSettled, EMPTY_CHANGES, type SessionChanges } from "@/components/desk/session-changes";
 import { createArchiveUndo, shouldReturnFocus, type ArchiveNotice, type NoticeHold } from "@/components/desk/archive-undo";
+import { agentChoices, agentOptions, defaultAgentName, type AgentOption } from "@/components/desk/agents";
 import { createTurnDiffCache, createTurnTracker, latestTurnFiles, mergeStepFiles, turnFiles, turnStateKey } from "@/components/desk/diff";
 import {
   belongsToProject,
@@ -93,6 +94,11 @@ export function DeskApp() {
   /** Set while openSession is fetching; sending is disabled until the server confirms the chat. */
   const [openingSessionId, setOpeningSessionId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** Add project is a dialog now; it settles the promise both callers await. */
+  const [addProjectOpen, setAddProjectOpen] = useState(false);
+  const addProjectResolve = useRef<((project: Project | null) => void) | null>(null);
+  /** The control that opened the dialog, so focus can go back to it. */
+  const addProjectReturnFocus = useRef<HTMLElement | null>(null);
   const panels = usePanelWidths(!settingsOpen);
   const [inspector, setInspector] = useState<"work" | "changes">("work");
   const [branch, setBranch] = useState<string | null>(null);
@@ -127,7 +133,7 @@ export function DeskApp() {
   /** Everything cancelOpen() touches; stable for the component's lifetime. */
   const [openTarget] = useState(() => ({ gate: openGate, setOpening: setOpeningSessionId, confirmedRef: confirmedSessionRef }));
   const [agent, setAgent] = useState("");
-  const [agents, setAgents] = useState<string[]>([]);
+  const [agents, setAgents] = useState<AgentOption[]>([]);
   const [stick, setStick] = useState(true);
   const [showJump, setShowJump] = useState(false);
   /** Latest-turn diff refresh for the inspector (on idle, or Retry). */
@@ -452,7 +458,7 @@ export function DeskApp() {
   useEffect(() => {
     if (!project || !status?.connected) return;
     void api.vcs().then((info) => setBranch(info.branch ?? null)).catch(() => setBranch(null));
-    void api.agents().then((payload) => setAgents(agentNames(payload))).catch(() => setAgents([]));
+    void api.agents().then((payload) => setAgents(agentOptions(payload))).catch(() => setAgents([]));
   }, [project, status?.connected]);
 
   // The Archive button that was clicked is gone: move keyboard focus to Undo
@@ -743,19 +749,41 @@ export function DeskApp() {
     setSessions(data.sessions);
   }
 
-  async function addProject(): Promise<Project | null> {
-    const path = window.prompt("Absolute path to the project");
-    if (!path) return null;
-    try {
-      const result = await api.addProject(path);
-      setProjects((current) => (current.some((item) => item.id === result.project.id) ? current : [...current, result.project]));
-      await chooseProject(result.project.id);
-      setError(null);
-      return result.project;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not add that project");
-      return null;
-    }
+  /**
+   * Open the Add project dialog and settle with its result. The sidebar button
+   * and New chat both call this, so one dialog (not window.prompt, which some
+   * contexts suppress and which the repo treats as an anti-pattern) owns the
+   * whole flow: one path, one project selected.
+   */
+  function addProject(trigger?: HTMLElement | null): Promise<Project | null> {
+    // A request left over from a dialog that was already replaced must not hang.
+    addProjectResolve.current?.(null);
+    addProjectReturnFocus.current = trigger ?? null;
+    setAddProjectOpen(true);
+    return new Promise((resolve) => {
+      addProjectResolve.current = resolve;
+    });
+  }
+
+  /** Close the dialog and hand its result to whoever awaited addProject(). */
+  const closeAddProject = useCallback((project: Project | null) => {
+    const resolve = addProjectResolve.current;
+    addProjectResolve.current = null;
+    setAddProjectOpen(false);
+    resolve?.(project);
+    const trigger = addProjectReturnFocus.current;
+    addProjectReturnFocus.current = null;
+    // Back to the control that opened the dialog, unless it is gone.
+    if (trigger?.isConnected) requestAnimationFrame(() => trigger.focus());
+  }, []);
+
+  /** Dialog submit: the controller validates the path; failures land in the dialog. */
+  async function addProjectTo(path: string, name?: string): Promise<Project> {
+    const result = await api.addProject(path, name);
+    setProjects((current) => (current.some((item) => item.id === result.project.id) ? current : [...current, result.project]));
+    await chooseProject(result.project.id);
+    setError(null);
+    return result.project;
   }
 
   async function openSession(id: string, projectId: string | null = activeProjectId, expectDirectory?: string) {
@@ -830,7 +858,7 @@ export function DeskApp() {
     });
   }
 
-  async function newChat() {
+  async function newChat(trigger?: HTMLElement | null) {
     if (creatingChat) return;
     setCreatingChat(true);
     setSettingsOpen(false);
@@ -838,7 +866,7 @@ export function DeskApp() {
     try {
       // A session belongs to a project. If none is selected yet, use the
       // existing Add Project flow, then create the chat in that project.
-      const targetProject = project ?? await addProject();
+      const targetProject = project ?? await addProject(trigger);
       if (!targetProject) return;
       const created = await api.createSession();
       setSessions((current) => upsertSession(current, created.session));
@@ -974,7 +1002,7 @@ export function DeskApp() {
           <div className="scrollbar-thin flex min-h-0 flex-1 flex-col overflow-y-auto p-2">
             <button
               type="button"
-              onClick={() => void newChat()}
+              onClick={(event) => void newChat(event.currentTarget)}
               disabled={creatingChat}
               className="flex h-11 w-full items-center gap-2.5 rounded-xl px-2.5 text-sm text-fg transition-colors hover:bg-surface"
             >
@@ -995,7 +1023,7 @@ export function DeskApp() {
                 <span className="truncate">{item.name}</span>
               </button>
             ))}
-            <button type="button" onClick={() => void addProject()} className="mt-0.5 px-2.5 py-1 text-left text-xs text-muted hover:text-fg">
+            <button type="button" onClick={(event) => void addProject(event.currentTarget)} className="mt-0.5 px-2.5 py-1 text-left text-xs text-muted hover:text-fg">
               Add project
             </button>
             <div className="relative mt-2 px-1">
@@ -1024,15 +1052,18 @@ export function DeskApp() {
             {!groups.length && <p className="px-2.5 py-2 text-xs text-subtle">No chats yet.</p>}
           </div>
           <div className="border-t border-border p-2">
-            <label className="px-2.5 text-[11px] tracking-wide text-muted uppercase">Agent</label>
+            <label htmlFor="desk-agent" className="px-2.5 text-[11px] tracking-wide text-muted uppercase">Agent</label>
             <select
+              id="desk-agent"
               className="mt-1 h-10 w-full rounded-md border border-border bg-surface px-2.5 text-sm text-fg"
               value={agent}
               onChange={(event) => setAgent(event.target.value)}
             >
-              <option value="">Build</option>
-              {agents.map((name) => (
-                <option key={name} value={name}>{name}</option>
+              {/* "" sends no agent param, which runs OpenCode's default agent — so
+                  the default agent's own row would only duplicate this label. */}
+              <option value="">{defaultAgentName(agents)}</option>
+              {agentChoices(agents).map((item) => (
+                <option key={item.id} value={item.id}>{item.name}</option>
               ))}
             </select>
             <button
@@ -1525,6 +1556,7 @@ export function DeskApp() {
           )}
         </div>
       </div>
+      {addProjectOpen && <AddProjectDialog onAdd={addProjectTo} onClose={closeAddProject} />}
     </div>
   );
 }
@@ -1543,6 +1575,153 @@ function applyTheme(appearance: string) {
 
 function SectionLabel({ children }: { children: string }) {
   return <p className="mt-3 mb-1 px-2.5 text-[11px] font-medium tracking-wide text-muted uppercase">{children}</p>;
+}
+
+/**
+ * Add project dialog: a real form instead of window.prompt (blocked in some
+ * contexts, and a repo anti-pattern). Server validation failures render next to
+ * the field that caused them, not in the desk's global error bar.
+ */
+function AddProjectDialog({
+  onAdd,
+  onClose,
+}: {
+  onAdd: (path: string, name?: string) => Promise<Project>;
+  onClose: (project: Project | null) => void;
+}) {
+  const [path, setPath] = useState("");
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  /** Read by the Escape listener, which must not re-subscribe on every keystroke. */
+  const pendingRef = useRef(false);
+  pendingRef.current = pending;
+  const input = useRef<HTMLInputElement>(null);
+
+  // Opened: the path is the only required field, so put the caret there.
+  useEffect(() => {
+    input.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      // While the controller is adding, Escape waits: that request cannot be
+      // aborted, and closing now would pop a project in after the user cancelled.
+      if (event.key === "Escape" && !pendingRef.current) {
+        event.preventDefault();
+        onClose(null);
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (pendingRef.current) return; // Enter twice must not add twice
+    const trimmed = path.trim();
+    if (!trimmed) {
+      setError("Enter the absolute path to a project folder.");
+      input.current?.focus();
+      return;
+    }
+    setPending(true);
+    setError(null);
+    try {
+      onClose(await onAdd(trimmed, name.trim() || undefined));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add that project");
+      setPending(false);
+      input.current?.focus();
+    }
+  }
+
+  /** Keep Tab inside the modal: aria-modal alone does not stop focus escaping. */
+  function trapFocus(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Tab") return;
+    const focusable = [
+      ...event.currentTarget.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+      ),
+    ];
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !pending) onClose(null);
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-project-title"
+        onKeyDown={trapFocus}
+        className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-2xl border border-border bg-elevated p-5 shadow-[var(--shadow-border-hover)]"
+      >
+        <h2 id="add-project-title" className="text-sm font-medium text-fg">Add project</h2>
+        <p id="add-project-hint" className="mt-1 text-xs text-muted">
+          Paddy works in a folder on this machine. Paste its absolute path.
+        </p>
+        <form className="mt-4 space-y-3" onSubmit={submit}>
+          <div>
+            <label htmlFor="add-project-path" className="text-[11px] font-medium tracking-wide text-muted uppercase">
+              Project folder
+            </label>
+            <Input
+              ref={input}
+              id="add-project-path"
+              value={path}
+              onChange={(event) => setPath(event.target.value)}
+              placeholder="/home/you/code/project"
+              aria-describedby={error ? "add-project-hint add-project-error" : "add-project-hint"}
+              aria-invalid={error ? true : undefined}
+              autoComplete="off"
+              spellCheck={false}
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <label htmlFor="add-project-name" className="text-[11px] font-medium tracking-wide text-muted uppercase">
+              Name <span className="normal-case text-subtle">(optional)</span>
+            </label>
+            <Input
+              id="add-project-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Defaults to the folder name"
+              autoComplete="off"
+              className="mt-1"
+            />
+          </div>
+          {error && (
+            <p id="add-project-error" role="alert" className="text-sm text-danger">
+              {error}
+            </p>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="outline" onClick={() => onClose(null)} disabled={pending}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={pending || !path.trim()}>
+              {pending ? "Adding…" : "Add project"}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 }
 
 function MessageView({ message }: { message: ChatMessage }) {
@@ -1751,9 +1930,4 @@ function groupByDate(sessions: SessionSummary[]): { label: string; items: Sessio
     groups.set(label, [...(groups.get(label) ?? []), session]);
   }
   return [...groups.entries()].map(([label, items]) => ({ label, items }));
-}
-
-function agentNames(payload: unknown): string[] {
-  if (!Array.isArray(payload)) return [];
-  return payload.map((item) => (item && typeof item === "object" && "name" in item ? String((item as { name?: string }).name ?? "") : "")).filter(Boolean);
 }
