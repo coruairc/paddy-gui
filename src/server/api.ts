@@ -4,6 +4,9 @@
  */
 
 import { OpenCodeError } from "./opencode-client.ts";
+import { readdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import {
   groupSessionsByDate,
   summarizeSession,
@@ -31,6 +34,7 @@ export async function handleApi(runtime: ControllerRuntime, request: Request): P
     if (request.method === "POST" && route === "/connect") return json(200, await runtime.connect());
     if (request.method === "POST" && route === "/disconnect") return json(200, await runtime.disconnect());
     if (request.method === "GET" && route === "/bootstrap") return json(200, await bootstrap(runtime));
+    if (request.method === "GET" && route === "/fs/dirs") return await listDirectories(request);
     if (request.method === "GET" && route === "/diagnostics") return json(200, diagnostics(runtime));
     if (request.method === "POST" && route === "/settings/reset") return await reset(runtime);
     if (request.method === "GET" && route === "/projects") return json(200, { projects: runtime.state.projects, activeProjectId: runtime.state.activeProjectId });
@@ -133,6 +137,39 @@ async function reset(runtime: ControllerRuntime): Promise<ApiResult> {
   runtime.state.deskModel = "";
   runtime.persist();
   return json(200, publicState(runtime.state));
+}
+
+/** Cap for the folder picker: a bounded payload even in a directory with thousands of entries. */
+const DIRECTORY_LIMIT = 500;
+
+/**
+ * Directory names for the Add project folder picker. Read-only, validated like
+ * adding a project (absolute, existing directory), and no allowlist: a project
+ * may live anywhere on the machine the user runs the controller on.
+ */
+async function listDirectories(request: Request): Promise<ApiResult> {
+  const requested = new URL(request.url).searchParams.get("path")?.trim() ?? "";
+  const checked = validateWorkspacePath(requested || homedir());
+  if (!checked.ok) return json(400, { error: checked.error });
+  let dirents;
+  try {
+    dirents = await readdir(checked.path, { withFileTypes: true });
+  } catch {
+    // EACCES/EPERM, or the directory vanished mid-listing: one message the user
+    // can act on instead of an errno the browser cannot do anything with.
+    return json(400, { error: "Cannot read that folder" });
+  }
+  const directories = dirents
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .map((entry) => ({ name: entry.name, path: join(checked.path, entry.name) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const parent = dirname(checked.path);
+  return json(200, {
+    path: checked.path,
+    parent: parent === checked.path ? null : parent,
+    entries: directories.slice(0, DIRECTORY_LIMIT),
+    truncated: directories.length > DIRECTORY_LIMIT,
+  });
 }
 
 async function addProject(runtime: ControllerRuntime, request: Request): Promise<ApiResult> {

@@ -1,6 +1,6 @@
-import { mkdtempSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { chmodSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handleApi } from "./api.ts";
@@ -897,4 +897,97 @@ test("diff route caps total patch text and keeps every file's row data", async (
     assert.equal(file.status, "added");
     assert.equal(file.truncated, true, file.file);
   }
+});
+
+// ── GET /api/fs/dirs (Add project folder picker) ───────────────────────────
+// Read-only directory names for the browser pane. Same validation as adding a
+// project: absolute, existing, absolute paths out; directories only.
+test("fs/dirs lists directories only, sorted, with parent and child paths", async () => {
+  const { runtime } = runtimeWithProject();
+  const root = mkdtempSync(join(tmpdir(), "ocw-dirs-"));
+  mkdirSync(join(root, "beta"));
+  mkdirSync(join(root, "Alpha"));
+  mkdirSync(join(root, ".hidden"));
+  writeFileSync(join(root, "notes.txt"), "x");
+  const result = await call(runtime, "GET", `/api/fs/dirs?path=${encodeURIComponent(root)}`);
+  assert.equal(result.status, 200);
+  const body = result.body as {
+    path: string;
+    parent: string | null;
+    entries: { name: string; path: string }[];
+    truncated: boolean;
+  };
+  assert.equal(body.path, realpathSync(root));
+  assert.equal(body.parent, dirname(realpathSync(root)));
+  assert.deepEqual(body.entries.map((entry) => entry.name), ["Alpha", "beta"]);
+  assert.equal(body.entries[0].path, join(realpathSync(root), "Alpha"));
+  assert.equal(body.truncated, false);
+});
+
+test("fs/dirs lists the controller home directory when no path is given", async () => {
+  const { runtime } = runtimeWithProject();
+  const result = await call(runtime, "GET", "/api/fs/dirs");
+  assert.equal(result.status, 200);
+  assert.equal((result.body as { path: string }).path, realpathSync(homedir()));
+});
+
+test("fs/dirs rejects relative, missing, and file paths", async () => {
+  const { runtime } = runtimeWithProject();
+  const root = mkdtempSync(join(tmpdir(), "ocw-dirs-"));
+  const file = join(root, "file.txt");
+  writeFileSync(file, "x");
+  const relative = await call(runtime, "GET", "/api/fs/dirs?path=relative");
+  assert.equal(relative.status, 400);
+  assert.equal((relative.body as { error: string }).error, "Workspace path must be absolute");
+  const missing = await call(runtime, "GET", `/api/fs/dirs?path=${encodeURIComponent(join(root, "nope"))}`);
+  assert.equal(missing.status, 400);
+  assert.equal((missing.body as { error: string }).error, "Workspace path does not exist");
+  const notDir = await call(runtime, "GET", `/api/fs/dirs?path=${encodeURIComponent(file)}`);
+  assert.equal(notDir.status, 400);
+  assert.equal((notDir.body as { error: string }).error, "Workspace path is not a directory");
+});
+
+test("fs/dirs caps the listing at 500 directories and flags truncation", async () => {
+  const { runtime } = runtimeWithProject();
+  const root = mkdtempSync(join(tmpdir(), "ocw-dirs-"));
+  try {
+    for (let i = 0; i < 501; i += 1) mkdirSync(join(root, `d${String(i).padStart(3, "0")}`));
+    const result = await call(runtime, "GET", `/api/fs/dirs?path=${encodeURIComponent(root)}`);
+    assert.equal(result.status, 200);
+    const body = result.body as { entries: unknown[]; truncated: boolean };
+    assert.equal(body.entries.length, 500);
+    assert.equal(body.truncated, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fs/dirs reports an unreadable directory without leaking the errno", async (t) => {
+  const { runtime } = runtimeWithProject();
+  const root = mkdtempSync(join(tmpdir(), "ocw-dirs-"));
+  const locked = join(root, "locked");
+  mkdirSync(locked);
+  try {
+    chmodSync(locked, 0o000);
+    if (process.getuid?.() === 0) {
+      t.skip("root can read any directory");
+      return;
+    }
+    const result = await call(runtime, "GET", `/api/fs/dirs?path=${encodeURIComponent(locked)}`);
+    assert.equal(result.status, 400);
+    assert.deepEqual(result.body, { error: "Cannot read that folder" });
+  } finally {
+    chmodSync(locked, 0o700);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fs/dirs reports no parent at the filesystem root", async () => {
+  const { runtime } = runtimeWithProject();
+  const result = await call(runtime, "GET", "/api/fs/dirs?path=/");
+  assert.equal(result.status, 200);
+  const body = result.body as { parent: string | null; path: string; truncated: boolean };
+  assert.equal(body.path, "/");
+  assert.equal(body.parent, null);
+  assert.equal(typeof body.truncated, "boolean");
 });

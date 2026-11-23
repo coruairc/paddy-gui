@@ -13,6 +13,20 @@ export type ConnectionStatus = {
 
 export type Project = { id: string; name: string; path: string; createdAt: number };
 
+/** One folder in the Add project picker. Directories only — the endpoint never lists files. */
+export type FsDirEntry = { name: string; path: string };
+
+/** `GET /api/fs/dirs`: a read-only directory listing for the folder picker. */
+export type FsDirListing = {
+  /** Canonical absolute path that was listed. */
+  path: string;
+  /** Absolute parent directory, or null at the filesystem root. */
+  parent: string | null;
+  entries: FsDirEntry[];
+  /** More than the server's cap of 500 folders: the list is the first 500 by name. */
+  truncated: boolean;
+};
+
 export type RuntimeModel = {
   id: string;
   name?: string;
@@ -169,6 +183,9 @@ export const api = {
     request<{ project: Project }>("/api/projects", { method: "POST", body: JSON.stringify({ path, name }) }),
   removeProject: (id: string) => request("/api/projects/" + encodeURIComponent(id), { method: "DELETE" }),
   selectProject: (id: string) => request("/api/projects/" + encodeURIComponent(id), { method: "POST" }),
+  /** Folder picker listing. No path = the controller's home directory. */
+  fsDirs: (path?: string) =>
+    request<FsDirListing>("/api/fs/dirs" + (path ? `?path=${encodeURIComponent(path)}` : "")),
   sessions: () => request<{ sessions: SessionSummary[]; groups: { label: string; items: SessionSummary[] }[]; archived: SessionSummary[] }>("/api/sessions"),
   createSession: () => request<{ session: SessionSummary }>("/api/sessions", { method: "POST", body: "{}" }),
   openSession: (id: string) =>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { ArrowDown, ArrowUp, FolderGit2, Plus, Search, Settings, Square } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpLeft, Archive, ChevronRight, Folder, FolderGit2, Pencil, Plus, RotateCcw, Search, Settings, Square } from "lucide-react";
 import { toast } from "sonner";
 import { HelixMark } from "@/components/helix-mark";
 import { Markdown } from "@/components/markdown";
@@ -57,6 +57,7 @@ import {
   type DeskCommand,
   type DeskEvent,
   type DeskModel,
+  type FsDirListing,
   type PermissionPrompt,
   type Project,
   type SessionSummary,
@@ -956,16 +957,62 @@ export function DeskApp() {
     setWorking(false);
   }
 
-  async function retry() {
-    if (!sessionId) return;
-    setWorking(true);
+  /** Per-row Retry: only the open chat owns the desk's "working" state. */
+  async function retrySession(id: string) {
     setError(null);
+    const open = id === sessionId;
+    if (open) setWorking(true);
     try {
-      await api.retry(sessionId);
+      await api.retry(id);
     } catch (err) {
-      setWorking(false);
-      setError(err instanceof Error ? err.message : "Could not retry");
+      if (open) setWorking(false);
+      toast.error(err instanceof Error ? err.message : "Could not retry that chat");
     }
+  }
+
+  /** Inline rename. False keeps the editor open so the typed title is not lost. */
+  async function renameChat(id: string, title: string): Promise<boolean> {
+    try {
+      await api.renameSession(id, title);
+      // `sessions` feeds both this row and the header title, so renaming the open
+      // chat updates the header too.
+      await refreshSessions();
+      return true;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not rename that chat");
+      return false;
+    }
+  }
+
+  /**
+   * Per-row Archive: archiveUndo keeps the Undo notice and its failure display.
+   * The open-chat teardown runs only when the archived chat is the one on screen.
+   */
+  function archiveChat(item: { id: string; title: string }) {
+    const archivedId = item.id;
+    const archivedTitle = item.title;
+    void archiveUndo.archive({ id: archivedId, title: archivedTitle }).then((notice) => {
+      focusUndoNext.current = true;
+      setArchiveFailure(null);
+      setArchiveNotice({ ...notice, projectId: activeProjectId });
+      forgetSession(browserStorage(), archivedId);
+      // A slow archive must not clear a chat the user picked in the meantime.
+      if (sessionRef.current === archivedId) {
+        resetCommandTurn();
+        cancelOpen(openTarget);
+        setSessionId(null);
+        setMessages([]);
+        setChanges(EMPTY_CHANGES);
+      }
+      return refreshSessions();
+    }).catch((err: unknown) => {
+      // The row action is explicit, so its failure belongs in the notice even if
+      // the open chat is a different one.
+      setArchiveFailure({
+        sessionId: archivedId,
+        text: `Could not archive “${archivedTitle}”: ${err instanceof Error ? err.message : "unknown error"}`,
+      });
+    });
   }
 
   async function reply(prompt: PermissionPrompt, decision: "once" | "always" | "reject", message?: string) {
@@ -1040,17 +1087,16 @@ export function DeskApp() {
               <div key={group.label} className="mt-1">
                 <p className="px-2.5 py-1 text-[11px] text-subtle">{group.label}</p>
                 {group.items.map((item) => (
-                  <button
+                  <SessionRow
                     key={item.id}
-                    type="button"
-                    onClick={() => void openSessionOrReport(item.id)}
-                    className={cn(
-                      "flex h-9 w-full items-center rounded-xl px-2.5 text-left text-sm transition-colors",
-                      item.id === sessionId && !settingsOpen ? "bg-elevated text-fg" : "text-muted hover:bg-surface hover:text-fg",
-                    )}
-                  >
-                    <span className="truncate">{item.title}</span>
-                  </button>
+                    item={item}
+                    active={item.id === sessionId && !settingsOpen}
+                    retrying={item.id === sessionId && working}
+                    onOpen={() => void openSessionOrReport(item.id)}
+                    onRetry={() => void retrySession(item.id)}
+                    onRename={(title) => renameChat(item.id, title)}
+                    onArchive={() => archiveChat(item)}
+                  />
                 ))}
               </div>
             ))}
@@ -1132,41 +1178,6 @@ export function DeskApp() {
                 <span className={cn("size-1.5 rounded-full", status?.connected ? "bg-ok pulse-live" : "bg-subtle")} />
                 {status?.connected ? "Live" : "Offline"}
               </span>
-              {active && !settingsOpen && (
-                <div className="hidden items-center gap-2 sm:flex">
-                  <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => void retry()} disabled={working}>Retry</button>
-                  <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => {
-                    const title = window.prompt("Rename chat", active.title);
-                    if (title?.trim()) void api.renameSession(active.id, title.trim()).then(() => refreshSessions());
-                  }}>Rename</button>
-                  <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => {
-                    const archivedId = active.id;
-                    const archivedTitle = active.title;
-                    void archiveUndo.archive({ id: archivedId, title: archivedTitle }).then((notice) => {
-                      focusUndoNext.current = true;
-                      setArchiveFailure(null);
-                      setArchiveNotice({ ...notice, projectId: activeProjectId });
-                      forgetSession(browserStorage(), archivedId);
-                      // A slow archive must not clear a chat the user picked in the meantime.
-                      if (sessionRef.current === archivedId) {
-                        resetCommandTurn();
-                        cancelOpen(openTarget);
-                        setSessionId(null);
-                        setMessages([]);
-                        setChanges(EMPTY_CHANGES);
-                      }
-                      return refreshSessions();
-                    }).catch((err: unknown) => {
-                      // Only the chat being archived shows the failure; the user may have moved on.
-                      if (sessionRef.current !== archivedId) return;
-                      setArchiveFailure({
-                        sessionId: archivedId,
-                        text: `Could not archive “${archivedTitle}”: ${err instanceof Error ? err.message : "unknown error"}`,
-                      });
-                    });
-                  }}>Archive</button>
-                </div>
-              )}
             </div>
           </header>
 
@@ -1583,6 +1594,153 @@ function SectionLabel({ children }: { children: string }) {
   return <p className="mt-3 mb-1 px-2.5 text-[11px] font-medium tracking-wide text-muted uppercase">{children}</p>;
 }
 
+const ROW_ACTION_CLASS =
+  "flex size-6 items-center justify-center rounded-md text-subtle transition-colors hover:bg-surface hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:opacity-40";
+
+/**
+ * One sidebar chat row. Retry / Rename / Archive live on the row (not in the
+ * header) so each action names the chat it acts on. The icons are reachable by
+ * keyboard, always visible on the active row and on touch, and revealed on
+ * hover/focus for the rest.
+ */
+function SessionRow({
+  item,
+  active,
+  retrying,
+  onOpen,
+  onRetry,
+  onRename,
+  onArchive,
+}: {
+  item: SessionSummary;
+  active: boolean;
+  retrying: boolean;
+  onOpen: () => void;
+  onRetry: () => void;
+  onRename: (title: string) => Promise<boolean>;
+  onArchive: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState("");
+  const [saving, setSaving] = useState(false);
+  /** Read in the blur handler: a save must not be cancelled by losing focus. */
+  const savingRef = useRef(false);
+  savingRef.current = saving;
+  const input = useRef<HTMLInputElement>(null);
+  const renameButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!editing) return;
+    input.current?.focus();
+    input.current?.select();
+  }, [editing]);
+
+  function startEditing() {
+    setValue(item.title);
+    setEditing(true);
+  }
+
+  /** Focus goes back to the Rename trigger only for explicit exits — a blur must not steal the click. */
+  function stopEditing(restoreFocus: boolean) {
+    setEditing(false);
+    if (restoreFocus) requestAnimationFrame(() => renameButton.current?.focus());
+  }
+
+  async function commit() {
+    if (savingRef.current) return;
+    const next = value.trim();
+    if (!next || next === item.title) {
+      stopEditing(true);
+      return;
+    }
+    savingRef.current = true;
+    setSaving(true);
+    const ok = await onRename(next);
+    savingRef.current = false;
+    setSaving(false);
+    if (!ok) {
+      input.current?.focus();
+      return;
+    }
+    stopEditing(true);
+  }
+
+  return (
+    <div
+      className={cn(
+        "group/session flex h-9 w-full items-center rounded-xl transition-colors",
+        active ? "bg-elevated text-fg" : "text-muted hover:bg-surface hover:text-fg",
+      )}
+    >
+      {editing ? (
+        <input
+          ref={input}
+          value={value}
+          disabled={saving}
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void commit();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              stopEditing(true);
+            }
+          }}
+          onBlur={() => {
+            if (!savingRef.current) stopEditing(false);
+          }}
+          aria-label={`Rename '${item.title}'`}
+          className="mx-1 h-7 min-w-0 flex-1 rounded-md border border-border bg-surface px-1.5 text-sm text-fg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        />
+      ) : (
+        <button type="button" onClick={onOpen} title={item.title} className="h-full min-w-0 flex-1 truncate px-2.5 text-left text-sm">
+          {item.title}
+        </button>
+      )}
+      <div
+        className={cn(
+          "flex shrink-0 items-center gap-0.5 pr-1.5 transition-opacity",
+          active ? "opacity-100" : "opacity-0 group-hover/session:opacity-100 group-focus-within/session:opacity-100 [@media(pointer:coarse)]:opacity-100",
+        )}
+      >
+        <button
+          type="button"
+          aria-label={`Retry '${item.title}'`}
+          title="Retry"
+          onClick={onRetry}
+          disabled={retrying}
+          className={ROW_ACTION_CLASS}
+        >
+          <RotateCcw className="size-3.5" />
+        </button>
+        <button
+          ref={renameButton}
+          type="button"
+          aria-label={`Rename '${item.title}'`}
+          title="Rename"
+          onClick={startEditing}
+          disabled={saving}
+          className={ROW_ACTION_CLASS}
+        >
+          <Pencil className="size-3.5" />
+        </button>
+        <button
+          type="button"
+          aria-label={`Archive '${item.title}'`}
+          title="Archive"
+          onClick={onArchive}
+          disabled={saving}
+          className={ROW_ACTION_CLASS}
+        >
+          <Archive className="size-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Add project dialog: a real form instead of window.prompt (blocked in some
  * contexts, and a repo anti-pattern). Server validation failures render next to
@@ -1603,11 +1761,40 @@ function AddProjectDialog({
   const pendingRef = useRef(false);
   pendingRef.current = pending;
   const input = useRef<HTMLInputElement>(null);
+  /** Folder pane: `browsePath` is the folder being requested; `listing` is the last good answer. */
+  const [browsePath, setBrowsePath] = useState<string | null>(null);
+  const [listing, setListing] = useState<FsDirListing | null>(null);
+  const [listingError, setListingError] = useState<string | null>(null);
+  const [listingLoading, setListingLoading] = useState(true);
+  const [listingReload, setListingReload] = useState(0);
 
   // Opened: the path is the only required field, so put the caret there.
   useEffect(() => {
     input.current?.focus();
   }, []);
+
+  // One listing at a time; a slow answer for a folder the user already left is
+  // dropped rather than overwriting the current one.
+  useEffect(() => {
+    let cancelled = false;
+    setListingLoading(true);
+    setListingError(null);
+    api
+      .fsDirs(browsePath ?? undefined)
+      .then((data) => {
+        if (cancelled) return;
+        setListing(data);
+        setListingLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setListingError(err instanceof Error ? err.message : "Could not list that folder");
+        setListingLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [browsePath, listingReload]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -1678,9 +1865,96 @@ function AddProjectDialog({
       >
         <h2 id="add-project-title" className="text-sm font-medium text-fg">Add project</h2>
         <p id="add-project-hint" className="mt-1 text-xs text-muted">
-          Paddy works in a folder on this machine. Paste its absolute path.
+          Paddy works in a folder on this machine. Browse below, or paste its absolute path.
         </p>
-        <form className="mt-4 space-y-3" onSubmit={submit}>
+
+        {/* The finder: one focus-trapped surface with the form, above the path
+            input so browsing and typing are the same decision. */}
+        <section aria-label="Folders" className="mt-4 overflow-hidden rounded-xl border border-border bg-surface">
+          <div className="flex items-center gap-1 border-b border-border px-1.5 py-1">
+            <button
+              type="button"
+              aria-label="Parent folder"
+              title="Parent folder"
+              onClick={() => listing?.parent && setBrowsePath(listing.parent)}
+              disabled={listingLoading || Boolean(listingError) || !listing?.parent}
+              className="flex size-6 shrink-0 items-center justify-center rounded-md text-subtle hover:bg-elevated hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:opacity-40"
+            >
+              <ArrowUpLeft className="size-3.5" />
+            </button>
+            <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted" title={browsePath ?? listing?.path ?? "Home"}>
+              {browsePath ?? listing?.path ?? "Home"}
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                if (!listing) return;
+                setPath(listing.path);
+                setError(null);
+                input.current?.focus();
+              }}
+              disabled={listingLoading || Boolean(listingError) || !listing}
+            >
+              Use this folder
+            </Button>
+          </div>
+          <div className="scrollbar-thin max-h-52 min-h-24 overflow-y-auto overscroll-contain p-1">
+            {listingLoading ? (
+              <p role="status" className="px-2 py-3 text-xs text-muted">
+                Loading folders…
+              </p>
+            ) : listingError ? (
+              <div className="px-2 py-3 text-xs">
+                <p role="alert" className="text-danger">
+                  {listingError}
+                </p>
+                <div className="mt-1 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setListingReload((value) => value + 1)}
+                    className="text-muted underline hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                  >
+                    Try again
+                  </button>
+                  {/* An unreadable subfolder must not trap the browse: the last
+                      folder we successfully listed is one level up. */}
+                  {listing && (
+                    <button
+                      type="button"
+                      onClick={() => setBrowsePath(listing.path)}
+                      className="text-muted underline hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                    >
+                      Back
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : !listing || listing.entries.length === 0 ? (
+              <p className="px-2 py-3 text-xs text-subtle">No subfolders.</p>
+            ) : (
+              listing.entries.map((entry) => (
+                <button
+                  key={entry.path}
+                  type="button"
+                  onClick={() => setBrowsePath(entry.path)}
+                  title={entry.name}
+                  className="flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left text-xs text-muted hover:bg-elevated hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                >
+                  <Folder className="size-3.5 shrink-0 text-subtle" aria-hidden />
+                  <span className="truncate">{entry.name}</span>
+                  <ChevronRight className="ml-auto size-3 shrink-0 opacity-50" aria-hidden />
+                </button>
+              ))
+            )}
+          </div>
+          {listing?.truncated && (
+            <p className="border-t border-border px-2 py-1 text-[10px] text-warn">Showing the first 500 folders.</p>
+          )}
+        </section>
+
+        <form className="mt-3 space-y-3" onSubmit={submit}>
           <div>
             <label htmlFor="add-project-path" className="text-[11px] font-medium tracking-wide text-muted uppercase">
               Project folder
