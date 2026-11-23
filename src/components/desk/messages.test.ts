@@ -9,6 +9,7 @@ import {
   mergeMessage,
   mergeMessages,
   replacePendingEcho,
+  retryableUserId,
   settlePendingEcho,
   settleWorkingAfterCatchUp,
   upsertActivity,
@@ -436,4 +437,31 @@ test("stop clears a pending recreation on unmount", () => {
   clock.advance(60_000);
   assert.equal(retries, 0);
   assert.equal(scheduler.retrying(), false);
+});
+
+// The prompt Retry/Edit act on: the newest user message, unless it is a local
+// pending echo (nothing on the server to resend or rewrite).
+test("retryableUserId returns the newest settled user message", () => {
+  assert.equal(retryableUserId([]), null);
+  assert.equal(retryableUserId([msg({ id: "a1", role: "assistant" })]), null);
+  assert.equal(
+    retryableUserId([
+      msg({ id: "u1", role: "user", text: "first" }),
+      msg({ id: "a1", role: "assistant" }),
+      msg({ id: "u2", role: "user", text: "second" }),
+      msg({ id: "a2", role: "assistant" }),
+    ]),
+    "u2",
+  );
+});
+
+test("retryableUserId ignores pending echoes and system notes", () => {
+  assert.equal(
+    retryableUserId([
+      msg({ id: "u1", role: "user", text: "sent" }),
+      msg({ id: "u2", role: "user", text: "still sending", pending: true }),
+    ]),
+    null,
+  );
+  assert.equal(retryableUserId([msg({ id: "s1", role: "system", text: "note" })]), null);
 });

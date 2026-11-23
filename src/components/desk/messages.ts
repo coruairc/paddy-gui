@@ -174,6 +174,20 @@ export function dropPendingBubbles(list: ChatMessage[]): ChatMessage[] {
   return list.some((item) => item.pending) ? list.filter((item) => !item.pending) : list;
 }
 
+/**
+ * The prompt Retry/Edit may act on: the newest user message, as long as it is
+ * not a pending echo — a local, unsent bubble has nothing server-side to resend
+ * or rewrite. There is no older-message editing: OpenCode sessions are linear.
+ */
+export function retryableUserId(list: ChatMessage[]): string | null {
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    const message = list[index];
+    if (message.role !== "user") continue;
+    return message.pending ? null : message.id;
+  }
+  return null;
+}
+
 export type CommandEchoRefs = { pending: string | null; settled: string | null };
 
 /**

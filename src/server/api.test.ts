@@ -991,3 +991,88 @@ test("fs/dirs reports no parent at the filesystem root", async () => {
   assert.equal(body.parent, null);
   assert.equal(typeof body.truncated, "boolean");
 });
+
+// ── POST /api/sessions/:id/edit (bubble Edit, revert-based) ────────────────
+// Rewrite the newest prompt: stage a revert boundary at that message, commit it
+// (commit drops the prompt and its reply from the transcript), then send the new
+// text. A failed revert must not send: the old prompt would be duplicated.
+function revertClient(
+  seed: Array<Record<string, unknown>>,
+  options: { failStage?: boolean; failCommit?: boolean } = {},
+) {
+  const calls: string[] = [];
+  return {
+    calls,
+    client: {
+      listMessages: async () => seed,
+      stageRevert: async (_directory: string, _sessionId: string, messageId: string) => {
+        if (options.failStage) throw new OpenCodeError(409, "Session is busy");
+        calls.push(`stage:${messageId}`);
+      },
+      commitRevert: async () => {
+        if (options.failCommit) throw new OpenCodeError(500, "commit failed");
+        calls.push("commit");
+      },
+      clearRevert: async () => {
+        calls.push("clear");
+      },
+      deleteMessage: async (_directory: string, _sessionId: string, messageId: string) => {
+        calls.push(`delete:${messageId}`);
+      },
+      sendMessage: async (_directory: string, _sessionId: string, input: { text: string }) => {
+        calls.push(`send:${input.text}`);
+      },
+    },
+  };
+}
+
+const EDIT_SEED = [
+  { id: "msg_1", type: "user", time: { created: 1 }, text: "First prompt" },
+  { id: "msg_2", type: "assistant", time: { created: 2 }, text: "First reply" },
+  { id: "msg_3", type: "user", time: { created: 3 }, text: "Original prompt" },
+  { id: "msg_4", type: "assistant", time: { created: 4 }, text: "Old reply" },
+];
+
+test("edit reverts to the last prompt, commits, then sends the new text", async () => {
+  const { runtime } = runtimeWithProject();
+  const spy = revertClient(EDIT_SEED);
+  runtime.client = { ...(runtime.client as object), ...spy.client } as unknown as ControllerRuntime["client"];
+  const result = await call(runtime, "POST", "/api/sessions/ses_1/edit", { text: "  Edited prompt  " });
+  assert.equal(result.status, 202);
+  assert.deepEqual(result.body, { ok: true });
+  assert.deepEqual(spy.calls, ["stage:msg_3", "commit", "send:Edited prompt"]);
+});
+
+test("edit refuses to send when staging the revert fails, and clears the stage", async () => {
+  const { runtime } = runtimeWithProject();
+  const spy = revertClient(EDIT_SEED, { failStage: true });
+  runtime.client = { ...(runtime.client as object), ...spy.client } as unknown as ControllerRuntime["client"];
+  const result = await call(runtime, "POST", "/api/sessions/ses_1/edit", { text: "Edited prompt" });
+  assert.equal(result.status, 503);
+  assert.equal((result.body as { error: string }).error, "Session is busy");
+  assert.deepEqual(spy.calls, ["clear"]);
+});
+
+test("edit refuses to send when committing the revert fails", async () => {
+  const { runtime } = runtimeWithProject();
+  const spy = revertClient(EDIT_SEED, { failCommit: true });
+  runtime.client = { ...(runtime.client as object), ...spy.client } as unknown as ControllerRuntime["client"];
+  const result = await call(runtime, "POST", "/api/sessions/ses_1/edit", { text: "Edited prompt" });
+  assert.equal(result.status, 503);
+  assert.equal((result.body as { error: string }).error, "commit failed");
+  assert.deepEqual(spy.calls, ["stage:msg_3", "clear"]);
+});
+
+test("edit rejects empty text and a session with no prompt", async () => {
+  const { runtime } = runtimeWithProject();
+  const empty = await call(runtime, "POST", "/api/sessions/ses_1/edit", { text: "   " });
+  assert.equal(empty.status, 400);
+  assert.equal((empty.body as { error: string }).error, "Message text is required");
+
+  const spy = revertClient([{ id: "msg_9", type: "assistant", time: { created: 9 }, text: "Reply only" }]);
+  runtime.client = { ...(runtime.client as object), ...spy.client } as unknown as ControllerRuntime["client"];
+  const none = await call(runtime, "POST", "/api/sessions/ses_1/edit", { text: "Edited prompt" });
+  assert.equal(none.status, 400);
+  assert.equal((none.body as { error: string }).error, "Nothing to edit");
+  assert.deepEqual(spy.calls, []);
+});

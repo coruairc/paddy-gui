@@ -204,6 +204,9 @@ export const api = {
     }),
   abort: (id: string) => request("/api/sessions/" + encodeURIComponent(id) + "/abort", { method: "POST" }),
   retry: (id: string) => request("/api/sessions/" + encodeURIComponent(id) + "/retry", { method: "POST" }),
+  /** Rewrite the newest prompt (the server drops its reply and the prompt first). */
+  editMessage: (id: string, text: string) =>
+    request("/api/sessions/" + encodeURIComponent(id) + "/edit", { method: "POST", body: JSON.stringify({ text }) }),
   /** One turn's changes: `from` is the user message that opened it; omitted = newest turn. */
   diff: (id: string, from?: string) =>
     request<{ files: DiffFile[] }>(

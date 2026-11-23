@@ -294,6 +294,7 @@ async function sessionRoute(runtime: ControllerRuntime, request: Request, id: st
     return json(200, { ok: true });
   }
   if (rest === "retry" && request.method === "POST") return retry(runtime, project.path, id);
+  if (rest === "edit" && request.method === "POST") return editPrompt(runtime, project.path, id, request);
   if (rest === "diff" && request.method === "GET") {
     const range = diffRange(new URL(request.url).searchParams);
     if (!range.ok) return json(400, { error: range.error });
@@ -336,6 +337,39 @@ async function retry(runtime: ControllerRuntime, directory: string, id: string):
   }
   await client.sendMessage(directory, id, { text: lastUser.text });
   return json(202, { ok: true, text: lastUser.text });
+}
+
+/**
+ * Rewrite the newest prompt. OpenCode v2.3.2 has no message-delete route, so the
+ * edit stages a revert boundary at that prompt and commits it (commit drops the
+ * prompt and everything after it from the session), then sends the new text. A
+ * failed revert sends nothing: the old prompt would otherwise be duplicated.
+ * The retry route keeps its own (best-effort) deleteMessage call.
+ */
+async function editPrompt(
+  runtime: ControllerRuntime,
+  directory: string,
+  id: string,
+  request: Request,
+): Promise<ApiResult> {
+  const body = await readBody(request);
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  if (!text) return json(400, { error: "Message text is required" });
+  const client = runtime.requireClient();
+  const messages = toChatMessages(await client.listMessages(directory, id));
+  const lastUser = [...messages].reverse().find((item) => item.role === "user" && item.text);
+  if (!lastUser) return json(400, { error: "Nothing to edit" });
+  try {
+    await client.stageRevert(directory, id, lastUser.id);
+    await client.commitRevert(directory, id);
+  } catch (err) {
+    // A stage without a commit would leave a boundary armed for a later commit:
+    // clear it (best effort) before reporting the failure.
+    await client.clearRevert(directory, id).catch(() => undefined);
+    return json(503, { error: err instanceof Error ? err.message : "Could not edit that message" });
+  }
+  await client.sendMessage(directory, id, { text });
+  return json(202, { ok: true });
 }
 
 async function listModels(runtime: ControllerRuntime): Promise<ApiResult> {

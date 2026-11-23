@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { ArrowDown, ArrowUp, ArrowUpLeft, Archive, ChevronRight, Folder, FolderGit2, Pencil, Plus, RotateCcw, Search, Settings, Square } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpLeft, Archive, Check, ChevronRight, Copy, Folder, FolderGit2, Pencil, Plus, RotateCcw, Search, Settings, Square, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { HelixMark } from "@/components/helix-mark";
 import { Markdown } from "@/components/markdown";
@@ -43,6 +43,7 @@ import {
   mergeMessage,
   mergeMessages,
   replacePendingEcho,
+  retryableUserId,
   settlePendingEcho,
   settleWorkingAfterCatchUp,
   upsertActivity,
@@ -505,6 +506,8 @@ export function DeskApp() {
     }).kind !== "go";
   const liveActivity = messages.flatMap((message) => message.activity).slice(-8);
   const turns = useMemo(() => turnFiles(messages), [messages]);
+  /** The one prompt whose bubble carries Retry/Edit (see retryableUserId). */
+  const retryableId = retryableUserId(messages);
   // Footer count from snapshot data in the chat: current even while the Changes tab is hidden.
   const latestFileCount = useMemo(() => latestTurnFiles(messages, turns).length, [messages, turns]);
   const catalogLoaded = catalog !== null;
@@ -958,17 +961,69 @@ export function DeskApp() {
     setWorking(false);
   }
 
-  /** Per-row Retry: only the open chat owns the desk's "working" state. */
-  async function retrySession(id: string) {
+  /** Bubble Retry: resend the open chat's newest prompt (the old reply is regenerated). */
+  async function retryOpenChat() {
+    if (!sessionId || working) return;
     setError(null);
-    const open = id === sessionId;
-    if (open) setWorking(true);
+    setWorking(true);
     try {
-      await api.retry(id);
+      await api.retry(sessionId);
     } catch (err) {
-      if (open) setWorking(false);
-      toast.error(err instanceof Error ? err.message : "Could not retry that chat");
+      setWorking(false);
+      toast.error(err instanceof Error ? err.message : "Could not resend that message");
     }
+  }
+
+  /**
+   * Bubble Edit: the controller rewrites the newest prompt (drops it and its
+   * reply, then sends the new text). Refetching is the honest way to settle the
+   * transcript — the server's linear history is the truth, and live deltas for
+   * the new reply keep merging by message id.
+   */
+  async function editLastPrompt(text: string): Promise<boolean> {
+    if (!sessionId || working) return false;
+    setError(null);
+    setWorking(true);
+    try {
+      await api.editMessage(sessionId, text);
+    } catch (err) {
+      setWorking(false);
+      toast.error(err instanceof Error ? err.message : "Could not edit that message");
+      return false;
+    }
+    await openSessionOrReport(sessionId);
+    requestAnimationFrame(() => composer.current?.focus());
+    return true;
+  }
+
+  /**
+   * Row Delete (no undo; the row asks twice). The SSE session-deleted branch is
+   * the normal teardown driver; the open-chat part is mirrored here so the desk
+   * is correct even if that event is missed — both paths are idempotent.
+   */
+  async function deleteChat(item: { id: string; title: string }): Promise<boolean> {
+    try {
+      await api.deleteSession(item.id);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not delete that chat");
+      return false;
+    }
+    setSessions((current) => current.filter((row) => row.id !== item.id));
+    forgetSession(browserStorage(), item.id);
+    archiveUndo.forget(item.id);
+    if (sessionRef.current === item.id) {
+      cancelOpen(openTarget);
+      setSessionId(null);
+      setMessages([]);
+      setChanges(EMPTY_CHANGES);
+      setWorking(false);
+    }
+    try {
+      await refreshSessions();
+    } catch {
+      /* the session-deleted event removes it anyway */
+    }
+    return true;
   }
 
   /** Inline rename. False keeps the editor open so the typed title is not lost. */
@@ -1092,11 +1147,10 @@ export function DeskApp() {
                     key={item.id}
                     item={item}
                     active={item.id === sessionId && !settingsOpen}
-                    retrying={item.id === sessionId && working}
                     onOpen={() => void openSessionOrReport(item.id)}
-                    onRetry={() => void retrySession(item.id)}
                     onRename={(title) => renameChat(item.id, title)}
                     onArchive={() => archiveChat(item)}
+                    onDelete={() => deleteChat(item)}
                   />
                 ))}
               </div>
@@ -1215,7 +1269,13 @@ export function DeskApp() {
                         const expandKey = sessionId ? turnStateKey(sessionId, turnKey) : "";
                         return (
                           <div key={message.id}>
-                            <MessageView message={message} />
+                            <MessageView
+                              message={message}
+                              retryable={message.id === retryableId && !working}
+                              busy={working}
+                              onRetry={() => void retryOpenChat()}
+                              onEdit={editLastPrompt}
+                            />
                             {turn && sessionId && (
                               <div className="pl-10">
                                 <FilesChangedBlock
@@ -1600,19 +1660,17 @@ const ROW_ACTION_CLASS =
 function SessionRow({
   item,
   active,
-  retrying,
   onOpen,
-  onRetry,
   onRename,
   onArchive,
+  onDelete,
 }: {
   item: SessionSummary;
   active: boolean;
-  retrying: boolean;
   onOpen: () => void;
-  onRetry: () => void;
   onRename: (title: string) => Promise<boolean>;
   onArchive: () => void;
+  onDelete: () => Promise<boolean>;
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState("");
@@ -1622,6 +1680,56 @@ function SessionRow({
   savingRef.current = saving;
   const input = useRef<HTMLInputElement>(null);
   const renameButton = useRef<HTMLButtonElement>(null);
+  /** Delete is destructive and has no undo, so it takes a second click. */
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const confirmTimer = useRef<number | null>(null);
+  const deleteButton = useRef<HTMLButtonElement>(null);
+
+  const resetDelete = useCallback((returnFocus: boolean) => {
+    if (confirmTimer.current) window.clearTimeout(confirmTimer.current);
+    confirmTimer.current = null;
+    setConfirmingDelete(false);
+    if (returnFocus) requestAnimationFrame(() => deleteButton.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    if (!confirmingDelete) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        resetDelete(true);
+      }
+    }
+    /** Click-away (or another row) abandons the confirm; the second click is inside the button. */
+    function onPointerDown(event: PointerEvent) {
+      if (!deleteButton.current?.contains(event.target as Node)) resetDelete(false);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [confirmingDelete, resetDelete]);
+
+  // The first click swaps the button; carry focus to the confirm so Enter/Space
+  // finish it and a blur can abandon it.
+  useEffect(() => {
+    if (confirmingDelete) deleteButton.current?.focus();
+  }, [confirmingDelete]);
+
+  useEffect(
+    () => () => {
+      if (confirmTimer.current) window.clearTimeout(confirmTimer.current);
+    },
+    [],
+  );
+
+  function askDelete() {
+    setConfirmingDelete(true);
+    if (confirmTimer.current) window.clearTimeout(confirmTimer.current);
+    confirmTimer.current = window.setTimeout(() => setConfirmingDelete(false), 4000);
+  }
 
   useEffect(() => {
     if (!editing) return;
@@ -1700,16 +1808,6 @@ function SessionRow({
         )}
       >
         <button
-          type="button"
-          aria-label={`Retry '${item.title}'`}
-          title="Retry"
-          onClick={onRetry}
-          disabled={retrying}
-          className={ROW_ACTION_CLASS}
-        >
-          <RotateCcw className="size-3.5" />
-        </button>
-        <button
           ref={renameButton}
           type="button"
           aria-label={`Rename '${item.title}'`}
@@ -1730,6 +1828,34 @@ function SessionRow({
         >
           <Archive className="size-3.5" />
         </button>
+        {confirmingDelete ? (
+          <button
+            ref={deleteButton}
+            type="button"
+            aria-label={`Confirm delete '${item.title}'`}
+            onBlur={() => resetDelete(false)}
+            onClick={() => {
+              resetDelete(false);
+              void onDelete();
+            }}
+            className="flex h-6 shrink-0 items-center rounded-md bg-danger/15 px-1.5 text-[11px] font-medium text-danger hover:bg-danger/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+          >
+            Delete?
+          </button>
+        ) : (
+          <button
+            ref={deleteButton}
+            type="button"
+            aria-label={`Delete '${item.title}'`}
+            title="Delete"
+            onClick={askDelete}
+            onBlur={() => resetDelete(false)}
+            disabled={saving}
+            className={ROW_ACTION_CLASS}
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        )}
       </div>
     </div>
   );
@@ -1998,29 +2124,186 @@ function AddProjectDialog({
   );
 }
 
-function MessageView({ message }: { message: ChatMessage }) {
+const BUBBLE_ACTION_CLASS =
+  "pointer-events-auto flex size-6 items-center justify-center rounded-md text-subtle transition-colors hover:bg-elevated hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:opacity-40";
+
+/** Overlay row under a bubble: no bubble width/height shift when it appears. */
+const BUBBLE_ACTIONS_CLASS =
+  "pointer-events-none absolute top-full z-10 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 [@media(pointer:coarse)]:opacity-100";
+
+function MessageView({
+  message,
+  retryable,
+  busy,
+  onRetry,
+  onEdit,
+}: {
+  message: ChatMessage;
+  /** This is the open chat's newest settled prompt: Retry/Edit are allowed. */
+  retryable: boolean;
+  busy: boolean;
+  onRetry: () => void;
+  onEdit: (text: string) => Promise<boolean>;
+}) {
   const [open, setOpen] = useState(message.activity.some((item) => item.status === "running"));
   const preview = activityPreview(message.activity);
+  const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<number | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const editInput = useRef<HTMLTextAreaElement>(null);
+  const editButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(
+    () => () => {
+      if (copiedTimer.current) window.clearTimeout(copiedTimer.current);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!editing) return;
+    editInput.current?.focus();
+    editInput.current?.select();
+  }, [editing]);
+
+  // A failed save disables the textarea while the request runs, which drops
+  // focus to <body>; when it re-enables, put the caret back so Escape works.
+  useEffect(() => {
+    if (!editing || saving) return;
+    editInput.current?.focus();
+  }, [editing, saving]);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(message.text);
+      setCopied(true);
+      if (copiedTimer.current) window.clearTimeout(copiedTimer.current);
+      copiedTimer.current = window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Could not copy the message");
+    }
+  }
+
+  function startEdit() {
+    setDraft(message.text);
+    setEditing(true);
+  }
+
+  function stopEdit(restoreFocus: boolean) {
+    setEditing(false);
+    if (restoreFocus) requestAnimationFrame(() => editButton.current?.focus());
+  }
+
+  async function commitEdit() {
+    if (saving) return;
+    const text = draft.trim();
+    if (!text || text === message.text) {
+      stopEdit(true);
+      return;
+    }
+    setSaving(true);
+    const ok = await onEdit(text);
+    setSaving(false);
+    if (!ok) {
+      editInput.current?.focus();
+      return;
+    }
+    setEditing(false);
+  }
+
+  /** Copy on every bubble; Retry/Edit only on the prompt the controller can rewrite. */
+  function actions(align: "left" | "right") {
+    return (
+      <div className={cn(BUBBLE_ACTIONS_CLASS, align === "right" ? "right-0" : "left-0")}>
+        {retryable && (
+          <>
+            <button
+              type="button"
+              aria-label="Resend last message"
+              title="Resend last message"
+              onClick={onRetry}
+              disabled={busy}
+              className={BUBBLE_ACTION_CLASS}
+            >
+              <RotateCcw className="size-3.5" />
+            </button>
+            <button
+              ref={editButton}
+              type="button"
+              aria-label="Edit message"
+              title="Edit last message"
+              onClick={startEdit}
+              disabled={busy}
+              className={BUBBLE_ACTION_CLASS}
+            >
+              <Pencil className="size-3.5" />
+            </button>
+          </>
+        )}
+        <button
+          type="button"
+          aria-label="Copy message"
+          title="Copy message"
+          onClick={() => void copy()}
+          className={BUBBLE_ACTION_CLASS}
+        >
+          {copied ? <Check className="size-3.5 text-ok" /> : <Copy className="size-3.5" />}
+        </button>
+      </div>
+    );
+  }
+
   if (message.role === "system") {
     return <p className="text-xs text-muted">{message.text}</p>;
   }
   if (message.role === "user") {
     return (
-      <article className="rise-in" data-command-echo={message.pending && message.text.startsWith("/") ? "true" : undefined}>
+      <article className="group/msg rise-in" data-command-echo={message.pending && message.text.startsWith("/") ? "true" : undefined}>
         <div className="flex justify-end">
-          <div className="max-w-[min(100%,36rem)] rounded-2xl rounded-br-md bg-bubble px-4 py-3 selection:bg-black/30 selection:text-bubble-fg shadow-[var(--shadow-border)]">
-            <p className="text-sm leading-relaxed text-bubble-fg">{message.text}</p>
+          <div className="relative max-w-[min(100%,36rem)] rounded-2xl rounded-br-md bg-bubble px-4 py-3 text-bubble-fg selection:bg-black/30 selection:text-bubble-fg shadow-[var(--shadow-border)]">
+            {editing ? (
+              <textarea
+                ref={editInput}
+                value={draft}
+                rows={Math.min(8, Math.max(2, draft.split("\n").length))}
+                cols={40}
+                disabled={saving}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    void commitEdit();
+                  } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    stopEdit(true);
+                  }
+                }}
+                onBlur={() => {
+                  // Clicking away abandons the draft; a save keeps the editor put.
+                  if (!saving) stopEdit(false);
+                }}
+                aria-label="Edit last message"
+                className="block max-h-60 w-full min-w-0 resize-none bg-transparent text-sm leading-relaxed text-bubble-fg focus:outline-none"
+              />
+            ) : (
+              <p className="text-sm leading-relaxed text-bubble-fg">{message.text}</p>
+            )}
             <div className="mt-1.5 flex items-center justify-end gap-1.5">
+              {editing && <span className="mr-auto text-[10px] text-bubble-muted">Enter saves · Esc cancels</span>}
               {message.pending && <span className={cn("size-1.5 rounded-full bg-bubble-fg pulse-live")} style={{ opacity: 0.7 }} />}
               <p className="text-right text-[11px] text-bubble-muted tabular-nums">{formatTime(message.created)}</p>
             </div>
+            {actions("right")}
           </div>
         </div>
       </article>
     );
   }
   return (
-    <article className="rise-in">
+    <article className="group/msg rise-in">
       <div className="flex gap-3">
         <HelixMark className="mt-1 size-7 shrink-0 text-accent" />
         <div className="min-w-0 flex-1">
@@ -2049,9 +2332,10 @@ function MessageView({ message }: { message: ChatMessage }) {
           {message.text || message.error ? (
             // Chat bubble for assistant replies: hugs short text, caps long text,
             // and mirrors the user bubble's corner treatment from the other side.
-            <div className="w-fit max-w-[min(100%,36rem)] break-words rounded-2xl rounded-bl-md bg-reply-bubble px-4 py-3 text-reply-bubble-fg selection:bg-black/30 selection:text-reply-bubble-fg shadow-[var(--shadow-border)]">
+            <div className="relative w-fit max-w-[min(100%,36rem)] break-words rounded-2xl rounded-bl-md bg-reply-bubble px-4 py-3 text-reply-bubble-fg selection:bg-black/30 selection:text-reply-bubble-fg shadow-[var(--shadow-border)]">
               {message.text ? <Markdown text={message.text} /> : null}
               {message.error && <p className="mt-2 text-sm text-danger">{message.error}</p>}
+              {actions("left")}
             </div>
           ) : null}
         </div>

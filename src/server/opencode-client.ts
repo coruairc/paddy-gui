@@ -292,6 +292,28 @@ export class OpenCodeClient {
   }
 
   /**
+   * v2 session revert (`POST /api/session/:id/revert/stage`, body `{ messageID }`).
+   * Staging marks the reversible boundary at that message; committing it is what
+   * drops the transcript from that message onward. `files` is omitted on purpose:
+   * editing a prompt rewinds the conversation, not the working tree.
+   */
+  async stageRevert(_directory: string, sessionId: string, messageId: string): Promise<void> {
+    await this.request("POST", `/api/session/${encodeURIComponent(sessionId)}/revert/stage`, {
+      body: { messageID: messageId },
+    });
+  }
+
+  /** Commit the staged revert (`POST …/revert/commit`, 204): the boundary becomes permanent. */
+  async commitRevert(_directory: string, sessionId: string): Promise<void> {
+    await this.request("POST", `/api/session/${encodeURIComponent(sessionId)}/revert/commit`);
+  }
+
+  /** Drop a staged revert without applying it (`DELETE …/revert`, 204); cleanup for a failed edit. */
+  async clearRevert(_directory: string, sessionId: string): Promise<void> {
+    await this.request("DELETE", `/api/session/${encodeURIComponent(sessionId)}/revert`);
+  }
+
+  /**
    * v2 `GET /api/session/:id/diff` → `{ data: FileDiff.Info[] }` (file, patch,
    * additions, deletions, status, optional more). Per turn: `from` is the user
    * message whose turn to diff, `to` extends through a later turn.
