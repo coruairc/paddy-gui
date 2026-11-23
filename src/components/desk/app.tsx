@@ -1023,8 +1023,13 @@ export function DeskApp() {
                 <span className="truncate">{item.name}</span>
               </button>
             ))}
-            <button type="button" onClick={(event) => void addProject(event.currentTarget)} className="mt-0.5 px-2.5 py-1 text-left text-xs text-muted hover:text-fg">
-              Add project
+            <button
+              type="button"
+              onClick={(event) => void addProject(event.currentTarget)}
+              className="flex h-10 w-full items-center gap-2.5 rounded-xl px-2.5 text-left text-sm text-muted transition-colors hover:bg-surface hover:text-fg"
+            >
+              <Plus className="size-4 shrink-0" />
+              <span className="truncate">Add project</span>
             </button>
             <div className="relative mt-2 px-1">
               <Search className="pointer-events-none absolute top-2.5 left-3 size-3.5 text-subtle" />
