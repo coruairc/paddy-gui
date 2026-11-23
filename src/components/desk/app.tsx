@@ -999,7 +999,7 @@ export function DeskApp() {
               <p className="truncate text-xs text-muted">Irishman</p>
             </div>
           </div>
-          <div className="scrollbar-thin flex min-h-0 flex-1 flex-col overflow-y-auto p-2">
+          <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-2">
             <button
               type="button"
               onClick={(event) => void newChat(event.currentTarget)}
