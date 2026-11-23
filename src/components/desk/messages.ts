@@ -52,6 +52,81 @@ export function mergeMessage(list: ChatMessage[], message: ChatMessage): ChatMes
   return [...list, message];
 }
 
+/**
+ * Progress order for one tool step: a snapshot may confirm or advance a live
+ * step, never move a finished one back to running.
+ */
+const ACTIVITY_RANK: Record<ActivityItem["status"], number> = {
+  pending: 0,
+  running: 1,
+  completed: 2,
+  error: 2,
+};
+
+/** Merge one message's steps by id, keeping snapshot order and live-only steps. */
+function mergeActivity(live: ActivityItem[], snapshot: ActivityItem[]): ActivityItem[] {
+  const liveById = new Map(live.map((item) => [item.id, item]));
+  const merged = snapshot.map((item) => {
+    const current = liveById.get(item.id);
+    if (!current) return item;
+    liveById.delete(item.id);
+    return ACTIVITY_RANK[item.status] >= ACTIVITY_RANK[current.status] ? item : current;
+  });
+  return [...merged, ...live.filter((item) => liveById.has(item.id))];
+}
+
+/**
+ * Fold a freshly fetched session snapshot into the live transcript after a
+ * disconnect. The snapshot decides order, so a message missed in the gap lands
+ * where it belongs rather than after later live ones. Messages match by id
+ * (nothing doubles on a retried catch-up); a longer locally streamed body wins
+ * over a snapshot taken before its last delta; a live tool step is never pushed
+ * back to an older snapshot status; an unseen server user message still settles
+ * a matching optimistic echo. Only live-only messages (system notes, an echo
+ * with no server twin) are appended.
+ */
+export function mergeMessages(list: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
+  const liveById = new Map(list.map((item) => [item.id, item]));
+  const merged = incoming.map((message) => {
+    const current = liveById.get(message.id);
+    if (current) {
+      liveById.delete(message.id);
+      return {
+        ...current,
+        text: message.text.length >= current.text.length ? message.text : current.text,
+        error: message.error ?? current.error,
+        activity: mergeActivity(current.activity, message.activity),
+        files: message.files ?? current.files,
+        pending: false,
+      };
+    }
+    if (message.role === "user") {
+      // Same reconciliation as mergeMessage: settle an optimistic echo in place.
+      const echo = [...liveById.values()].find(
+        (item) =>
+          item.pending &&
+          item.role === "user" &&
+          item.text === message.text &&
+          Math.abs(item.created - message.created) < 5000,
+      );
+      if (echo) liveById.delete(echo.id);
+    }
+    return { ...message, pending: false };
+  });
+  return [...merged, ...list.filter((item) => liveById.has(item.id))];
+}
+
+/**
+ * A caught-up snapshot is still working only while a step is unfinished. A
+ * missed idle event would leave `working` stuck otherwise; the next status,
+ * delta or activity event re-asserts it if the turn actually continues.
+ */
+export function workingAfterCatchUp(list: ChatMessage[]): boolean {
+  return list.some((message) =>
+    message.activity.some((item) => item.status === "pending" || item.status === "running"),
+  );
+}
+
 export function hasPendingBubble(list: ChatMessage[]): boolean {
   return list.some((m) => m.pending);
 }

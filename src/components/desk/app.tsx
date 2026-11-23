@@ -11,6 +11,7 @@ import { filterCommands, nextCommandIndex, parseCommandInput, shouldAutoLoadComm
 import { canSelectModel, modelForSend, modelSaveFailure, resolveActiveSource, resolveHeaderModel } from "@/components/desk/models";
 import { ResizeHandle } from "@/components/desk/resize-handle";
 import { createRequestGate, runLatest } from "@/components/desk/request-gate";
+import { catchUpProjectMatches, createReconnectScheduler } from "@/components/desk/event-stream";
 import { usePanelWidths } from "@/components/desk/use-panel-widths";
 import { ChangesPanel, FilesChangedBlock, type TurnDiffs } from "@/components/desk/files-changed";
 import { changesFailed, changesLoaded, changesLoading, changesSettled, EMPTY_CHANGES, type SessionChanges } from "@/components/desk/session-changes";
@@ -38,10 +39,12 @@ import {
   dropPendingBubbles,
   echoToReplace,
   mergeMessage,
+  mergeMessages,
   replacePendingEcho,
   settlePendingEcho,
   upsertActivity,
   upsertSession,
+  workingAfterCatchUp,
 } from "./messages";
 import {
   api,
@@ -81,6 +84,8 @@ export function DeskApp() {
   const [working, setWorking] = useState(false);
   const [creatingChat, setCreatingChat] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** SSE recovery notice, kept apart from `error` so a reconnect clears only its own message. */
+  const [streamNotice, setStreamNotice] = useState<string | null>(null);
   const [serverPassword, setServerPassword] = useState("");
   const [prompts, setPrompts] = useState<PermissionPrompt[]>([]);
   const [loadingSession, setLoadingSession] = useState(false);
@@ -149,6 +154,9 @@ export function DeskApp() {
   const composer = useRef<HTMLTextAreaElement>(null);
   const sessionRef = useRef<string | null>(null);
   sessionRef.current = sessionId;
+  /** Project id readable from async catch-up without a stale effect closure. */
+  const activeProjectIdRef = useRef<string | null>(null);
+  activeProjectIdRef.current = activeProjectId;
 
   const project = projects.find((item) => item.id === activeProjectId) ?? null;
 
@@ -324,12 +332,89 @@ export function DeskApp() {
   useEffect(() => {
     let cancelled = false;
     let source: EventSource | undefined;
+    const retry = createReconnectScheduler(
+      {
+        setTimeout: (fn, ms) => window.setTimeout(fn, ms),
+        clearTimeout: (id) => window.clearTimeout(id as number),
+      },
+      () => connect(),
+    );
+
+    /**
+     * Refetch what the disconnect gap swallowed. Merges by message id and only
+     * touches messages, working state and session summaries, so scroll,
+     * expanded turns and the inspector survive; a chat or project switched away
+     * from meanwhile is left alone.
+     */
+    function catchUp() {
+      const id = sessionRef.current;
+      const projectAtStart = activeProjectIdRef.current;
+      const chatCaughtUp = id
+        ? api.openSession(id).then((data) => {
+            if (cancelled || sessionRef.current !== id) return;
+            setMessages((current) => mergeMessages(current, data.messages));
+            setSessions((current) => upsertSession(current, data.session));
+            // A turn that ended while the stream was down produced no idle frame:
+            // settle it here or the spinner (and send) would stay blocked.
+            const stillWorking = workingAfterCatchUp(data.messages);
+            setWorking(stillWorking);
+            if (!stillWorking && turnTracker.idle()) {
+              setTurnEpoch((value) => value + 1);
+              filesStaleRef.current = true;
+            }
+          })
+        : Promise.resolve();
+      const listRefreshed = api.sessions().then((data) => {
+        if (!cancelled && catchUpProjectMatches(projectAtStart, activeProjectIdRef.current)) {
+          setSessions(data.sessions);
+        }
+      });
+      void Promise.allSettled([chatCaughtUp, listRefreshed]).then((results) => {
+        if (cancelled || results.every((result) => result.status === "fulfilled")) return;
+        toast.error("Reconnected, but could not catch up. Reload if messages look missing.");
+      });
+    }
+
+    function connect() {
+      if (cancelled) return;
+      // One live source at a time, even if a late retry and a native reconnect race.
+      source?.close();
+      const stream = new EventSource("/api/events");
+      source = stream;
+      stream.onopen = () => {
+        if (cancelled) return;
+        setStreamNotice(null);
+        if (retry.opened()) catchUp();
+      };
+      stream.onmessage = (message) => {
+        try {
+          applyEvent(JSON.parse(message.data) as DeskEvent);
+        } catch {
+          /* ignore malformed frames */
+        }
+      };
+      stream.onerror = () => {
+        if (cancelled) return;
+        if (stream.readyState === EventSource.CLOSED) {
+          // Fatal (e.g. wrong content-type during a restart): the browser will
+          // not retry this stream, so schedule a fresh one under supervision.
+          stream.close();
+          retry.failed();
+        } else {
+          // CONNECTING: the browser is already retrying; only catch up after it.
+          retry.interrupted();
+        }
+        setStreamNotice("Lost the live connection. Reconnecting…");
+      };
+    }
+
     void api.bootstrap().then((data) => {
       if (cancelled) return;
       setBoot(data);
       setStatus(data.status);
       setProjects(data.projects);
       setActiveProjectId(data.activeProjectId);
+      activeProjectIdRef.current = data.activeProjectId;
       setSessions(data.sessions);
       setModel(data.model);
       setModelSource("desk");
@@ -351,22 +436,11 @@ export function DeskApp() {
           setLoadingSession(false),
         );
       }
-      const stream = new EventSource("/api/events");
-      source = stream;
-      stream.onmessage = (message) => {
-        try {
-          applyEvent(JSON.parse(message.data) as DeskEvent);
-        } catch {
-          /* ignore malformed frames */
-        }
-      };
-      stream.onerror = () => setError((current) => current ?? "Lost the desk connection. Reconnecting…");
-      stream.addEventListener("error", () => {
-        if (stream.readyState === EventSource.CLOSED) stream.close();
-      });
+      connect();
     }).catch((err: Error) => setError(err.message));
     return () => {
       cancelled = true;
+      retry.stop();
       source?.close();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -639,6 +713,8 @@ export function DeskApp() {
 
   async function chooseProject(id: string) {
     await api.selectProject(id);
+    // Sync now: a catch-up response for the old project must not land after this.
+    activeProjectIdRef.current = id;
     resetCommandTurn();
     setActiveProjectId(id);
     cancelOpen(openTarget);
@@ -765,6 +841,7 @@ export function DeskApp() {
       setSessions((current) => upsertSession(current, created.session));
       resetCommandTurn();
       setActiveProjectId(targetProject.id);
+      activeProjectIdRef.current = targetProject.id;
       cancelOpen(openTarget, created.session.id);
       setSessionId(created.session.id);
       setMessages([]);
@@ -1233,6 +1310,10 @@ export function DeskApp() {
                       Save and reconnect
                     </Button>
                   </form>
+                ) : streamNotice ? (
+                  <p role="status" className="truncate border-t border-border px-4 py-1.5 text-[11px] text-muted">
+                    {streamNotice}
+                  </p>
                 ) : error ? (
                   <p className="truncate border-t border-border px-4 py-1.5 text-[11px] text-danger">
                     {error}

@@ -7,10 +7,13 @@ import {
   echoToReplace,
   hasPendingBubble,
   mergeMessage,
+  mergeMessages,
   replacePendingEcho,
   settlePendingEcho,
   upsertActivity,
+  workingAfterCatchUp,
 } from "./messages.ts";
+import { catchUpProjectMatches, createReconnectScheduler, reconnectDelay } from "./event-stream.ts";
 
 function msg(overrides: Partial<{ id: string; role: "user" | "assistant" | "system"; text: string; created: number; pending: boolean; activity: { id: string; tool: string; title: string; status: "pending" | "running" | "completed" | "error" }[] }>) {
   return {
@@ -152,4 +155,274 @@ test("activityPreview lists everything up to 4 and otherwise says how many are h
   const nine = activityPreview([1, 2, 3, 4, 5, 6, 7, 8, 9]);
   assert.equal(nine.shown.length + nine.hidden, 9, "shown + hidden always equals the count in the button");
   assert.deepEqual(activityPreview([]), { shown: [], hidden: 0 });
+});
+
+// ── Catch-up after an SSE disconnect ───────────────────────────────────────
+
+test("mergeMessages adds the messages missed while disconnected exactly once", () => {
+  const live = [msg({ id: "u1", role: "user", text: "hi", created: 1 })];
+  const snapshot = [
+    msg({ id: "u1", role: "user", text: "hi", created: 1 }),
+    msg({ id: "a2", role: "assistant", text: "hello", created: 2 }),
+  ];
+  const once = mergeMessages(live, snapshot);
+  assert.deepEqual(once.map((m) => m.id), ["u1", "a2"]);
+  const twice = mergeMessages(once, snapshot);
+  assert.deepEqual(twice.map((m) => m.id), ["u1", "a2"], "a retried catch-up must not duplicate");
+  assert.equal(live.length, 1, "input is not mutated");
+});
+
+test("mergeMessages updates a known message but keeps a longer live body", () => {
+  const live = [msg({ id: "a1", role: "assistant", text: "Hello there", created: 2 })];
+  const stale = [msg({ id: "a1", role: "assistant", text: "Hello", created: 2 })];
+  assert.equal(mergeMessages(live, stale)[0].text, "Hello there");
+  const newer = [
+    msg({
+      id: "a1",
+      role: "assistant",
+      text: "Hello there, friend",
+      created: 2,
+      activity: [{ id: "t1", tool: "read", title: "r", status: "completed" }],
+    }),
+  ];
+  const out = mergeMessages(live, newer);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].text, "Hello there, friend");
+  assert.equal(out[0].activity[0].id, "t1");
+});
+
+test("mergeMessages settles an optimistic echo the snapshot already contains", () => {
+  const live = [msg({ id: "local_1", role: "user", text: "hi", created: 1000, pending: true })];
+  const snapshot = [msg({ id: "srv_1", role: "user", text: "hi", created: 1200 })];
+  const out = mergeMessages(live, snapshot);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].id, "srv_1");
+  assert.equal(out[0].pending, false);
+});
+
+test("mergeMessages renders the transcript in snapshot order", () => {
+  // The live view saw a3 (delivered before the gap closed); a2 was missed.
+  const live = [
+    msg({ id: "u1", role: "user", text: "hi", created: 1 }),
+    msg({ id: "a3", role: "assistant", text: "done", created: 3 }),
+  ];
+  const snapshot = [
+    msg({ id: "u1", role: "user", text: "hi", created: 1 }),
+    msg({ id: "a2", role: "assistant", text: "working", created: 2 }),
+    msg({ id: "a3", role: "assistant", text: "done", created: 3 }),
+  ];
+  assert.deepEqual(
+    mergeMessages(live, snapshot).map((m) => m.id),
+    ["u1", "a2", "a3"],
+    "a missed message must land between the messages that were already shown",
+  );
+});
+
+test("mergeMessages never regresses a finished step to a stale snapshot status", () => {
+  const live = [
+    msg({
+      id: "a1",
+      role: "assistant",
+      text: "done",
+      activity: [{ id: "t1", tool: "read", title: "read", status: "completed" }],
+    }),
+  ];
+  const snapshot = [
+    msg({
+      id: "a1",
+      role: "assistant",
+      text: "done",
+      activity: [{ id: "t1", tool: "read", title: "read", status: "running" }],
+    }),
+  ];
+  const out = mergeMessages(live, snapshot);
+  assert.equal(out[0].activity[0].status, "completed", "the live completion is newer than the snapshot");
+});
+
+test("mergeMessages takes a newer snapshot completion and keeps a live-only step", () => {
+  const live = [
+    msg({
+      id: "a1",
+      role: "assistant",
+      activity: [
+        { id: "t1", tool: "read", title: "read", status: "running" },
+        { id: "t2", tool: "bash", title: "bash", status: "running" },
+      ],
+    }),
+  ];
+  const snapshot = [
+    msg({
+      id: "a1",
+      role: "assistant",
+      activity: [{ id: "t1", tool: "read", title: "read", status: "completed" }],
+    }),
+  ];
+  const out = mergeMessages(live, snapshot);
+  assert.deepEqual(
+    out[0].activity.map((item) => [item.id, item.status]),
+    [
+      ["t1", "completed"],
+      ["t2", "running"],
+    ],
+  );
+});
+
+test("mergeMessages appends live-only messages after the snapshot and drops settled echoes", () => {
+  const live = [
+    msg({ id: "sys_1", role: "system", text: "note" }),
+    msg({ id: "local_1", role: "user", text: "hi", created: 1000, pending: true }),
+  ];
+  const snapshot = [msg({ id: "srv_1", role: "user", text: "hi", created: 1200 })];
+  const out = mergeMessages(live, snapshot);
+  assert.deepEqual(out.map((m) => m.id), ["srv_1", "sys_1"]);
+  assert.equal(out[0].pending, false);
+});
+
+test("workingAfterCatchUp is false when every caught-up step has finished", () => {
+  assert.equal(workingAfterCatchUp([]), false);
+  assert.equal(
+    workingAfterCatchUp([
+      msg({
+        id: "a1",
+        role: "assistant",
+        activity: [
+          { id: "t1", tool: "read", title: "read", status: "completed" },
+          { id: "t2", tool: "bash", title: "bash", status: "error" },
+        ],
+      }),
+    ]),
+    false,
+  );
+});
+
+test("workingAfterCatchUp is true while any caught-up step is pending or running", () => {
+  assert.equal(
+    workingAfterCatchUp([
+      msg({ id: "a1", role: "assistant", activity: [{ id: "t1", tool: "read", title: "read", status: "running" }] }),
+    ]),
+    true,
+  );
+  assert.equal(
+    workingAfterCatchUp([
+      msg({ id: "a1", role: "assistant", activity: [{ id: "t1", tool: "bash", title: "bash", status: "pending" }] }),
+    ]),
+    true,
+  );
+});
+
+// ── Supervised stream reconnection ─────────────────────────────────────────
+
+/** Deterministic timers for the reconnect scheduler, mirroring autonomous-drink.test.ts. */
+function makeTimerClock() {
+  let now = 0;
+  let nextId = 1;
+  const timers = new Map<number, { fn: () => void; at: number }>();
+  return {
+    setTimeout: (fn: () => void, ms: number) => {
+      const id = nextId++;
+      timers.set(id, { fn, at: now + ms });
+      return id;
+    },
+    clearTimeout: (id: unknown) => {
+      timers.delete(id as number);
+    },
+    pending: () => timers.size,
+    advance: (ms: number) => {
+      const end = now + ms;
+      for (;;) {
+        let earliest: number | null = null;
+        let earliestAt = Infinity;
+        for (const [id, timer] of timers) {
+          if (timer.at <= end && timer.at < earliestAt) {
+            earliest = id;
+            earliestAt = timer.at;
+          }
+        }
+        if (earliest === null) break;
+        const timer = timers.get(earliest)!;
+        timers.delete(earliest);
+        now = earliestAt;
+        timer.fn();
+      }
+      now = end;
+    },
+  };
+}
+
+test("reconnectDelay doubles per attempt and is capped", () => {
+  assert.equal(reconnectDelay(1), 1_000);
+  assert.equal(reconnectDelay(2), 2_000);
+  assert.equal(reconnectDelay(3), 4_000);
+  assert.equal(reconnectDelay(4), 8_000);
+  assert.equal(reconnectDelay(5), 15_000);
+  assert.equal(reconnectDelay(50), 15_000);
+  assert.equal(reconnectDelay(0), 1_000, "a bad attempt number still waits the base delay");
+});
+
+test("catchUpProjectMatches drops a session list for a project the user left", () => {
+  assert.equal(catchUpProjectMatches("A", "A"), true);
+  assert.equal(catchUpProjectMatches("A", "B"), false, "a project switch in flight wins");
+  assert.equal(catchUpProjectMatches(null, null), true);
+  assert.equal(catchUpProjectMatches(null, "A"), false);
+});
+
+test("a fatal close schedules one bounded recreation at a time", () => {
+  const clock = makeTimerClock();
+  let retries = 0;
+  const scheduler = createReconnectScheduler(clock, () => {
+    retries += 1;
+  });
+  scheduler.failed();
+  scheduler.failed(); // repeated error events for the same dead stream
+  assert.equal(clock.pending(), 1);
+  assert.equal(scheduler.retrying(), true);
+  clock.advance(999);
+  assert.equal(retries, 0);
+  clock.advance(1);
+  assert.equal(retries, 1);
+  assert.equal(scheduler.retrying(), false);
+  scheduler.failed(); // the replacement failed too: the next delay is longer
+  clock.advance(1_999);
+  assert.equal(retries, 1);
+  clock.advance(1);
+  assert.equal(retries, 2);
+});
+
+test("a successful open reports the gap, cancels a pending retry and resets the backoff", () => {
+  const clock = makeTimerClock();
+  let retries = 0;
+  const scheduler = createReconnectScheduler(clock, () => {
+    retries += 1;
+  });
+  assert.equal(scheduler.opened(), false, "the first open has nothing to catch up");
+  scheduler.failed();
+  assert.equal(scheduler.opened(), true, "an open after a fatal close needs catch-up");
+  assert.equal(scheduler.retrying(), false, "a late open cancels the scheduled recreation");
+  scheduler.failed();
+  clock.advance(999);
+  assert.equal(retries, 0, "backoff restarted at the base delay");
+  clock.advance(1);
+  assert.equal(retries, 1);
+});
+
+test("a native retry marks a gap without scheduling a second stream", () => {
+  const clock = makeTimerClock();
+  const scheduler = createReconnectScheduler(clock, () => {});
+  scheduler.interrupted();
+  assert.equal(scheduler.retrying(), false);
+  assert.equal(clock.pending(), 0);
+  assert.equal(scheduler.opened(), true);
+});
+
+test("stop clears a pending recreation on unmount", () => {
+  const clock = makeTimerClock();
+  let retries = 0;
+  const scheduler = createReconnectScheduler(clock, () => {
+    retries += 1;
+  });
+  scheduler.failed();
+  scheduler.stop();
+  clock.advance(60_000);
+  assert.equal(retries, 0);
+  assert.equal(scheduler.retrying(), false);
 });
