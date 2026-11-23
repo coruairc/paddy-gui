@@ -127,6 +127,15 @@ export function workingAfterCatchUp(list: ChatMessage[]): boolean {
   );
 }
 
+/**
+ * Catch-up may only clear `working`, never set it. A live idle frame can land
+ * during the openSession round trip; a snapshot taken before it may still show
+ * a running step, and there is no later idle to undo a forced `true`.
+ */
+export function settleWorkingAfterCatchUp(liveWorking: boolean, snapshotWorking: boolean): boolean {
+  return snapshotWorking ? liveWorking : false;
+}
+
 export function hasPendingBubble(list: ChatMessage[]): boolean {
   return list.some((m) => m.pending);
 }

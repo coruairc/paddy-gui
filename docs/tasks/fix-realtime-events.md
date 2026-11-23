@@ -118,10 +118,10 @@ re-ran typecheck (exit 0), lint (exit 0, 5 pre-existing warnings), npm test
 (23 + 286 pass / 0 fail). Live Playwright reported-not-reproduced (script outside
 reviewer workspace). Residual risks recorded as follow-ups:
 
-- F1: `setWorking(stillWorking)` uses the raw snapshot; an idle frame landing
-  during the openSession RTT can be overridden back to true with no later idle
-  (narrow, not self-healing). Fix: only clear from the snapshot
-  (`if (!stillWorking) setWorking(false)`), never force true over a live idle.
+- F1: RESOLVED — `settleWorkingAfterCatchUp(liveWorking, snapshotWorking)`
+  (snapshotWorking ? liveWorking : false) applied via functional setWorking;
+  catch-up may only clear working, never force true over a live idle.
+  4-combination regression test; reviewer PASS_WITH_NOTES, no findings.
 - F2: inferred idle does not refresh an already-open Changes tab (matches the
   non-goal; per-turn blocks still refetch). No action.
 - F3: equal terminal rank prefers snapshot item (stale terminal can replace the

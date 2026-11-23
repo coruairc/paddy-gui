@@ -56,6 +56,7 @@ export function ModelPicker({
   const inputRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const listboxRef = useRef<HTMLDivElement>(null);
   const openIntent = useRef<"down" | "up" | "enter">("down");
 
   const label = active.label || active.persistedKey || "Choose model";
@@ -96,6 +97,13 @@ export function ModelPicker({
   useEffect(() => {
     if (open && (state === "list" || state === "no-match")) inputRef.current?.focus();
   }, [open, state]);
+
+  // A new filter is a new result set: start it at the top so the highlighted
+  // first match is visible. Covers typing and the "Clear filter" button; the
+  // sticky headers stay put because this only moves the listbox scroller.
+  useEffect(() => {
+    if (open) listboxRef.current?.scrollTo({ top: 0 });
+  }, [query, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -286,6 +294,7 @@ export function ModelPicker({
                 </div>
               )}
               <div
+                ref={listboxRef}
                 role="listbox"
                 id="model-picker-listbox"
                 aria-label="Models"

@@ -10,6 +10,7 @@ import {
   mergeMessages,
   replacePendingEcho,
   settlePendingEcho,
+  settleWorkingAfterCatchUp,
   upsertActivity,
   workingAfterCatchUp,
 } from "./messages.ts";
@@ -308,6 +309,16 @@ test("workingAfterCatchUp is true while any caught-up step is pending or running
     ]),
     true,
   );
+});
+
+test("catch-up may clear working but never forces it true over a live idle", () => {
+  // The lost-idle case: the snapshot says idle, so the stuck spinner clears.
+  assert.equal(settleWorkingAfterCatchUp(true, false), false);
+  // A live idle landed during the openSession round trip; a stale snapshot
+  // that still shows running must not resurrect the spinner (no later idle).
+  assert.equal(settleWorkingAfterCatchUp(false, true), false);
+  assert.equal(settleWorkingAfterCatchUp(true, true), true);
+  assert.equal(settleWorkingAfterCatchUp(false, false), false);
 });
 
 // ── Supervised stream reconnection ─────────────────────────────────────────

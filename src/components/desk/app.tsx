@@ -42,6 +42,7 @@ import {
   mergeMessages,
   replacePendingEcho,
   settlePendingEcho,
+  settleWorkingAfterCatchUp,
   upsertActivity,
   upsertSession,
   workingAfterCatchUp,
@@ -355,9 +356,11 @@ export function DeskApp() {
             setMessages((current) => mergeMessages(current, data.messages));
             setSessions((current) => upsertSession(current, data.session));
             // A turn that ended while the stream was down produced no idle frame:
-            // settle it here or the spinner (and send) would stay blocked.
+            // settle it here or the spinner (and send) would stay blocked. Only
+            // clear — a live idle that landed during this fetch must win over a
+            // snapshot that still shows running (no later idle would undo true).
             const stillWorking = workingAfterCatchUp(data.messages);
-            setWorking(stillWorking);
+            setWorking((current) => settleWorkingAfterCatchUp(current, stillWorking));
             if (!stillWorking && turnTracker.idle()) {
               setTurnEpoch((value) => value + 1);
               filesStaleRef.current = true;

@@ -58,4 +58,12 @@ unreachable.
 
 - [x] Implemented
 - [x] Reviewed (PASS_WITH_NOTES: dvh assumption documented; live DOM check script kept out of repo; no automated regression test possible without component-render tooling)
-- [x] Committed
+- [x] Committed (0769900; final reviewer verdict confirmed PASS_WITH_NOTES, all ACs met, reviewer re-ran typecheck/lint/tests: 294 pass / 0 fail)
+
+## Follow-up R1 — RESOLVED
+
+After scrolling the list and then typing a filter, the listbox kept its old
+`scrollTop`. Fixed: `listboxRef` + effect on `[query, open]` resets scroll to 0;
+covers input onChange and Clear-filter; keyboard scrollIntoView unaffected.
+Live-verified (deep scroll 40465 → 0 on filter, first match visible).
+Reviewer: PASS_WITH_NOTES, no findings. Committed with the F1 batch.
