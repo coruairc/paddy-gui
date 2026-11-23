@@ -285,7 +285,12 @@ export function ModelPicker({
                   default{defaultLabel ? ` (${defaultLabel})` : ""}.
                 </div>
               )}
-              <div role="listbox" id="model-picker-listbox" aria-label="Models">
+              <div
+                role="listbox"
+                id="model-picker-listbox"
+                aria-label="Models"
+                className="scrollbar-thin max-h-[min(28rem,calc(100dvh-10rem))] scroll-pt-9 overflow-y-auto overscroll-contain"
+              >
                 {state === "no-match" ? (
                   <div className="flex flex-col items-center gap-2 px-4 py-8 text-center" role="status">
                     <SearchX className="size-4 text-muted" aria-hidden />
