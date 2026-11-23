@@ -1186,6 +1186,7 @@ export function DeskApp() {
                 setModelSource("desk");
               }}
               onProjectsChange={setProjects}
+              onAddProject={(trigger) => void addProject(trigger)}
               onReconnect={() => void api.connect().then(setStatus)}
             />
           ) : (

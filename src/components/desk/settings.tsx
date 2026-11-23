@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -35,6 +36,7 @@ export function SettingsPanel({
   onAppearance,
   onModelChange,
   onProjectsChange,
+  onAddProject,
   onReconnect,
 }: {
   status: ConnectionStatus | null;
@@ -45,6 +47,7 @@ export function SettingsPanel({
   onAppearance: (appearance: "dark" | "light") => void;
   onModelChange: (model: string) => void;
   onProjectsChange: (projects: Project[]) => void;
+  onAddProject: (trigger: HTMLElement | null) => void;
   onReconnect: () => void;
 }) {
   const [section, setSection] = useState<Section>("General");
@@ -82,7 +85,7 @@ export function SettingsPanel({
           {section === "Agents" && <Agents />}
           {section === "Permissions" && <Permissions />}
           {section === "MCP" && <Mcp />}
-          {section === "Projects" && <Projects projects={projects} onChange={onProjectsChange} />}
+          {section === "Projects" && <Projects projects={projects} onChange={onProjectsChange} onAdd={onAddProject} />}
           {section === "Appearance" && (
             <Appearance
               appearance={appearance}
@@ -525,31 +528,49 @@ function Mcp() {
   );
 }
 
-function Projects({ projects, onChange }: { projects: Project[]; onChange: (projects: Project[]) => void }) {
+function Projects({
+  projects,
+  onChange,
+  onAdd,
+}: {
+  projects: Project[];
+  onChange: (projects: Project[]) => void;
+  onAdd: (trigger: HTMLElement | null) => void;
+}) {
   return (
-    <ul className="space-y-2 text-sm">
-      {projects.map((project) => (
-        <li key={project.id} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">
-          <div className="min-w-0">
-            <div>{project.name}</div>
-            <div className="truncate text-xs text-subtle">{project.path}</div>
-          </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              void api.removeProject(project.id).then(() => {
-                forgetProject(browserStorage(), project.id);
-                onChange(projects.filter((item) => item.id !== project.id));
-              });
-            }}
-          >
-            Remove
-          </Button>
-        </li>
-      ))}
-      {!projects.length && <li className="text-subtle">No projects yet. Add one from the sidebar.</li>}
-    </ul>
+    <div className="space-y-2">
+      {/* The dialog itself lives in the desk shell (app.tsx): one add flow,
+          one focus-return path, shared with the sidebar trigger. */}
+      <div className="flex justify-end">
+        <Button size="sm" variant="outline" className="gap-1.5" onClick={(event) => onAdd(event.currentTarget)}>
+          <Plus className="size-3.5" aria-hidden />
+          Add project
+        </Button>
+      </div>
+      <ul className="space-y-2 text-sm">
+        {projects.map((project) => (
+          <li key={project.id} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">
+            <div className="min-w-0">
+              <div>{project.name}</div>
+              <div className="truncate text-xs text-subtle">{project.path}</div>
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                void api.removeProject(project.id).then(() => {
+                  forgetProject(browserStorage(), project.id);
+                  onChange(projects.filter((item) => item.id !== project.id));
+                });
+              }}
+            >
+              Remove
+            </Button>
+          </li>
+        ))}
+        {!projects.length && <li className="text-subtle">No projects yet.</li>}
+      </ul>
+    </div>
   );
 }
 
