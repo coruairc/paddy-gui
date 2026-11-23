@@ -34,6 +34,26 @@ test("maxPanelWidth keeps the chat column usable", () => {
   assert.equal(maxPanelWidth("left", 0, 352), left.max, "unknown viewport uses static max");
 });
 
+test("PANEL_LIMITS raised right cap keeps the left panel and chat guard", () => {
+  assert.equal(PANEL_LIMITS.right.max, 1200, "inspector cap raised to 1200");
+  assert.equal(PANEL_LIMITS.right.min, 280);
+  assert.equal(PANEL_LIMITS.right.default, 352);
+  assert.deepEqual(PANEL_LIMITS.left, { min: 200, default: 240, max: 400 }, "left panel untouched");
+  assert.equal(CHAT_MIN_WIDTH, 420, "chat guard untouched");
+});
+
+test("maxPanelWidth lets the inspector reach 1200 only when the viewport has room", () => {
+  assert.equal(maxPanelWidth("right", 1920, 240), 1200, "1920 - 240 - 420 = 1260 >= 1200");
+  assert.equal(maxPanelWidth("right", 1280, 240), 620, "1280 - 240 - 420 = 620 still binds");
+  assert.equal(
+    keyboardWidth("right", "End", 352, PANEL_LIMITS.right.min, maxPanelWidth("right", 1920, 240)),
+    1200,
+    "End key reaches the new max",
+  );
+  assert.equal(parseStoredWidth("right", "1200"), 1200);
+  assert.equal(parseStoredWidth("right", "800"), 800, "existing saved widths stay valid");
+});
+
 test("clampPanel combines limits and viewport room", () => {
   assert.equal(clampPanel("right", 9999, 1400, 240), 1400 - 240 - CHAT_MIN_WIDTH);
   assert.equal(clampPanel("right", 10, 1400, 240), PANEL_LIMITS.right.min);

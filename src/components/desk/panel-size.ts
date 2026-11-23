@@ -14,7 +14,7 @@ export interface PanelLimits {
 /** Widths in CSS pixels. Defaults match the previous fixed layout (w-60 / 22rem). */
 export const PANEL_LIMITS: Record<PanelSide, PanelLimits> = {
   left: { min: 200, default: 240, max: 400 },
-  right: { min: 280, default: 352, max: 800 },
+  right: { min: 280, default: 352, max: 1200 },
 };
 
 /** The chat column never gets narrower than this while both sidebars are docked. */
