@@ -108,6 +108,8 @@ export function DeskApp() {
   const [model, setModel] = useState("");
   const [catalog, setCatalog] = useState<{ models: DeskModel[]; default: string; fetchedAt: number } | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  /** Agent dropdown state lives here so opening one composer picker closes the other. */
+  const [agentOpen, setAgentOpen] = useState(false);
   const [modelLoading, setModelLoading] = useState(false);
   const [modelLoadError, setModelLoadError] = useState<string | null>(null);
   const [modelNote, setModelNote] = useState<string | null>(null);
@@ -1194,27 +1196,6 @@ export function DeskApp() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {project && (
-                <ModelPicker
-                  open={pickerOpen}
-                  onOpenChange={(next) => {
-                    setPickerOpen(next);
-                    if (next) void loadModels();
-                  }}
-                  models={catalog?.models ?? []}
-                  defaultKey={catalog?.default ?? ""}
-                  active={effective}
-                  catalogLoaded={catalogLoaded}
-                  connected={Boolean(status?.connected)}
-                  loading={modelLoading}
-                  loadError={modelLoadError}
-                  onSelect={(key) => {
-                    chooseModel(key);
-                    setPickerOpen(false);
-                  }}
-                  onRetry={() => void loadModels(true)}
-                />
-              )}
               <span className="hidden items-center gap-1.5 text-xs text-muted sm:flex">
                 <span className={cn("size-1.5 rounded-full", status?.connected ? "bg-ok pulse-live" : "bg-subtle")} />
                 {status?.connected ? "Live" : "Offline"}
@@ -1559,10 +1540,47 @@ export function DeskApp() {
                       </Button>
                     )}
                     </div>
-                    {/* Agent control sits inside the box but below the input row:
-                        the textarea keeps its full width at narrow viewports. */}
+                    {/* Agent and model controls sit inside the box but below the input
+                        row: the textarea keeps its full width at narrow viewports. */}
                     <div className="mt-1 flex items-center gap-1 px-1">
-                      <AgentPicker agents={agents} agent={agent} onChange={setAgent} />
+                      {/* Model names are long, so it takes the flexible space and
+                          truncates; the short agent label keeps its width. */}
+                      <div className="min-w-0 flex-1">
+                        <ModelPicker
+                          open={pickerOpen}
+                          onOpenChange={(next) => {
+                            setPickerOpen(next);
+                            if (next) {
+                              setAgentOpen(false);
+                              void loadModels();
+                            }
+                          }}
+                          models={catalog?.models ?? []}
+                          defaultKey={catalog?.default ?? ""}
+                          active={effective}
+                          catalogLoaded={catalogLoaded}
+                          connected={Boolean(status?.connected)}
+                          loading={modelLoading}
+                          loadError={modelLoadError}
+                          onSelect={(key) => {
+                            chooseModel(key);
+                            setPickerOpen(false);
+                          }}
+                          onRetry={() => void loadModels(true)}
+                        />
+                      </div>
+                      <div className="shrink-0">
+                        <AgentPicker
+                          agents={agents}
+                          agent={agent}
+                          open={agentOpen}
+                          onOpenChange={(next) => {
+                            setAgentOpen(next);
+                            if (next) setPickerOpen(false);
+                          }}
+                          onChange={setAgent}
+                        />
+                      </div>
                     </div>
                     </div>
                   </div>

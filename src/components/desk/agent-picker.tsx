@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Bot, Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { agentRows, type AgentOption } from "./agents";
@@ -10,6 +10,9 @@ export type AgentPickerProps = {
   /** Chosen id, or "" for OpenCode's default agent (a send then omits the param). */
   agent: string;
   onChange: (id: string) => void;
+  /** Controlled open state: the composer keeps the model and agent popups exclusive. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 };
 
 /** Place before paint on the client; SSR must not call useLayoutEffect. */
@@ -21,8 +24,17 @@ const usePlacementEffect = typeof window === "undefined" ? useEffect : useLayout
  * of the viewport. Focus stays on the trigger and moves the highlight through
  * `aria-activedescendant`, like the model picker.
  */
-export function AgentPicker({ agents, agent, onChange }: AgentPickerProps) {
-  const [open, setOpen] = useState(false);
+export function AgentPicker({ agents, agent, onChange, open: controlledOpen, onOpenChange }: AgentPickerProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  /** Uncontrolled by default; the composer can own it to keep pickers exclusive. */
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (onOpenChange) onOpenChange(next);
+      else setInternalOpen(next);
+    },
+    [onOpenChange],
+  );
   const [activeIndex, setActiveIndex] = useState(0);
   /** Viewport-clamped placement: the trigger can sit near the right edge of a narrow shell. */
   const [popup, setPopup] = useState<{ left: number; bottom: number; width: number } | null>(null);
@@ -65,7 +77,7 @@ export function AgentPicker({ agents, agent, onChange }: AgentPickerProps) {
     }
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [open]);
+  }, [open, setOpen]);
 
   // Scroll only the popup's own list: scrollIntoView also moves ancestor
   // scrollers, which shifted the fixed shell horizontally before.

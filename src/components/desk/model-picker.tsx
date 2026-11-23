@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   AlertCircle,
   AlertTriangle,
   Boxes,
   Check,
   ChevronDown,
+  Cpu,
   Search,
   SearchX,
   WifiOff,
@@ -12,7 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { HelixMark } from "@/components/helix-mark";
-import { formatTokens } from "@/lib/utils";
+import { cn, formatTokens } from "@/lib/utils";
 import type { DeskModel } from "@/lib/desk/client";
 import {
   filterModels,
@@ -38,6 +39,15 @@ export type ModelPickerProps = {
   onRetry?: () => void;
 };
 
+/** Place before paint on the client; SSR must not call useLayoutEffect. */
+const usePlacementEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
+/**
+ * Model combobox in the composer footer. The popup body (filter, provider
+ * groups, states, keyboard nav) is unchanged; only the trigger and placement
+ * live here: a compact trigger that opens a fixed, viewport-clamped popup
+ * upward, because the composer sits at the bottom of the viewport.
+ */
 export function ModelPicker({
   open,
   onOpenChange,
@@ -58,6 +68,32 @@ export function ModelPicker({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const listboxRef = useRef<HTMLDivElement>(null);
   const openIntent = useRef<"down" | "up" | "enter">("down");
+  /** Viewport-clamped rect while open: the popup opens upward and stays on screen. */
+  const [popup, setPopup] = useState<{ left: number; bottom: number; width: number; maxHeight: number } | null>(null);
+
+  usePlacementEffect(() => {
+    if (!open) {
+      setPopup(null);
+      return;
+    }
+    function place() {
+      const node = triggerRef.current;
+      if (!node) return;
+      const rect = node.getBoundingClientRect();
+      const width = Math.min(384, window.innerWidth - 16);
+      setPopup({
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
+        bottom: window.innerHeight - rect.top + 6,
+        width,
+        // Space above the trigger, capped like the old list height. Keeps the
+        // popup inside the viewport on short windows too.
+        maxHeight: Math.max(200, Math.min(528, rect.top - 12)),
+      });
+    }
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [open]);
 
   const label = active.label || active.persistedKey || "Choose model";
   const filtered = useMemo(() => filterModels(models, query), [models, query]);
@@ -148,6 +184,15 @@ export function ModelPicker({
   }
 
   function onTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (open) {
+      // Normally focus moved into the filter, but Escape must close from the
+      // trigger too (e.g. it arrives before the focus effect runs).
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeToTrigger();
+      }
+      return;
+    }
     if (event.key === "ArrowDown") {
       event.preventDefault();
       requestOpen("down");
@@ -195,44 +240,50 @@ export function ModelPicker({
   return (
     <div
       ref={wrapperRef}
-      className="relative"
+      className="relative min-w-0"
       data-model-picker
       data-model-picker-state={state}
     >
-      <Button
+      <button
         ref={triggerRef}
         type="button"
-        variant="ghost"
-        size="sm"
-        className={`max-w-[14rem]${open ? " bg-elevated text-fg" : ""}`}
         data-model-picker-trigger
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? "model-picker-popup" : undefined}
         aria-label={`Model: ${label}. Open model picker.`}
         aria-describedby={active.isStale ? "model-picker-stale" : undefined}
+        title={label}
         onClick={() => onOpenChange(!open)}
         onKeyDown={onTriggerKeyDown}
+        className={cn(
+          "flex h-7 w-fit max-w-full min-w-0 items-center gap-1 rounded-lg px-2 text-[11px] transition-colors",
+          "text-muted hover:bg-surface hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
+          open && "bg-surface text-fg",
+        )}
       >
-        {active.isStale && <AlertCircle className="text-warn" aria-hidden />}
-        <span className="max-w-[10rem] truncate max-sm:max-w-[7rem]" title={label}>
-          {label}
-        </span>
+        {active.isStale ? (
+          <AlertCircle className="size-3.5 shrink-0 text-warn" aria-hidden />
+        ) : (
+          <Cpu className="size-3.5 shrink-0" aria-hidden />
+        )}
+        <span className="truncate">{label}</span>
         <ChevronDown
-          className={open ? "rotate-180 transition-transform duration-150" : "transition-transform duration-150"}
+          className={cn("size-3 shrink-0 transition-transform duration-150", open && "rotate-180")}
           aria-hidden
         />
-      </Button>
+      </button>
       {active.isStale && (
         <span id="model-picker-stale" className="sr-only">
           Saved model “{active.persistedKey}” is not in this catalog. Showing OpenCode&apos;s default
           {defaultLabel ? ` (${defaultLabel})` : ""}.
         </span>
       )}
-      {open && (
+      {open && popup && (
         <div
           id="model-picker-popup"
-          className="absolute top-full right-0 z-50 mt-2 w-[min(24rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-border bg-elevated shadow-[var(--shadow-border-hover)] focus-within:ring-2 focus-within:ring-accent/40"
+          style={{ left: popup.left, bottom: popup.bottom, width: popup.width, maxHeight: popup.maxHeight }}
+          className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-border bg-elevated shadow-[var(--shadow-border-hover)] focus-within:ring-2 focus-within:ring-accent/40"
         >
           {state === "offline" ? (
             <StatePanel
@@ -298,7 +349,7 @@ export function ModelPicker({
                 role="listbox"
                 id="model-picker-listbox"
                 aria-label="Models"
-                className="scrollbar-thin max-h-[min(28rem,calc(100dvh-10rem))] scroll-pt-9 overflow-y-auto overscroll-contain"
+                className="scrollbar-thin min-h-0 max-h-[min(28rem,calc(100dvh-10rem))] flex-1 scroll-pt-9 overflow-y-auto overscroll-contain"
               >
                 {state === "no-match" ? (
                   <div className="flex flex-col items-center gap-2 px-4 py-8 text-center" role="status">
