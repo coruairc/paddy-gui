@@ -251,6 +251,245 @@ test("config falls back to the v2 default model", async () => {
   assert.ok(calls.some((call) => call.url.includes("/api/model/default")));
 });
 
+test("providers expose the provider-listed model catalog with picker metadata", async () => {
+  const { fetchImpl } = mockFetch((url) => {
+    if (url.includes("/api/provider")) {
+      return {
+        body: {
+          location: {},
+          data: [
+            {
+              id: "opencode-go",
+              integrationID: "opencode",
+              name: "OpenCode Go",
+              models: {
+                "gemini-4-neon": {
+                  id: "gemini-4-neon",
+                  modelID: "gemini-4-neon",
+                  providerID: "opencode-go",
+                  name: "Gemini 4 Neon",
+                  type: "chat",
+                  status: "beta",
+                  enabled: true,
+                  limit: { context: 1_000_000, output: 64_000 },
+                  time: { released: 1_794_960_000_000 },
+                  capabilities: { tools: true },
+                  variants: [{ id: "low" }, { id: "high" }, { id: "max" }],
+                  settings: { baseURL: "https://example.invalid" },
+                  package: "@opencode/ai/providers/opencode-go",
+                  cost: [{ input: 1 }],
+                },
+                "opencode-go/text-embed": {
+                  id: "opencode-go/text-embed",
+                  modelID: "opencode-go/text-embed",
+                  providerID: "opencode-go",
+                  name: "Embed",
+                  type: "embedding",
+                  enabled: false,
+                },
+              },
+            },
+          ],
+        },
+      };
+    }
+    if (url.includes("/api/model/default")) return { body: { location: {}, data: null } };
+    if (url.includes("/api/model")) {
+      return {
+        body: {
+          location: {},
+          data: [
+            { id: "gemini-4-neon", modelID: "gemini-4-neon", providerID: "opencode-go", name: "Catalog Name" },
+            { id: "catalog-only", modelID: "catalog-only", providerID: "opencode-go", name: "Catalog Only" },
+          ],
+        },
+      };
+    }
+    if (url.includes("/api/integration")) return { body: { location: {}, data: [] } };
+    return { body: {} };
+  });
+  const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: fetchImpl });
+  const providers = (await client.getProviders("/work/app")) as {
+    all: { id: string; models?: Record<string, Record<string, unknown>> }[];
+  };
+  const model = providers.all[0].models?.["gemini-4-neon"];
+  assert.ok(model);
+  assert.equal(model.id, "gemini-4-neon");
+  assert.equal(model.providerID, "opencode-go");
+  assert.equal(model.name, "Gemini 4 Neon");
+  assert.equal("catalog-only" in (providers.all[0].models ?? {}), false, "the provider's own catalog wins");
+  assert.equal(model.type, "chat");
+  assert.equal(model.enabled, true);
+  assert.equal(model.status, "beta");
+  assert.deepEqual(model.limit, { context: 1_000_000, output: 64_000 });
+  assert.deepEqual(model.time, { released: 1_794_960_000_000 });
+  assert.deepEqual(model.capabilities, { tools: true });
+  assert.equal(model.variantCount, 3);
+  for (const banned of ["settings", "package", "cost", "variants"]) {
+    assert.equal(banned in model, false, `${banned} must not cross the boundary`);
+  }
+  const embed = providers.all[0].models?.["opencode-go/text-embed"];
+  assert.equal(embed?.type, "embedding");
+  assert.equal(embed?.enabled, false);
+});
+
+test("getProviderCatalog returns raw provider-listed models for server validation", async () => {
+  const { fetchImpl, calls } = mockFetch(() => ({
+    body: {
+      location: {},
+      data: [{ id: "openai", models: { gpt: { modelID: "gpt", providerID: "openai", type: "chat", enabled: true } } }],
+    },
+  }));
+  const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: fetchImpl });
+  const providers = await client.getProviderCatalog("/work/app");
+  assert.equal(providers[0].id, "openai");
+  assert.equal(providers[0].models?.gpt.type, "chat");
+  assert.equal(new URL(calls[0].url).searchParams.get("location[directory]"), "/work/app");
+});
+
+test("getProviderAuth preserves method ids, exact types, labels and form schema", async () => {
+  const { fetchImpl } = mockFetch(() => ({
+    body: {
+      location: {},
+      data: [
+        {
+          id: "openai",
+          methods: [
+            {
+              id: "oauth-chatgpt",
+              type: "oauth",
+              label: "Sign in with ChatGPT",
+              form: [
+                {
+                  key: "label",
+                  type: "string",
+                  title: "Account label",
+                  description: "Shown in OpenCode",
+                  required: false,
+                  placeholder: "Work",
+                },
+              ],
+            },
+            {
+              id: "api-key",
+              type: "key",
+              label: "API key",
+              form: [{ key: "key", type: "string", title: "API key", hidden: true, default: "sk-default-must-not-leak" }],
+            },
+            { type: "env", names: ["OPENAI_API_KEY"] },
+          ],
+          connections: [{ id: "cred_1", value: { type: "key", key: "sk-must-not-leak" } }],
+        },
+      ],
+    },
+  }));
+  const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: fetchImpl });
+  const auth = (await client.getProviderAuth("/work/app")) as Record<string, unknown[]>;
+  assert.deepEqual(auth.openai, [
+    {
+      id: "oauth-chatgpt",
+      type: "oauth",
+      label: "Sign in with ChatGPT",
+      form: [
+        {
+          key: "label",
+          type: "string",
+          title: "Account label",
+          description: "Shown in OpenCode",
+          required: false,
+          placeholder: "Work",
+        },
+      ],
+    },
+    {
+      id: "api-key",
+      type: "key",
+      label: "API key",
+      form: [{ key: "key", type: "string", title: "API key", hidden: true }],
+    },
+    { type: "env", label: "OPENAI_API_KEY" },
+  ]);
+  assert.equal(JSON.stringify(auth).includes("sk-must-not-leak"), false);
+  assert.equal(JSON.stringify(auth).includes("sk-default-must-not-leak"), false);
+  assert.equal(JSON.stringify(auth).includes("connections"), false);
+});
+
+test("OAuth integration proxy uses the exact v2 routes, order and payloads", async () => {
+  const { fetchImpl, calls } = mockFetch((url, init) => {
+    if (url.includes("/connect/oauth/con_1/complete") && init?.method === "POST") return { status: 204 };
+    if (url.includes("/connect/oauth/con_1") && init?.method === "DELETE") return { status: 204 };
+    if (url.includes("/connect/oauth/con_1")) {
+      return { body: { data: { status: "pending", time: { created: 1, expires: 2 } } } };
+    }
+    if (url.includes("/connect/oauth")) {
+      return {
+        body: {
+          data: {
+            attemptID: "con_1",
+            url: "https://auth.example.invalid/authorize?state=abc",
+            instructions: "Sign in and paste the redirect URL",
+            mode: "code",
+            paste: true,
+            time: { created: 1, expires: 2 },
+          },
+        },
+      };
+    }
+    return { body: {} };
+  });
+  const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: fetchImpl });
+
+  const attempt = await client.startOAuthConnect("/work/app", "openai", {
+    methodID: "oauth-chatgpt",
+    answer: { label: "Work" },
+    label: "ChatGPT work",
+  });
+  assert.equal(attempt.attemptID, "con_1");
+  assert.equal(attempt.mode, "code");
+  assert.equal(attempt.paste, true);
+  const start = calls.find((call) => call.url.includes("/connect/oauth") && !call.url.includes("con_1"));
+  assert.ok(start);
+  const startUrl = new URL(String(start.url));
+  assert.equal(startUrl.pathname, "/api/integration/openai/connect/oauth");
+  assert.equal(startUrl.searchParams.get("location[directory]"), "/work/app");
+  assert.equal(start.init?.method, "POST");
+  assert.deepEqual(JSON.parse(String(start.init?.body)), {
+    methodID: "oauth-chatgpt",
+    answer: { label: "Work" },
+    label: "ChatGPT work",
+  });
+
+  const status = await client.getOAuthConnectStatus("/work/app", "openai", "con_1");
+  assert.deepEqual(status, { status: "pending", time: { created: 1, expires: 2 } });
+  const poll = calls.find((call) => call.url.includes("/connect/oauth/con_1") && call.init?.method !== "DELETE" && !call.url.endsWith("/complete"));
+  assert.ok(poll);
+  const pollUrl = new URL(String(poll.url));
+  assert.equal(pollUrl.pathname, "/api/integration/openai/connect/oauth/con_1");
+  assert.equal(pollUrl.searchParams.get("location[directory]"), "/work/app");
+
+  await client.completeOAuthConnect("/work/app", "openai", "con_1", "auth-code-123");
+  const complete = calls.find((call) => call.url.includes("/connect/oauth/con_1/complete"));
+  assert.ok(complete);
+  assert.equal(complete.init?.method, "POST");
+  assert.deepEqual(JSON.parse(String(complete.init?.body)), { code: "auth-code-123" });
+  assert.equal(new URL(String(complete.url)).searchParams.get("location[directory]"), "/work/app");
+
+  await client.cancelOAuthConnect("/work/app", "openai", "con_1");
+  const cancel = calls.find((call) => call.url.includes("/connect/oauth/con_1") && call.init?.method === "DELETE");
+  assert.ok(cancel);
+  assert.equal(new URL(String(cancel.url)).searchParams.get("location[directory]"), "/work/app");
+});
+
+test("OAuth start omits absent optional fields rather than sending nulls", async () => {
+  const { fetchImpl, calls } = mockFetch(() => ({
+    body: { data: { attemptID: "con_2", url: "https://auth.example.invalid", mode: "auto", paste: false } },
+  }));
+  const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: fetchImpl });
+  await client.startOAuthConnect(undefined, "xai", { methodID: "supergrok" });
+  assert.deepEqual(JSON.parse(String(calls[0].init?.body)), { methodID: "supergrok" });
+  assert.equal(new URL(calls[0].url).searchParams.get("location[directory]"), null);
+});
+
 test("providers are adapted for the desk", async () => {
   const { fetchImpl } = mockFetch((url) => {
     if (url.includes("/api/provider")) {

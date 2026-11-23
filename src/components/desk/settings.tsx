@@ -1,5 +1,17 @@
-import { useEffect, useState } from "react";
-import { Plus } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import {
+  Blocks,
+  Bot,
+  Folder,
+  Info,
+  Palette,
+  PlugZap,
+  Plus,
+  Server,
+  Settings2,
+  ShieldCheck,
+  type LucideIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -8,7 +20,9 @@ import { modelSaveFailure } from "@/components/desk/models";
 import {
   api,
   type ConnectionStatus,
+  type OAuthAttempt,
   type Project,
+  type ProviderAuthFormField,
   type ProviderAuthMethod,
   type RuntimeProvider,
 } from "@/lib/desk/client";
@@ -27,14 +41,30 @@ const SECTIONS = [
 
 type Section = (typeof SECTIONS)[number];
 
+/** Desktop nav icons; the native mobile <select> stays unadorned. */
+const SECTION_ICONS: Record<Section, LucideIcon> = {
+  General: Settings2,
+  Connection: PlugZap,
+  Providers: Blocks,
+  Agents: Bot,
+  Permissions: ShieldCheck,
+  MCP: Server,
+  Projects: Folder,
+  Appearance: Palette,
+  About: Info,
+};
+
 export function SettingsPanel({
   status,
   projects,
   appearance,
   model,
+  availableModels = [],
   hasConnectionPassword = false,
   onAppearance,
   onModelChange,
+  onAvailableModelsChange,
+  onCatalogChange,
   onProjectsChange,
   onAddProject,
   onReconnect,
@@ -43,9 +73,15 @@ export function SettingsPanel({
   projects: Project[];
   appearance: "dark" | "light";
   model: string;
+  /** Curated `provider/model` keys added to the composer picker. */
+  availableModels?: string[];
   hasConnectionPassword?: boolean;
   onAppearance: (appearance: "dark" | "light") => void;
   onModelChange: (model: string) => void;
+  /** Called only after the controller accepts the new list. */
+  onAvailableModelsChange?: (models: string[]) => void;
+  /** Invalidate the composer's cached model catalog (providers changed). */
+  onCatalogChange?: () => void;
   onProjectsChange: (projects: Project[]) => void;
   onAddProject: (trigger: HTMLElement | null) => void;
   onReconnect: () => void;
@@ -54,19 +90,23 @@ export function SettingsPanel({
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
       <nav className="hidden w-44 shrink-0 flex-col border-r border-border p-2 sm:flex">
-        {SECTIONS.map((item) => (
-          <button
-            key={item}
-            type="button"
-            className={cn(
-              "flex h-10 w-full items-center rounded-xl px-2.5 text-left text-sm transition-colors",
-              section === item ? "bg-elevated text-fg" : "text-muted hover:bg-surface hover:text-fg",
-            )}
-            onClick={() => setSection(item)}
-          >
-            {item}
-          </button>
-        ))}
+        {SECTIONS.map((item) => {
+          const Icon = SECTION_ICONS[item];
+          return (
+            <button
+              key={item}
+              type="button"
+              className={cn(
+                "flex h-10 w-full items-center rounded-xl px-2.5 text-left text-sm transition-colors",
+                section === item ? "bg-elevated text-fg" : "text-muted hover:bg-surface hover:text-fg",
+              )}
+              onClick={() => setSection(item)}
+            >
+              <Icon className="mr-2 size-4 shrink-0" aria-hidden="true" />
+              {item}
+            </button>
+          );
+        })}
       </nav>
       <div className="scrollbar-thin min-w-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8">
         <div className="mx-auto max-w-2xl">
@@ -81,7 +121,15 @@ export function SettingsPanel({
           <div className="mt-5">
           {section === "General" && <General status={status} />}
           {section === "Connection" && <Connection status={status} onReconnect={onReconnect} hasConnectionPassword={hasConnectionPassword} />}
-          {section === "Providers" && <Providers model={model} onModelChange={onModelChange} />}
+          {section === "Providers" && (
+            <Providers
+              model={model}
+              onModelChange={onModelChange}
+              availableModels={availableModels}
+              onAvailableModelsChange={onAvailableModelsChange}
+              onCatalogChange={onCatalogChange}
+            />
+          )}
           {section === "Agents" && <Agents />}
           {section === "Permissions" && <Permissions />}
           {section === "MCP" && <Mcp />}
@@ -170,28 +218,50 @@ function Connection({ status, onReconnect, hasConnectionPassword = false }: { st
   );
 }
 
-function Providers({ model, onModelChange }: { model: string; onModelChange: (model: string) => void }) {
+function Providers({
+  model,
+  onModelChange,
+  availableModels,
+  onAvailableModelsChange,
+  onCatalogChange,
+}: {
+  model: string;
+  onModelChange: (model: string) => void;
+  availableModels: string[];
+  onAvailableModelsChange?: (models: string[]) => void;
+  onCatalogChange?: () => void;
+}) {
   const [providers, setProviders] = useState<RuntimeProvider[]>([]);
   const [defaults, setDefaults] = useState<Record<string, string>>({});
   const [auth, setAuth] = useState<Record<string, ProviderAuthMethod[]>>({});
   const [connected, setConnected] = useState<string[]>([]);
+  /** Keys currently offered by the composer catalog (`/api/models`), or null when unknown. */
+  const [pickerKeys, setPickerKeys] = useState<Set<string> | null>(null);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
     setError(null);
-    try {
-      const payload = await api.providers();
+    // Providers are the main content; the picker catalog only decides whether a
+    // row is already available, so its failure degrades to "unknown".
+    const [providersResult, modelsResult] = await Promise.allSettled([api.providers(), api.models()]);
+    if (providersResult.status === "fulfilled") {
+      const payload = providersResult.value;
       setProviders(payload.providers?.all ?? []);
       setDefaults(payload.providers?.default ?? {});
       setConnected(payload.providers?.connected ?? []);
       setAuth(payload.auth ?? {});
-    } catch (err) {
+    } else {
+      const err = providersResult.reason;
       setError(err instanceof Error ? err.message : "Could not load provider configuration.");
-    } finally {
-      setLoading(false);
     }
+    setPickerKeys(
+      modelsResult.status === "fulfilled"
+        ? new Set(modelsResult.value.models.map((item) => item.key))
+        : null,
+    );
+    setLoading(false);
   }
 
   useEffect(() => {
@@ -215,17 +285,26 @@ function Providers({ model, onModelChange }: { model: string; onModelChange: (mo
       {error && <p className="text-sm text-danger">{error}</p>}
       {loading && <p className="text-sm text-muted">Loading providers from OpenCode…</p>}
       {!loading && !visible.length && <p className="text-sm text-muted">No providers match this filter.</p>}
-      <div className="space-y-3">
+      <div className="grid items-start gap-3 lg:grid-cols-2">
         {visible.map((provider) => (
           <ProviderCard
             key={provider.id}
             provider={provider}
-            authMethods={auth[provider.id] ?? []}
+            authMethods={auth[provider.integrationID ?? provider.id] ?? auth[provider.id] ?? []}
             connected={connected.includes(provider.id)}
             defaultModel={defaults[provider.id] ?? ""}
             deskModel={model}
+            availableModels={availableModels}
+            pickerKeys={pickerKeys}
             onModelChange={onModelChange}
-            onRefresh={() => void load()}
+            onAvailableModelsChange={(next) => {
+              onAvailableModelsChange?.(next);
+              onCatalogChange?.();
+            }}
+            onRefresh={() => {
+              void load();
+              onCatalogChange?.();
+            }}
           />
         ))}
       </div>
@@ -233,13 +312,25 @@ function Providers({ model, onModelChange }: { model: string; onModelChange: (mo
   );
 }
 
+type ProviderModelRow = {
+  id: string;
+  name: string;
+  status?: string;
+  providerID: string;
+  type?: string;
+  enabled?: boolean;
+};
+
 function ProviderCard({
   provider,
   authMethods,
   connected,
   defaultModel,
   deskModel,
+  availableModels,
+  pickerKeys,
   onModelChange,
+  onAvailableModelsChange,
   onRefresh,
 }: {
   provider: RuntimeProvider;
@@ -247,13 +338,22 @@ function ProviderCard({
   connected: boolean;
   defaultModel: string;
   deskModel: string;
+  availableModels: string[];
+  pickerKeys: Set<string> | null;
   onModelChange: (model: string) => void;
+  onAvailableModelsChange: (models: string[]) => void;
   onRefresh: () => void;
 }) {
-  const models = Object.entries(provider.models ?? {}).map(([key, item]) => ({
+  const integrationID = provider.integrationID ?? provider.id;
+  const models: ProviderModelRow[] = Object.entries(provider.models ?? {}).map(([key, item]) => ({
     id: item.id || key,
     name: item.name || item.id || key,
     status: item.status,
+    // OpenCode may list a model under a provider alias; its own providerID is
+    // the canonical half of the picker key.
+    providerID: item.providerID || provider.id,
+    type: item.type,
+    enabled: item.enabled,
   }));
   const prefix = `${provider.id}/`;
   const currentForProvider = deskModel.startsWith(prefix) ? deskModel.slice(prefix.length) : "";
@@ -264,16 +364,25 @@ function ProviderCard({
   const [keyDraft, setKeyDraft] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pickerNote, setPickerNote] = useState<string | null>(null);
+  const [pickerError, setPickerError] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState(false);
   const [savingModel, setSavingModel] = useState(false);
+  const [savingPicker, setSavingPicker] = useState(false);
 
   useEffect(() => setSelected(currentForProvider || providerDefault || models[0]?.id || ""), [currentForProvider, providerDefault, provider.id]);
 
-  const apiAuth = authMethods.some((method) => method.type === "api");
+  const keyMethod = authMethods.some((method) => method.type === "key" || method.type === "api");
   const filteredModels = models.filter((item) => {
     const filter = modelQuery.trim().toLowerCase();
     return !filter || `${item.name} ${item.id}`.toLowerCase().includes(filter);
   });
+  const selectedModel = models.find((item) => item.id === selected);
+  const selectedKey = selectedModel ? `${selectedModel.providerID}/${selectedModel.id}` : "";
+  const curated = selectedKey !== "" && availableModels.includes(selectedKey);
+  const inPicker = selectedKey !== "" && (pickerKeys?.has(selectedKey) ?? false);
+  const addable =
+    selectedModel !== undefined && selectedModel.type === "chat" && selectedModel.enabled !== false;
 
   async function saveKey() {
     if (!keyDraft.trim()) return;
@@ -281,7 +390,7 @@ function ProviderCard({
     setError(null);
     setNote(null);
     try {
-      await api.setKey(provider.id, keyDraft.trim());
+      await api.setKey(integrationID, keyDraft.trim());
       setKeyDraft("");
       setNote("Credential saved in OpenCode.");
       onRefresh();
@@ -297,7 +406,7 @@ function ProviderCard({
     setError(null);
     setNote(null);
     try {
-      await api.removeKey(provider.id);
+      await api.removeKey(integrationID);
       setNote("Provider credential removed from OpenCode.");
       onRefresh();
     } catch (err) {
@@ -333,6 +442,31 @@ function ProviderCard({
     }
   }
 
+  async function changeAvailability(add: boolean) {
+    if (!selectedKey) return;
+    const next = add
+      ? Array.from(new Set([...availableModels, selectedKey]))
+      : availableModels.filter((key) => key !== selectedKey);
+    setSavingPicker(true);
+    setPickerError(null);
+    setPickerNote(null);
+    try {
+      await api.settings({ availableModels: next });
+      // The parent updates only after the controller accepted the list, so the
+      // UI never claims availability the picker will not have.
+      onAvailableModelsChange(next);
+      setPickerNote(
+        add ? "Added to the composer chat picker." : "Removed from the composer chat picker.",
+      );
+    } catch (err) {
+      setPickerError(
+        err instanceof Error ? err.message : "Could not update the composer chat picker.",
+      );
+    } finally {
+      setSavingPicker(false);
+    }
+  }
+
   return (
     <details className="group rounded-xl border border-border bg-elevated shadow-[var(--shadow-border)]">
       <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3 [&::-webkit-details-marker]:hidden">
@@ -353,13 +487,32 @@ function ProviderCard({
               <p className="text-xs text-subtle">OpenCode environment keys: <span className="font-mono">{provider.env.join(", ")}</span></p>
             ) : null}
             {authMethods.length ? (
-              <ul className="space-y-1 text-xs text-muted">
+              <ul className="space-y-2 text-xs text-muted">
                 {authMethods.map((method, index) => (
-                  <li key={`${method.type ?? "auth"}-${index}`}>{method.label || method.type || "Authentication supported"}</li>
+                  <li key={`${method.id ?? method.type ?? "auth"}-${index}`}>
+                    {method.type === "oauth" ? (
+                      <OAuthSignIn
+                        integrationID={integrationID}
+                        method={method}
+                        providerName={provider.name || provider.id}
+                        onRefresh={onRefresh}
+                      />
+                    ) : (
+                      <div className="space-y-0.5">
+                        <p>{method.label || method.type || "Authentication supported"}</p>
+                        {method.type === "env" && (
+                          <p className="text-subtle">OpenCode reads this credential from the environment.</p>
+                        )}
+                        {method.type === "external" && (
+                          <p className="text-subtle">Sign in through this provider outside Paddy, then reconnect.</p>
+                        )}
+                      </div>
+                    )}
+                  </li>
                 ))}
               </ul>
             ) : <p className="text-xs text-subtle">OpenCode reports no interactive authentication methods for this provider.</p>}
-            {apiAuth ? (
+            {keyMethod ? (
               <>
                 <Input type="password" value={keyDraft} onChange={(event) => setKeyDraft(event.target.value)} placeholder={`API key for ${provider.name || provider.id}`} autoComplete="off" />
                 <div className="flex flex-wrap gap-2">
@@ -369,7 +522,8 @@ function ProviderCard({
                   {connected && <Button size="sm" variant="outline" onClick={() => void removeKey()} disabled={savingKey}>Remove credential</Button>}
                 </div>
               </>
-            ) : (
+            ) : null}
+            {!keyMethod && !authMethods.some((method) => method.type === "oauth") && (
               <p className="text-xs text-subtle">Configure this provider using its OpenCode sign-in method.</p>
             )}
           </section>
@@ -385,17 +539,44 @@ function ProviderCard({
                   size={Math.min(6, Math.max(3, filteredModels.length))}
                   className="w-full rounded-lg border border-border bg-bg p-1 text-xs"
                   value={selected}
-                  onChange={(event) => setSelected(event.target.value)}
+                  onChange={(event) => {
+                    setSelected(event.target.value);
+                    setPickerNote(null);
+                    setPickerError(null);
+                  }}
                 >
                   {filteredModels.slice(0, 100).map((item) => (
                     <option key={item.id} value={item.id}>
-                      {item.name}{item.status && item.status !== "active" ? ` · ${item.status}` : ""}
+                      {item.name}
+                      {item.status && item.status !== "active" ? ` · ${item.status}` : ""}
+                      {item.enabled === false ? " · disabled" : ""}
                     </option>
                   ))}
                 </select>
                 <Button size="sm" variant="outline" onClick={() => void setDeskDefault()} disabled={!selected || savingModel}>
                   {savingModel ? "Saving…" : currentForProvider === selected ? "Current desk default" : "Use as desk default"}
                 </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {curated ? (
+                    <Button size="sm" variant="outline" onClick={() => void changeAvailability(false)} disabled={savingPicker}>
+                      {savingPicker ? "Saving…" : "Remove from chat picker"}
+                    </Button>
+                  ) : inPicker ? (
+                    <span className="text-xs text-subtle">In chat picker</span>
+                  ) : pickerKeys === null ? (
+                    <span className="text-xs text-subtle">Chat picker list unavailable</span>
+                  ) : addable ? (
+                    <Button size="sm" variant="outline" onClick={() => void changeAvailability(true)} disabled={savingPicker}>
+                      {savingPicker ? "Saving…" : "Add to chat picker"}
+                    </Button>
+                  ) : (
+                    <span className="text-xs text-subtle">
+                      {selectedModel?.type !== "chat" ? "Not a chat model" : "Disabled in OpenCode"}
+                    </span>
+                  )}
+                </div>
+                {pickerNote && <p role="status" className="text-xs text-ok">{pickerNote}</p>}
+                {pickerError && <p role="alert" className="text-xs text-danger">{pickerError}</p>}
               </>
             ) : <p className="text-xs text-subtle">OpenCode reports no models for this provider.</p>}
           </section>
@@ -404,6 +585,408 @@ function ProviderCard({
         {error && <p className="text-xs text-danger">{error}</p>}
       </div>
     </details>
+  );
+}
+
+const OAUTH_POLL_MS = 2_000;
+const OAUTH_MAX_POLLS = 300;
+
+type OAuthPhase = "idle" | "starting" | "pending" | "complete" | "failed";
+
+/** OpenCode form conditions: hide a field until its `when` matchers pass. */
+function fieldVisible(
+  field: ProviderAuthFormField,
+  answers: Record<string, string | boolean>,
+): boolean {
+  if (!field.when?.length) return true;
+  return field.when.every((condition) => {
+    if (!condition.key) return true;
+    const value = answers[condition.key];
+    const same = (expected: unknown) =>
+      value === expected || String(value) === String(expected);
+    switch (condition.op) {
+      case "eq":
+        return same(condition.value);
+      case "neq":
+        return !same(condition.value);
+      case "in":
+        return Array.isArray(condition.value) && condition.value.some(same);
+      case "not_in":
+        return Array.isArray(condition.value) && !condition.value.some(same);
+      default:
+        // Unknown operator: do not hide a field the user may need.
+        return true;
+    }
+  });
+}
+
+function OAuthSignIn({
+  integrationID,
+  method,
+  providerName,
+  onRefresh,
+}: {
+  integrationID: string;
+  method: ProviderAuthMethod;
+  providerName: string;
+  onRefresh: () => void;
+}) {
+  const fieldId = useId();
+  const methodID = method.id ?? "";
+  const allFields = (method.form ?? []).filter(
+    (field): field is ProviderAuthFormField & { key: string } => Boolean(field.key) && !field.hidden,
+  );
+  const [answers, setAnswers] = useState<Record<string, string | boolean>>({});
+  const fields = allFields.filter((field) => fieldVisible(field, answers));
+  const [phase, setPhase] = useState<OAuthPhase>("idle");
+  const [attempt, setAttempt] = useState<OAuthAttempt | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle");
+  const [completing, setCompleting] = useState(false);
+  const timerRef = useRef<number | null>(null);
+  const pollCount = useRef(0);
+  const attemptRef = useRef<string | null>(null);
+  /** True when there is no live attempt the teardown should cancel. */
+  const settledRef = useRef(true);
+  const aliveRef = useRef(true);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      const live = attemptRef.current;
+      if (live && !settledRef.current) {
+        attemptRef.current = null;
+        settledRef.current = true;
+        void api.cancelOAuth(integrationID, live).catch(() => undefined);
+      }
+    };
+  }, [integrationID]);
+
+  function stopPolling() {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }
+
+  function fieldAnswer(field: (typeof fields)[number]): string | boolean {
+    const value = answers[field.key];
+    if (value !== undefined) return value;
+    if (field.type === "boolean") return false;
+    return "";
+  }
+
+  function hasAnswer(field: (typeof fields)[number]): boolean {
+    const value = fieldAnswer(field);
+    return typeof value === "boolean" ? value : value.trim() !== "";
+  }
+
+  function answerPayload(): Record<string, unknown> | undefined {
+    const payload: Record<string, unknown> = {};
+    for (const field of fields) {
+      const value = fieldAnswer(field);
+      if (typeof value === "boolean") {
+        payload[field.key] = value;
+      } else if (value.trim() !== "") {
+        payload[field.key] = value.trim();
+      }
+    }
+    return Object.keys(payload).length ? payload : undefined;
+  }
+
+  async function poll(attemptID: string) {
+    if (!aliveRef.current) return;
+    if (pollCount.current >= OAUTH_MAX_POLLS) {
+      stopPolling();
+      settledRef.current = true;
+      attemptRef.current = null;
+      setAttempt(null);
+      setPhase("failed");
+      setError("Sign-in timed out. Try again.");
+      void api.cancelOAuth(integrationID, attemptID).catch(() => undefined);
+      return;
+    }
+    pollCount.current += 1;
+    try {
+      const data = await api.oauthStatus(integrationID, attemptID);
+      if (!aliveRef.current || attemptRef.current !== attemptID) return;
+      const next = data.attempt;
+      if (next.status === "pending") {
+        setStatusMessage(next.message || "Waiting for you to finish signing in…");
+        timerRef.current = window.setTimeout(() => {
+          timerRef.current = null;
+          void poll(attemptID);
+        }, OAUTH_POLL_MS);
+        return;
+      }
+      stopPolling();
+      settledRef.current = true;
+      attemptRef.current = null;
+      setAttempt(null);
+      setCode("");
+      if (next.status === "complete") {
+        setPhase("complete");
+        setStatusMessage("Signed in. Provider and model data refreshed.");
+        setError(null);
+        setAnswers({});
+        onRefresh();
+        return;
+      }
+      setPhase("failed");
+      setError(
+        next.message ||
+          (next.status === "expired"
+            ? "This sign-in link expired. Try again."
+            : "Sign-in did not complete. Try again."),
+      );
+    } catch (err) {
+      if (!aliveRef.current || attemptRef.current !== attemptID) return;
+      stopPolling();
+      setPhase("failed");
+      setError(err instanceof Error ? err.message : "Could not check sign-in status. Try again.");
+    }
+  }
+
+  async function start() {
+    if (!methodID) {
+      setError("OpenCode did not provide a method id for this sign-in.");
+      return;
+    }
+    const missing = fields.some((field) => field.required && !hasAnswer(field));
+    if (missing) {
+      setError("Fill the required fields before signing in.");
+      return;
+    }
+    stopPolling();
+    const previous = attemptRef.current;
+    attemptRef.current = null;
+    settledRef.current = true;
+    if (previous) void api.cancelOAuth(integrationID, previous).catch(() => undefined);
+    setAttempt(null);
+    setPhase("starting");
+    setError(null);
+    setStatusMessage(null);
+    setCode("");
+    setCopied("idle");
+    const answer = answerPayload();
+    try {
+      const data = await api.startOAuth(integrationID, methodID, {
+        ...(answer ? { answer } : {}),
+        ...(method.label ? { label: method.label } : {}),
+      });
+      if (!aliveRef.current) {
+        void api.cancelOAuth(integrationID, data.attempt.attemptID).catch(() => undefined);
+        return;
+      }
+      attemptRef.current = data.attempt.attemptID;
+      settledRef.current = false;
+      pollCount.current = 0;
+      setAttempt(data.attempt);
+      setPhase("pending");
+      setStatusMessage("Waiting for you to finish signing in…");
+      timerRef.current = window.setTimeout(() => {
+        timerRef.current = null;
+        void poll(data.attempt.attemptID);
+      }, OAUTH_POLL_MS);
+    } catch (err) {
+      if (!aliveRef.current) return;
+      setPhase("failed");
+      setError(err instanceof Error ? err.message : "Could not start sign-in. Try again.");
+    }
+  }
+
+  async function complete() {
+    if (!attempt || completing) return;
+    const trimmed = code.trim();
+    if (!trimmed) {
+      setError("Enter the authorization code or pasted redirect URL.");
+      return;
+    }
+    setCompleting(true);
+    setPhase("pending");
+    setError(null);
+    setStatusMessage("Verifying sign-in…");
+    try {
+      await api.completeOAuth(integrationID, attempt.attemptID, trimmed);
+      if (!aliveRef.current || attemptRef.current !== attempt.attemptID) return;
+      setCode("");
+      void poll(attempt.attemptID);
+    } catch (err) {
+      if (!aliveRef.current || attemptRef.current !== attempt.attemptID) return;
+      setPhase("pending");
+      setError(err instanceof Error ? err.message : "Could not submit that code. Try again.");
+      if (timerRef.current === null) {
+        timerRef.current = window.setTimeout(() => {
+          timerRef.current = null;
+          void poll(attempt.attemptID);
+        }, OAUTH_POLL_MS);
+      }
+    } finally {
+      if (aliveRef.current) setCompleting(false);
+    }
+  }
+
+  async function cancel() {
+    const live = attempt?.attemptID ?? attemptRef.current;
+    stopPolling();
+    attemptRef.current = null;
+    settledRef.current = true;
+    setAttempt(null);
+    setPhase("idle");
+    setCode("");
+    setError(null);
+    setCopied("idle");
+    if (!live) {
+      setStatusMessage("Sign-in cancelled.");
+      return;
+    }
+    try {
+      await api.cancelOAuth(integrationID, live);
+      if (aliveRef.current) setStatusMessage("Sign-in cancelled.");
+    } catch {
+      if (aliveRef.current) setStatusMessage("Sign-in cancelled here; the OpenCode attempt may still expire on its own.");
+    }
+  }
+
+  async function copyLink() {
+    if (!attempt?.url) return;
+    try {
+      await navigator.clipboard.writeText(attempt.url);
+      setCopied("copied");
+    } catch {
+      setCopied("failed");
+    }
+  }
+
+  const busy = phase === "starting" || (phase === "pending" && attempt === null);
+  const label = method.label || `Sign in with ${providerName}`;
+
+  return (
+    <div className="rounded-lg border border-border px-3 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-fg">{label}</p>
+        {phase !== "pending" && phase !== "starting" && (
+          <Button size="sm" variant="outline" onClick={() => void start()} disabled={!methodID || busy}>
+            {phase === "failed" ? "Try again" : "Sign in"}
+          </Button>
+        )}
+        {phase === "starting" && <span role="status" className="text-xs text-muted">Starting sign-in…</span>}
+      </div>
+
+      {fields.length > 0 && !attempt && phase !== "complete" && (
+        <div className="mt-2 space-y-2">
+          {fields.map((field, index) => {
+            const id = `${fieldId}-${index}`;
+            const value = fieldAnswer(field);
+            const options = field.options?.filter((option) => option.value !== undefined) ?? [];
+            return (
+              <div key={field.key} className="space-y-1">
+                <label htmlFor={id} className="block text-xs text-muted">
+                  {field.title || field.key}
+                  {field.required ? " *" : ""}
+                </label>
+                {field.description && <p className="text-[11px] text-subtle">{field.description}</p>}
+                {options.length ? (
+                  <select
+                    id={id}
+                    className="h-8 w-full rounded-md border border-border bg-surface px-2 text-xs text-fg"
+                    value={typeof value === "boolean" ? "" : value}
+                    onChange={(event) =>
+                      setAnswers((current) => ({ ...current, [field.key]: event.target.value }))
+                    }
+                  >
+                    <option value="">Select…</option>
+                    {options.map((option, optionIndex) => (
+                      <option key={optionIndex} value={String(option.value)}>
+                        {option.label || String(option.value)}
+                      </option>
+                    ))}
+                  </select>
+                ) : field.type === "boolean" ? (
+                  <input
+                    id={id}
+                    type="checkbox"
+                    className="size-4 accent-[var(--accent)]"
+                    checked={value === true}
+                    onChange={(event) =>
+                      setAnswers((current) => ({ ...current, [field.key]: event.target.checked }))
+                    }
+                  />
+                ) : (
+                  <Input
+                    id={id}
+                    type={field.type === "password" || field.format === "password" ? "password" : "text"}
+                    className="h-8 text-xs"
+                    value={typeof value === "boolean" ? "" : value}
+                    placeholder={field.placeholder}
+                    autoComplete="off"
+                    onChange={(event) =>
+                      setAnswers((current) => ({ ...current, [field.key]: event.target.value }))
+                    }
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {attempt && (
+        <div className="mt-2 space-y-2">
+          {attempt.instructions && <p className="text-xs text-muted">{attempt.instructions}</p>}
+          <div className="flex flex-wrap items-center gap-2">
+            {attempt.url && (
+              <Button asChild size="sm" variant="outline">
+                <a href={attempt.url} target="_blank" rel="noopener noreferrer">
+                  Open sign-in
+                </a>
+              </Button>
+            )}
+            {attempt.url && (
+              <Button size="sm" variant="outline" onClick={() => void copyLink()}>
+                Copy link
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" onClick={() => void cancel()}>
+              Cancel
+            </Button>
+            {copied === "copied" && <span role="status" className="text-xs text-ok">Copied.</span>}
+            {copied === "failed" && (
+              <span role="alert" className="text-xs text-danger">Could not copy the link. Open it instead.</span>
+            )}
+          </div>
+          {(attempt.mode === "code" || attempt.paste) && (
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="min-w-0 flex-1 space-y-1">
+                <label htmlFor={`${fieldId}-code`} className="block text-xs text-muted">
+                  {attempt.paste ? "Paste the redirect URL or code" : "Authorization code"}
+                </label>
+                <Input
+                  id={`${fieldId}-code`}
+                  className="h-8 text-xs"
+                  value={code}
+                  autoComplete="off"
+                  onChange={(event) => setCode(event.target.value)}
+                />
+              </div>
+              <Button size="sm" onClick={() => void complete()} disabled={!code.trim() || completing}>
+                {completing ? "Completing…" : "Complete"}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {statusMessage && <p role="status" className="mt-1 text-xs text-muted">{statusMessage}</p>}
+      {error && <p role="alert" className="mt-1 text-xs text-danger">{error}</p>}
+    </div>
   );
 }
 

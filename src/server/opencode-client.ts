@@ -142,6 +142,89 @@ export type OpenCodeMcpServer = {
   integrationID?: string;
 };
 
+export type OpenCodeProviderModel = Omit<OpenCodeModel, "capabilities"> & {
+  /** OpenCode's model kind; only `chat` models are valid for the picker. */
+  type?: string;
+  enabled?: boolean;
+  time?: { released?: number };
+  capabilities?: {
+    tools?: boolean;
+    reasoning?: boolean;
+    attachment?: boolean;
+    toolcall?: boolean;
+    input?: string[];
+    output?: string[];
+    temperature?: boolean;
+  };
+  variants?: Array<{ id?: string }>;
+};
+
+/** A provider entry from `GET /api/provider`; `models` is OpenCode's own
+ *  provider-listed catalog (not the smaller `/api/model` picker catalog). */
+export type OpenCodeProviderInfo = {
+  id?: string;
+  integrationID?: string;
+  name?: string;
+  models?: Record<string, OpenCodeProviderModel>;
+};
+
+/** Form schema attached to an integration auth method (`Form.Field`). */
+export type OpenCodeAuthFormField = {
+  key?: string;
+  type?: string;
+  title?: string;
+  description?: string;
+  required?: boolean;
+  hidden?: boolean;
+  format?: string;
+  placeholder?: string;
+  pattern?: string;
+  default?: unknown;
+  options?: Array<{ value?: unknown; label?: string; description?: string }>;
+  minLength?: number;
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
+  minItems?: number;
+  maxItems?: number;
+  custom?: boolean;
+  when?: Array<{ key?: string; op?: string; value?: unknown }>;
+  /** External form fields only. */
+  url?: string;
+};
+
+export type OpenCodeIntegrationMethod = {
+  id?: string;
+  type?: string;
+  label?: string;
+  names?: string[];
+  command?: string;
+  form?: OpenCodeAuthFormField[];
+};
+
+export type OpenCodeIntegration = {
+  id?: string;
+  name?: string;
+  methods?: OpenCodeIntegrationMethod[];
+  connections?: unknown[];
+};
+
+/** Unwrapped `POST /api/integration/:id/connect/oauth` result. Never a credential. */
+export type OpenCodeOAuthAttempt = {
+  attemptID: string;
+  url: string;
+  instructions?: string;
+  mode?: "auto" | "code" | string;
+  paste?: boolean;
+  time?: { created?: number; expires?: number };
+};
+
+export type OpenCodeOAuthAttemptStatus = {
+  status?: "pending" | "complete" | "failed" | "expired" | string;
+  message?: string;
+  time?: { created?: number; expires?: number };
+};
+
 export class OpenCodeError extends Error {
   status: number;
   retryable: boolean;
@@ -375,6 +458,16 @@ export class OpenCodeClient {
     });
   }
 
+  /**
+   * `GET /api/provider` raw provider entries. Unlike `getProviders`, this keeps
+   * OpenCode's provider-listed models (including ones absent from the smaller
+   * `/api/model` picker catalog) so the controller can validate additions.
+   */
+  async getProviderCatalog(directory?: string): Promise<OpenCodeProviderInfo[]> {
+    const data = await this.request("GET", "/api/provider", { query: locationQuery(directory) });
+    return asArray<OpenCodeProviderInfo>(data);
+  }
+
   async getProviders(directory?: string): Promise<unknown> {
     const query = locationQuery(directory);
     const [providerList, modelList, integrations, defaultModel] = await Promise.all([
@@ -396,12 +489,28 @@ export class OpenCodeClient {
     const all = providers.map((provider) => {
       const id = String(provider.id ?? "");
       const integrationID = String(provider.integrationID ?? id);
-      const providerModels: Record<string, OpenCodeModel> = {};
-      for (const model of models) {
-        if (model.providerID !== id && model.providerID !== integrationID) continue;
-        const key = model.modelID ?? model.id ?? "";
-        if (!key) continue;
-        providerModels[key] = { ...model, id: model.modelID ?? model.id };
+      // Prefer the provider's own models. Those carry the authoritative
+      // providerID/type/enabled metadata and include models the `/api/model`
+      // picker catalog omits. The `/api/model` match stays as a fallback for
+      // older servers/tests whose provider entry has no `models` record.
+      const providerModels: Record<string, Record<string, unknown>> = {};
+      const rawModels =
+        provider.models && typeof provider.models === "object"
+          ? (provider.models as Record<string, OpenCodeProviderModel>)
+          : {};
+      if (Object.keys(rawModels).length > 0) {
+        for (const [key, model] of Object.entries(rawModels)) {
+          const modelId = model?.modelID ?? model?.id ?? key;
+          if (!modelId) continue;
+          providerModels[modelId] = projectProviderModel(model ?? {}, modelId);
+        }
+      } else {
+        for (const model of models) {
+          if (model.providerID !== id && model.providerID !== integrationID) continue;
+          const key = model.modelID ?? model.id ?? "";
+          if (!key) continue;
+          providerModels[key] = projectProviderModel(model, key);
+        }
       }
       return { ...provider, models: providerModels };
     });
@@ -418,31 +527,83 @@ export class OpenCodeClient {
     };
   }
 
-  /**
-   * v2 lists integrations and their auth methods. Map them back to the
-   * provider -> method list the desk renders; never expose credentials.
-   */
-  async getProviderAuth(directory?: string): Promise<unknown> {
+  /** `GET /api/integration`: methods and their form schema. Credentials live in
+   *  `connections`, which this method deliberately does not return. */
+  async listIntegrations(directory?: string): Promise<OpenCodeIntegration[]> {
     const data = await this.request("GET", "/api/integration", {
       query: locationQuery(directory),
     });
-    const auth: Record<string, { type: string; label: string }[]> = {};
-    for (const integration of asArray<Record<string, unknown>>(data)) {
+    return asArray<OpenCodeIntegration>(data);
+  }
+
+  /**
+   * v2 lists integrations and their auth methods. Map them back to the
+   * provider -> method list the desk renders; never expose credentials.
+   * Method ids, exact types and form schema are preserved for OAuth/metadata.
+   */
+  async getProviderAuth(directory?: string): Promise<unknown> {
+    const integrations = await this.listIntegrations(directory);
+    const auth: Record<string, Array<Record<string, unknown>>> = {};
+    for (const integration of integrations) {
       const id = String(integration.id ?? "");
-      const methods = asArray<Record<string, unknown>>(integration.methods);
+      const methods = asArray<OpenCodeIntegrationMethod>(integration.methods);
       if (!id || !methods.length) continue;
-      auth[id] = methods.map((method) => {
-        const type = String(method.type ?? "");
-        const names = Array.isArray(method.names) ? method.names.map(String) : [];
-        return {
-          type: type === "key" ? "api" : type,
-          label:
-            (typeof method.label === "string" && method.label) ||
-            (names.length ? names.join(", ") : type === "key" ? "API key" : type),
-        };
-      });
+      auth[id] = methods.map((method) => projectAuthMethod(method));
     }
     return auth;
+  }
+
+  /** Start an OpenCode-managed OAuth attempt; the authorization URL is upstream-owned. */
+  async startOAuthConnect(
+    directory: string | undefined,
+    integrationID: string,
+    input: { methodID: string; answer?: Record<string, unknown>; label?: string },
+  ): Promise<OpenCodeOAuthAttempt> {
+    const body: Record<string, unknown> = { methodID: input.methodID };
+    if (input.answer !== undefined) body.answer = input.answer;
+    if (input.label !== undefined) body.label = input.label;
+    return (await this.request(
+      "POST",
+      `/api/integration/${encodeURIComponent(integrationID)}/connect/oauth`,
+      { query: locationQuery(directory), body },
+    )) as OpenCodeOAuthAttempt;
+  }
+
+  async getOAuthConnectStatus(
+    directory: string | undefined,
+    integrationID: string,
+    attemptID: string,
+  ): Promise<OpenCodeOAuthAttemptStatus> {
+    return (await this.request(
+      "GET",
+      `/api/integration/${encodeURIComponent(integrationID)}/connect/oauth/${encodeURIComponent(attemptID)}`,
+      { query: locationQuery(directory) },
+    )) as OpenCodeOAuthAttemptStatus;
+  }
+
+  async completeOAuthConnect(
+    directory: string | undefined,
+    integrationID: string,
+    attemptID: string,
+    code?: string,
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      `/api/integration/${encodeURIComponent(integrationID)}/connect/oauth/${encodeURIComponent(attemptID)}/complete`,
+      { query: locationQuery(directory), body: code === undefined ? {} : { code } },
+    );
+  }
+
+  async cancelOAuthConnect(
+    directory: string | undefined,
+    integrationID: string,
+    attemptID: string,
+  ): Promise<void> {
+    await this.request(
+      "DELETE",
+      `/api/integration/${encodeURIComponent(integrationID)}/connect/oauth/${encodeURIComponent(attemptID)}`,
+      { query: locationQuery(directory) },
+    );
   }
 
   async setApiKey(providerId: string, key: string): Promise<void> {
@@ -732,6 +893,111 @@ function unwrapData(data: unknown): unknown {
 
 /** Page size for the session list; matches OpenCode v2.3.2's documented default ("newest 50"). */
 export const SESSION_PAGE_LIMIT = 50;
+
+/** Browser-safe projection of a provider-listed model: no settings, costs, or
+ *  vendor request bodies. */
+function projectProviderModel(model: OpenCodeProviderModel, id: string): Record<string, unknown> {
+  const projected: Record<string, unknown> = { id };
+  if (typeof model.modelID === "string" && model.modelID) projected.modelID = model.modelID;
+  if (typeof model.providerID === "string" && model.providerID) projected.providerID = model.providerID;
+  if (typeof model.name === "string" && model.name) projected.name = model.name;
+  if (typeof model.type === "string" && model.type) projected.type = model.type;
+  if (typeof model.enabled === "boolean") projected.enabled = model.enabled;
+  if (typeof model.status === "string" && model.status) projected.status = model.status;
+  if (model.limit && typeof model.limit === "object") {
+    const limit: Record<string, number> = {};
+    for (const key of ["context", "input", "output"] as const) {
+      const value = model.limit[key];
+      if (typeof value === "number") limit[key] = value;
+    }
+    if (Object.keys(limit).length) projected.limit = limit;
+  }
+  if (typeof model.time?.released === "number") projected.time = { released: model.time.released };
+  if (model.capabilities && typeof model.capabilities === "object") {
+    const capabilities: Record<string, unknown> = {};
+    for (const key of ["tools", "reasoning", "attachment", "temperature"] as const) {
+      if (typeof model.capabilities[key] === "boolean") capabilities[key] = model.capabilities[key];
+    }
+    for (const key of ["input", "output"] as const) {
+      if (Array.isArray(model.capabilities[key])) {
+        capabilities[key] = (model.capabilities[key] as unknown[]).filter((item) => typeof item === "string");
+      }
+    }
+    if (Object.keys(capabilities).length) projected.capabilities = capabilities;
+  }
+  if (Array.isArray(model.variants)) projected.variantCount = model.variants.length;
+  return projected;
+}
+
+/** Project an integration auth method: keep the id/type/label/form schema the
+ *  UI needs, never `connections` or any credential value. */
+function projectAuthMethod(method: OpenCodeIntegrationMethod): Record<string, unknown> {
+  const type = typeof method.type === "string" ? method.type : "";
+  const names = Array.isArray(method.names) ? method.names.filter((item) => typeof item === "string") : [];
+  const projected: Record<string, unknown> = {
+    type,
+    label:
+      (typeof method.label === "string" && method.label) ||
+      (names.length ? names.join(", ") : type === "key" ? "API key" : type),
+  };
+  if (typeof method.id === "string" && method.id) projected.id = method.id;
+  if (Array.isArray(method.form)) {
+    projected.form = method.form
+      .map((field) => projectAuthFormField(field))
+      .filter((field): field is Record<string, unknown> => field !== null);
+  }
+  return projected;
+}
+
+function projectAuthFormField(field: OpenCodeAuthFormField): Record<string, unknown> | null {
+  if (!field || typeof field !== "object") return null;
+  const type = typeof field.type === "string" ? field.type : "";
+  if (!type) return null;
+  const projected: Record<string, unknown> = { type };
+  for (const key of ["key", "title", "description", "format", "placeholder", "pattern"] as const) {
+    if (typeof field[key] === "string" && field[key]) projected[key] = field[key];
+  }
+  for (const key of ["required", "hidden", "custom"] as const) {
+    if (typeof field[key] === "boolean") projected[key] = field[key];
+  }
+  for (const key of ["minLength", "maxLength", "minimum", "maximum", "minItems", "maxItems"] as const) {
+    if (typeof field[key] === "number") projected[key] = field[key];
+  }
+  // Hidden fields are filled by OpenCode; never echo a possible default.
+  if (!field.hidden && isScalarOrScalarArray(field.default)) projected.default = field.default;
+  if (Array.isArray(field.options)) {
+    projected.options = field.options
+      .slice(0, 200)
+      .flatMap((option) => {
+        if (!option || typeof option !== "object" || !isScalar(option.value)) return [];
+        const clean: Record<string, unknown> = { value: option.value };
+        if (typeof option.label === "string") clean.label = option.label;
+        if (typeof option.description === "string") clean.description = option.description;
+        return [clean];
+      });
+  }
+  if (Array.isArray(field.when)) {
+    projected.when = field.when
+      .slice(0, 50)
+      .flatMap((condition) => {
+        if (!condition || typeof condition !== "object") return [];
+        if (typeof condition.key !== "string" || !isScalar(condition.value)) return [];
+        return [{ key: condition.key, op: condition.op, value: condition.value }];
+      });
+  }
+  if (typeof field.url === "string" && field.url) projected.url = field.url;
+  return projected;
+}
+
+function isScalar(value: unknown): boolean {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+function isScalarOrScalarArray(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (isScalar(value)) return true;
+  return Array.isArray(value) && value.every((item) => isScalar(item));
+}
 
 function asArray<T>(data: unknown): T[] {
   return Array.isArray(data) ? (data as T[]) : [];

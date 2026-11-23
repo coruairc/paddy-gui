@@ -108,6 +108,109 @@ function runtimeWithProject() {
       default: {},
       key: "sk-should-not-leak",
     }),
+    getProviderCatalog: async () => [
+      {
+        id: "openai",
+        integrationID: "openai",
+        name: "OpenAI",
+        models: {
+          "gpt-6.2-astra": {
+            id: "gpt-6.2-astra",
+            modelID: "gpt-6.2-astra",
+            providerID: "openai",
+            name: "GPT-6.2 Astra",
+            type: "chat",
+            status: "active",
+            enabled: true,
+            limit: { context: 628000 },
+            time: { released: 1794960000000 },
+            capabilities: { tools: true },
+            variants: [{ id: "low" }, { id: "high" }],
+          },
+          "gpt-6.2-disabled": {
+            id: "gpt-6.2-disabled",
+            modelID: "gpt-6.2-disabled",
+            providerID: "openai",
+            name: "GPT-6.2 Disabled",
+            type: "chat",
+            enabled: false,
+          },
+          "text-embed": {
+            id: "text-embed",
+            modelID: "text-embed",
+            providerID: "openai",
+            name: "Text Embed",
+            type: "embedding",
+            enabled: true,
+          },
+        },
+      },
+      {
+        id: "opencode-go",
+        integrationID: "opencode",
+        name: "OpenCode Go",
+        models: {
+          "gemini-4-neon": {
+            id: "gemini-4-neon",
+            modelID: "gemini-4-neon",
+            providerID: "opencode-go",
+            name: "Gemini 4 Neon",
+            type: "chat",
+            status: "beta",
+            enabled: true,
+            limit: { context: 1000000 },
+            time: { released: 1795000000000 },
+            capabilities: { tools: false },
+            variants: [{ id: "low" }, { id: "high" }, { id: "max" }],
+          },
+        },
+      },
+    ],
+    listIntegrations: async () => [
+      {
+        id: "openai",
+        methods: [
+          {
+            id: "oauth-chatgpt",
+            type: "oauth",
+            label: "Sign in with ChatGPT",
+            form: [{ key: "label", type: "string", title: "Account label" }],
+          },
+          { id: "api-key", type: "key", label: "API key" },
+        ],
+      },
+      {
+        id: "xai",
+        methods: [{ id: "supergrok", type: "oauth", label: "SuperGrok Subscription" }],
+      },
+    ],
+    startOAuthConnect: async (
+      _directory: string | undefined,
+      integrationID: string,
+      input: { methodID: string },
+    ) => {
+      calls.push(`oauth-start:${integrationID}:${input.methodID}`);
+      return {
+        attemptID: "con_1",
+        url: "https://auth.example.invalid/authorize?state=abc",
+        instructions: "Sign in",
+        mode: "auto",
+        paste: false,
+        time: { created: 1, expires: 2 },
+      };
+    },
+    getOAuthConnectStatus: async () => ({ status: "pending", time: { created: 1, expires: 2 } }),
+    completeOAuthConnect: async (
+      _directory: string | undefined,
+      _integrationID: string,
+      _attemptID: string,
+      code?: string,
+    ) => {
+      calls.push(`oauth-complete:${code ?? ""}`);
+    },
+    cancelOAuthConnect: async () => {
+      calls.push("oauth-cancel");
+    },
     getProviderAuth: async () => ({ openai: [{ type: "api", label: "API key" }] }),
     getAgents: async () => [],
     getMcp: async () => ({}),
@@ -260,6 +363,339 @@ test("model keys and default survive redaction with a registered needle", async 
   );
   assert.equal(body.default, "google/gemini-3");
   assert.equal(JSON.stringify(body).includes('"modelKey"'), false);
+});
+
+// ── Curated model availability (Settings → Providers "Add to chat") ───────
+test("availableModels accepts provider-listed chat models, dedupes, and never changes deskModel", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.state.deskModel = "openai/gpt-6.2-astra";
+  const result = await call(runtime, "PATCH", "/api/settings", {
+    availableModels: [
+      "openai/gpt-6.2-astra",
+      "opencode-go/gemini-4-neon",
+      "openai/gpt-6.2-astra",
+    ],
+  });
+  assert.equal(result.status, 200);
+  const body = result.body as { availableModels: string[]; deskModel: string };
+  assert.deepEqual(body.availableModels, ["openai/gpt-6.2-astra", "opencode-go/gemini-4-neon"]);
+  assert.deepEqual(runtime.state.availableModels, ["openai/gpt-6.2-astra", "opencode-go/gemini-4-neon"]);
+  assert.equal(body.deskModel, "openai/gpt-6.2-astra");
+  assert.equal(runtime.state.deskModel, "openai/gpt-6.2-astra");
+});
+
+test("availableModels rejects unknown, non-chat, disabled and malformed keys without half-applying", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.state.availableModels = ["openai/gpt-6.2-astra"];
+  runtime.state.appearance = "dark";
+  const bad: unknown[] = [
+    ["openai/not-listed"],
+    ["openai/text-embed"],
+    ["openai/gpt-6.2-disabled"],
+    ["no-slash"],
+    ["openai/gpt-6.2-astra", "openai/gpt-6.2-disabled"],
+    "openai/gpt-6.2-astra",
+    [42],
+    [""],
+  ];
+  for (const availableModels of bad) {
+    const result = await call(runtime, "PATCH", "/api/settings", { availableModels, appearance: "light" });
+    assert.equal(result.status, 400, JSON.stringify(availableModels));
+    assert.equal(typeof (result.body as { error: unknown }).error, "string");
+    assert.deepEqual(runtime.state.availableModels, ["openai/gpt-6.2-astra"]);
+    assert.equal(runtime.state.appearance, "dark");
+  }
+});
+
+test("availableModels bounds the stored list and dedupes before capping", async () => {
+  const { runtime } = runtimeWithProject();
+  const models = Object.fromEntries(
+    Array.from({ length: 501 }, (_, index) => [
+      `bulk-${index}`,
+      {
+        id: `bulk-${index}`,
+        modelID: `bulk-${index}`,
+        providerID: "bulk",
+        name: `Bulk ${index}`,
+        type: "chat",
+        enabled: true,
+      },
+    ]),
+  );
+  runtime.client = {
+    ...(runtime.client as object),
+    getProviderCatalog: async () => [{ id: "bulk", models }],
+  } as unknown as ControllerRuntime["client"];
+  const keys = Object.keys(models).map((id) => `bulk/${id}`);
+  const oversized = await call(runtime, "PATCH", "/api/settings", { availableModels: keys });
+  assert.equal(oversized.status, 400);
+  assert.match((oversized.body as { error: string }).error, /at most 500/);
+  const atCap = await call(runtime, "PATCH", "/api/settings", {
+    availableModels: [...keys.slice(0, 500), keys[0]],
+  });
+  assert.equal(atCap.status, 200);
+  assert.equal(runtime.state.availableModels.length, 500);
+});
+
+test("availableModels can be cleared or pruned while disconnected but cannot add unvalidated keys", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.state.availableModels = ["openai/gpt-6.2-astra", "openai/ghost"];
+  runtime.status.connected = false;
+  runtime.client = null;
+  const cleared = await call(runtime, "PATCH", "/api/settings", { availableModels: [] });
+  assert.equal(cleared.status, 200);
+  assert.deepEqual(runtime.state.availableModels, []);
+
+  runtime.state.availableModels = ["openai/gpt-6.2-astra", "openai/ghost"];
+  const pruned = await call(runtime, "PATCH", "/api/settings", { availableModels: ["openai/gpt-6.2-astra"] });
+  assert.equal(pruned.status, 200);
+  assert.deepEqual(runtime.state.availableModels, ["openai/gpt-6.2-astra"]);
+
+  const added = await call(runtime, "PATCH", "/api/settings", { availableModels: ["openai/other"] });
+  assert.equal(added.status, 503);
+  assert.deepEqual(runtime.state.availableModels, ["openai/gpt-6.2-astra"]);
+});
+
+test("availableModels removes a stale key that disappeared upstream without re-validating it", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.state.availableModels = ["openai/ghost", "openai/gpt-6.2-astra"];
+  const removed = await call(runtime, "PATCH", "/api/settings", {
+    availableModels: ["openai/gpt-6.2-astra"],
+  });
+  assert.equal(removed.status, 200);
+  assert.deepEqual(runtime.state.availableModels, ["openai/gpt-6.2-astra"]);
+});
+
+test("reset clears curated availableModels", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.state.availableModels = ["openai/gpt-6.2-astra"];
+  const result = await call(runtime, "POST", "/api/settings/reset", {});
+  assert.equal(result.status, 200);
+  assert.deepEqual(runtime.state.availableModels, []);
+});
+
+test("model catalog merges curated provider models without duplicates and leaves the default alone", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.state.availableModels = [
+    "opencode-go/gemini-4-neon",
+    "openai/gpt-6.2-astra",
+    "openai/ghost",
+    "openai/text-embed",
+    "openai/gpt-6.2-disabled",
+  ];
+  const result = await call(runtime, "GET", "/api/models");
+  assert.equal(result.status, 200);
+  const body = result.body as { models: Array<Record<string, unknown>>; default: string };
+  assert.deepEqual(
+    body.models.map((model) => model.key),
+    [
+      "openai/gpt-6.2-astra",
+      "openai/gpt-6.2-astra-fast",
+      "alibaba-token-plan/qwen4-max",
+      "opencode-go/gemini-4-neon",
+    ],
+  );
+  assert.equal(new Set(body.models.map((model) => model.key)).size, 4);
+  assert.equal(body.default, "google/gemini-3");
+  const added = body.models[3];
+  assert.deepEqual(Object.keys(added).sort(), [
+    "context",
+    "enabled",
+    "id",
+    "key",
+    "name",
+    "providerID",
+    "released",
+    "status",
+    "tools",
+    "variantCount",
+  ]);
+  assert.equal(added.name, "Gemini 4 Neon");
+  assert.equal(added.status, "beta");
+  assert.equal(added.context, 1000000);
+  assert.equal(added.released, 1795000000000);
+  assert.equal(added.enabled, true);
+  assert.equal(added.tools, false);
+  assert.equal(added.variantCount, 3);
+  // A disappeared or invalid saved key is preserved, not silently deleted.
+  assert.deepEqual(runtime.state.availableModels, [
+    "opencode-go/gemini-4-neon",
+    "openai/gpt-6.2-astra",
+    "openai/ghost",
+    "openai/text-embed",
+    "openai/gpt-6.2-disabled",
+  ]);
+});
+
+test("model catalog omits curated models when the provider catalog is unavailable, keeping the core catalog", async () => {
+  const { runtime } = runtimeWithProject();
+  runtime.state.availableModels = ["opencode-go/gemini-4-neon"];
+  runtime.client = {
+    ...(runtime.client as object),
+    getProviderCatalog: async () => {
+      throw new OpenCodeError(500, "provider listing failed");
+    },
+  } as unknown as ControllerRuntime["client"];
+  const result = await call(runtime, "GET", "/api/models");
+  assert.equal(result.status, 200);
+  const body = result.body as { models: { key: string }[]; default: string };
+  assert.deepEqual(
+    body.models.map((model) => model.key),
+    ["openai/gpt-6.2-astra", "openai/gpt-6.2-astra-fast", "alibaba-token-plan/qwen4-max"],
+  );
+  assert.equal(body.default, "google/gemini-3");
+  assert.deepEqual(runtime.state.availableModels, ["opencode-go/gemini-4-neon"]);
+});
+
+// ── Subscription OAuth (Settings → Providers "Sign in") ───────────────────
+test("OAuth start validates the listed method and proxies the exact upstream call", async () => {
+  const { runtime, calls } = runtimeWithProject();
+  const seen: Array<{ integrationID: string; input: unknown; directory?: string }> = [];
+  runtime.client = {
+    ...(runtime.client as object),
+    startOAuthConnect: async (
+      directory: string | undefined,
+      integrationID: string,
+      input: { methodID: string; answer?: Record<string, unknown>; label?: string },
+    ) => {
+      seen.push({ directory, integrationID, input });
+      return {
+        attemptID: "con_1",
+        url: "https://auth.example.invalid/authorize?state=abc",
+        instructions: "Sign in and paste the redirect URL",
+        mode: "code",
+        paste: true,
+        time: { created: 1, expires: 2 },
+        access_token: "must-not-leak",
+      };
+    },
+  } as unknown as ControllerRuntime["client"];
+  const result = await call(runtime, "POST", "/api/integrations/openai/oauth", {
+    methodID: "oauth-chatgpt",
+    answer: { label: "Work" },
+    label: "ChatGPT work",
+  });
+  assert.equal(result.status, 200);
+  assert.deepEqual(seen, [
+    {
+      directory: runtime.state.projects[0].path,
+      integrationID: "openai",
+      input: { methodID: "oauth-chatgpt", answer: { label: "Work" }, label: "ChatGPT work" },
+    },
+  ]);
+  const body = result.body as { attempt: Record<string, unknown> };
+  assert.deepEqual(body.attempt, {
+    attemptID: "con_1",
+    url: "https://auth.example.invalid/authorize?state=abc",
+    instructions: "Sign in and paste the redirect URL",
+    mode: "code",
+    paste: true,
+    time: { created: 1, expires: 2 },
+  });
+  assert.equal(JSON.stringify(result.body).includes("must-not-leak"), false);
+  assert.equal(calls.some((item) => item.startsWith("oauth-start")), false);
+});
+
+test("OAuth start rejects unknown integrations, unknown methods and non-OAuth methods", async () => {
+  const { runtime } = runtimeWithProject();
+  let started = 0;
+  runtime.client = {
+    ...(runtime.client as object),
+    startOAuthConnect: async () => {
+      started += 1;
+      throw new OpenCodeError(500, "must not run");
+    },
+  } as unknown as ControllerRuntime["client"];
+  const cases: Array<[string, unknown, number]> = [
+    ["nope", { methodID: "oauth-chatgpt" }, 404],
+    ["openai", { methodID: "unknown" }, 400],
+    ["openai", { methodID: "api-key" }, 400],
+    ["openai", {}, 400],
+    ["openai", { methodID: 42 }, 400],
+  ];
+  for (const [integrationID, body, status] of cases) {
+    const result = await call(runtime, "POST", `/api/integrations/${integrationID}/oauth`, body);
+    assert.equal(result.status, status, `${integrationID} ${JSON.stringify(body)}`);
+  }
+  assert.equal(started, 0);
+});
+
+test("OAuth status, complete and cancel proxy exact upstream calls without leaking tokens", async () => {
+  const { runtime, calls } = runtimeWithProject();
+  const seen: string[] = [];
+  runtime.client = {
+    ...(runtime.client as object),
+    getOAuthConnectStatus: async (_directory: string | undefined, integrationID: string, attemptID: string) => {
+      seen.push(`status:${integrationID}:${attemptID}`);
+      return { status: "pending", time: { created: 1, expires: 2 }, access_token: "must-not-leak" };
+    },
+    completeOAuthConnect: async (
+      _directory: string | undefined,
+      integrationID: string,
+      attemptID: string,
+      code?: string,
+    ) => {
+      seen.push(`complete:${integrationID}:${attemptID}:${code ?? ""}`);
+    },
+    cancelOAuthConnect: async (_directory: string | undefined, integrationID: string, attemptID: string) => {
+      seen.push(`cancel:${integrationID}:${attemptID}`);
+    },
+  } as unknown as ControllerRuntime["client"];
+
+  const status = await call(runtime, "GET", "/api/integrations/openai/oauth/con_1");
+  assert.equal(status.status, 200);
+  assert.deepEqual(status.body, { attempt: { status: "pending", time: { created: 1, expires: 2 } } });
+  assert.equal(JSON.stringify(status.body).includes("must-not-leak"), false);
+
+  const complete = await call(runtime, "POST", "/api/integrations/openai/oauth/con_1/complete", {
+    code: "auth-code-123",
+  });
+  assert.equal(complete.status, 200);
+  assert.deepEqual(complete.body, { ok: true });
+
+  const cancel = await call(runtime, "DELETE", "/api/integrations/openai/oauth/con_1");
+  assert.equal(cancel.status, 200);
+  assert.deepEqual(cancel.body, { ok: true });
+
+  assert.deepEqual(seen, [
+    "status:openai:con_1",
+    "complete:openai:con_1:auth-code-123",
+    "cancel:openai:con_1",
+  ]);
+  assert.equal(JSON.stringify([status.body, complete.body, cancel.body]).includes("auth-code-123"), false);
+  assert.equal(calls.some((item) => item.startsWith("oauth-")), false);
+});
+
+test("OAuth attempt routes reject malformed ids before calling OpenCode and require a connection", async () => {
+  const { runtime } = runtimeWithProject();
+  let internalCalls = 0;
+  runtime.client = {
+    ...(runtime.client as object),
+    getOAuthConnectStatus: async () => {
+      internalCalls += 1;
+      return { status: "pending" };
+    },
+    completeOAuthConnect: async () => {
+      internalCalls += 1;
+    },
+    cancelOAuthConnect: async () => {
+      internalCalls += 1;
+    },
+  } as unknown as ControllerRuntime["client"];
+  for (const attemptID of ["..%2Fsecrets", "not-an-attempt", "con_" + "x".repeat(300)]) {
+    const status = await call(runtime, "GET", `/api/integrations/openai/oauth/${attemptID}`);
+    assert.equal(status.status, 400, attemptID);
+    const complete = await call(runtime, "POST", `/api/integrations/openai/oauth/${attemptID}/complete`, {});
+    assert.equal(complete.status, 400, attemptID);
+    const cancel = await call(runtime, "DELETE", `/api/integrations/openai/oauth/${attemptID}`);
+    assert.equal(cancel.status, 400, attemptID);
+  }
+  assert.equal(internalCalls, 0);
+
+  runtime.status.connected = false;
+  runtime.client = null;
+  const offline = await call(runtime, "POST", "/api/integrations/openai/oauth", { methodID: "oauth-chatgpt" });
+  assert.equal(offline.status, 503);
 });
 
 test("command catalog projects name and description only", async () => {

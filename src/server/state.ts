@@ -32,6 +32,9 @@ export type AppState = {
   ownedServerPassword: string;
   /** Desk default provider/model id. Empty means unset — fall back to OpenCode config. */
   deskModel: string;
+  /** Canonical `provider/model` keys the user added to the composer picker.
+   *  OpenCode remains the authority for the model metadata. */
+  availableModels: string[];
 };
 
 export const EMPTY_STATE: AppState = {
@@ -43,6 +46,7 @@ export const EMPTY_STATE: AppState = {
   connectionPassword: "",
   ownedServerPassword: "",
   deskModel: "",
+  availableModels: [],
 };
 
 export function stateFilePath(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
@@ -102,12 +106,17 @@ export function normalizeState(input: Partial<AppState> | null | undefined): App
       typeof input?.ownedServerPassword === "string" ? input.ownedServerPassword : "",
     // Values written before deskModel was validated (or hand-edited) load as unset.
     deskModel: loadDeskModel(input?.deskModel),
+    availableModels: loadAvailableModels(input?.availableModels),
   };
 }
 
 export const DESK_MODEL_MAX_LENGTH = 256;
 // `provider/model`: provider has no slash; the model id may (e.g. `openrouter/x/y`).
 const DESK_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@+-]*\/[A-Za-z0-9._:@+-]+(?:\/[A-Za-z0-9._:@+-]+)*$/;
+
+/** Bound for the curated picker list; keeps a hand-edited state file from
+ *  turning every `/api/models` call into an unbounded lookup. */
+export const AVAILABLE_MODELS_MAX = 500;
 
 /** `null`/`""` clears the desk default; otherwise a bounded `provider/model` key. */
 export function validateDeskModel(value: unknown): { ok: true; value: string } | { ok: false; error: string } {
@@ -125,6 +134,44 @@ function loadDeskModel(value: unknown): string {
   return checked.ok ? checked.value : "";
 }
 
+/** Validate a PATCH body list: every entry must be a bounded provider/model
+ *  key. Dedupe preserves first-seen order; the cap applies after dedupe. */
+export function validateAvailableModels(
+  value: unknown,
+): { ok: true; value: string[] } | { ok: false; error: string } {
+  if (!Array.isArray(value)) return { ok: false, error: "availableModels must be an array of provider/model keys" };
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string" || item.length > DESK_MODEL_MAX_LENGTH || !DESK_MODEL_PATTERN.test(item)) {
+      return { ok: false, error: "availableModels must contain provider/model keys" };
+    }
+    if (seen.has(item)) continue;
+    seen.add(item);
+    deduped.push(item);
+  }
+  if (deduped.length > AVAILABLE_MODELS_MAX) {
+    return { ok: false, error: `availableModels may contain at most ${AVAILABLE_MODELS_MAX} models` };
+  }
+  return { ok: true, value: deduped };
+}
+
+/** State-file upgrade is forgiving: old files have no list, and a corrupt
+ *  entry is dropped rather than making the whole controller state unreadable. */
+function loadAvailableModels(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (out.length >= AVAILABLE_MODELS_MAX) break;
+    const checked = validateDeskModel(item);
+    if (!checked.ok || !checked.value || seen.has(checked.value)) continue;
+    seen.add(checked.value);
+    out.push(checked.value);
+  }
+  return out;
+}
+
 export function publicState(state: AppState) {
   return {
     projects: state.projects,
@@ -134,6 +181,7 @@ export function publicState(state: AppState) {
     connectionUsername: state.connectionUsername,
     hasConnectionPassword: Boolean(state.connectionPassword),
     deskModel: state.deskModel,
+    availableModels: state.availableModels,
   };
 }
 

@@ -1209,6 +1209,7 @@ export function DeskApp() {
               projects={projects}
               appearance={boot?.appearance ?? "dark"}
               model={model}
+              availableModels={boot?.availableModels ?? []}
               hasConnectionPassword={boot?.hasConnectionPassword ?? false}
               onAppearance={(appearance) => {
                 applyTheme(appearance);
@@ -1217,6 +1218,15 @@ export function DeskApp() {
               onModelChange={(next) => {
                 setModel(next);
                 setModelSource("desk");
+              }}
+              onAvailableModelsChange={(next) => {
+                setBoot((current) => (current ? { ...current, availableModels: next } : current));
+              }}
+              onCatalogChange={() => {
+                // The composer keeps one catalog snapshot; expire it so the next
+                // open refetches and shows the newly available models without
+                // touching the desk default.
+                setCatalog((current) => (current ? { ...current, fetchedAt: 0 } : current));
               }}
               onProjectsChange={setProjects}
               onAddProject={(trigger) => void addProject(trigger)}

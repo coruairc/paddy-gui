@@ -31,18 +31,73 @@ export type RuntimeModel = {
   id: string;
   name?: string;
   status?: string;
+  /** OpenCode's model kind; only `chat` models can be added to the picker. */
+  type?: string;
+  enabled?: boolean;
+  providerID?: string;
   limit?: { context?: number; input?: number; output?: number };
-  capabilities?: { reasoning?: boolean; attachment?: boolean; toolcall?: boolean };
+  capabilities?: { reasoning?: boolean; attachment?: boolean; toolcall?: boolean; tools?: boolean };
+  time?: { released?: number };
+  variantCount?: number;
 };
 
 export type RuntimeProvider = {
   id: string;
+  /** OpenCode integration that owns auth/credentials; falls back to `id`. */
+  integrationID?: string;
   name?: string;
   env?: string[];
   models?: Record<string, RuntimeModel>;
 };
 
-export type ProviderAuthMethod = { type?: string; label?: string };
+export type ProviderAuthFormField = {
+  key?: string;
+  type: string;
+  title?: string;
+  description?: string;
+  required?: boolean;
+  hidden?: boolean;
+  format?: string;
+  placeholder?: string;
+  pattern?: string;
+  default?: unknown;
+  options?: Array<{ value?: unknown; label?: string; description?: string }>;
+  minLength?: number;
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
+  minItems?: number;
+  maxItems?: number;
+  custom?: boolean;
+  when?: Array<{ key?: string; op?: string; value?: unknown }>;
+  url?: string;
+};
+
+export type ProviderAuthMethod = {
+  /** OpenCode method id; required for OAuth start. */
+  id?: string;
+  /** Exact OpenCode type: `oauth`, `key`, `env`, `external` or `command`. */
+  type?: string;
+  label?: string;
+  /** Optional OpenCode form schema for methods that ask for input. */
+  form?: ProviderAuthFormField[];
+};
+
+/** Unwrapped `POST /api/integrations/:id/oauth` result. Never a token. */
+export type OAuthAttempt = {
+  attemptID: string;
+  url: string;
+  instructions?: string;
+  mode: "auto" | "code";
+  paste: boolean;
+  time?: { created?: number; expires?: number };
+};
+
+export type OAuthAttemptStatus = {
+  status: "pending" | "complete" | "failed" | "expired";
+  message?: string;
+  time?: { created?: number; expires?: number };
+};
 
 export type ProvidersResponse = {
   providers?: {
@@ -213,6 +268,31 @@ export const api = {
       "/api/sessions/" + encodeURIComponent(id) + "/diff" + (from ? "?from=" + encodeURIComponent(from) : ""),
     ),
   providers: () => request<ProvidersResponse>("/api/providers"),
+  /** Start an OpenCode-owned OAuth attempt. The controller validates the
+   *  integration/method against OpenCode before proxying. */
+  startOAuth: (
+    integrationID: string,
+    methodID: string,
+    options?: { answer?: Record<string, unknown>; label?: string },
+  ) =>
+    request<{ attempt: OAuthAttempt }>(
+      `/api/integrations/${encodeURIComponent(integrationID)}/oauth`,
+      { method: "POST", body: JSON.stringify({ methodID, ...options }) },
+    ),
+  oauthStatus: (integrationID: string, attemptID: string) =>
+    request<{ attempt: OAuthAttemptStatus }>(
+      `/api/integrations/${encodeURIComponent(integrationID)}/oauth/${encodeURIComponent(attemptID)}`,
+    ),
+  completeOAuth: (integrationID: string, attemptID: string, code?: string) =>
+    request<{ ok: true }>(
+      `/api/integrations/${encodeURIComponent(integrationID)}/oauth/${encodeURIComponent(attemptID)}/complete`,
+      { method: "POST", body: JSON.stringify(code === undefined ? {} : { code }) },
+    ),
+  cancelOAuth: (integrationID: string, attemptID: string) =>
+    request<{ ok: true }>(
+      `/api/integrations/${encodeURIComponent(integrationID)}/oauth/${encodeURIComponent(attemptID)}`,
+      { method: "DELETE" },
+    ),
   models: () => request<{ models: DeskModel[]; default: string }>("/api/models"),
   commands: () => request<{ commands: DeskCommand[] }>("/api/commands"),
   runCommand: (id: string, name: string, text: string) =>
@@ -254,6 +334,8 @@ export type Bootstrap = {
   connectionUrl: string;
   hasConnectionPassword: boolean;
   deskModel: string;
+  /** Curated `provider/model` keys the user added to the picker. */
+  availableModels: string[];
   sessions: SessionSummary[];
   /** False when the first page was full (there may be more) or listing failed: absence from `sessions` proves nothing. */
   sessionsComplete?: boolean;

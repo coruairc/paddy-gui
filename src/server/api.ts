@@ -3,7 +3,12 @@
  * project allowlist. Provider keys are forwarded to OpenCode and never echoed.
  */
 
-import { OpenCodeError } from "./opencode-client.ts";
+import {
+  OpenCodeError,
+  type OpenCodeOAuthAttempt,
+  type OpenCodeOAuthAttemptStatus,
+  type OpenCodeProviderInfo,
+} from "./opencode-client.ts";
 import { readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -17,7 +22,7 @@ import {
   type SessionSummary,
 } from "./normalize.ts";
 import { redactSecrets, safeJson, validateWorkspacePath } from "./security.ts";
-import { newId, publicState, validateDeskModel } from "./state.ts";
+import { newId, publicState, validateAvailableModels, validateDeskModel } from "./state.ts";
 import { CONTROLLER_VERSION, type ControllerRuntime } from "./runtime.ts";
 
 export type ApiResult = { status: number; body: unknown; stream?: ReadableStream<Uint8Array> };
@@ -42,7 +47,7 @@ export async function handleApi(runtime: ControllerRuntime, request: Request): P
     const project = route.match(/^\/projects\/([^/]+)$/);
     if (project && request.method === "DELETE") return removeProject(runtime, decodeParam(project[1]));
     if (project && request.method === "POST") return selectProject(runtime, decodeParam(project[1]));
-    if (request.method === "PATCH" && route === "/settings") return updateSettings(runtime, request);
+    if (request.method === "PATCH" && route === "/settings") return await updateSettings(runtime, request);
     if (request.method === "GET" && route === "/sessions") return await listSessions(runtime);
     if (request.method === "POST" && route === "/sessions") return await createSession(runtime, request);
     const command = route.match(/^\/sessions\/([^/]+)\/command$/);
@@ -53,6 +58,19 @@ export async function handleApi(runtime: ControllerRuntime, request: Request): P
     if (request.method === "GET" && route === "/commands") return await listCommands(runtime);
     if (request.method === "GET" && (route === "/config" || route === "/providers" || route === "/agents" || route === "/mcp" || route === "/vcs" || route === "/files/status" || route === "/permissions")) {
       return await readOpenCode(runtime, route);
+    }
+    // `/integrations/:integrationID/oauth[/:attemptID[/complete]]` — controller
+    // proxy for OpenCode-owned OAuth attempts. Keep ahead of the provider key
+    // routes so DELETE is not mistaken for a credential removal.
+    const oauth = route.match(/^\/integrations\/([^/]+)\/oauth(?:\/([^/]+)(\/complete)?)?$/);
+    if (oauth) {
+      return await integrationOAuth(
+        runtime,
+        request,
+        decodeParam(oauth[1]),
+        oauth[2] === undefined ? undefined : decodeParam(oauth[2]),
+        oauth[3] === "/complete",
+      );
     }
     if (request.method === "PUT" && route.startsWith("/providers/")) return await setKey(runtime, request, route);
     if (request.method === "DELETE" && route.startsWith("/providers/")) return await removeKey(runtime, route);
@@ -135,6 +153,7 @@ async function reset(runtime: ControllerRuntime): Promise<ApiResult> {
   runtime.state.connectionPassword = "";
   runtime.state.ownedServerPassword = "";
   runtime.state.deskModel = "";
+  runtime.state.availableModels = [];
   runtime.persist();
   return json(200, publicState(runtime.state));
 }
@@ -217,6 +236,29 @@ async function updateSettings(runtime: ControllerRuntime, request: Request): Pro
       return json(400, { error: "That model is disabled in OpenCode" });
     }
   }
+  let availableModels: string[] | undefined;
+  if (body.availableModels !== undefined) {
+    const checked = validateAvailableModels(body.availableModels);
+    if (!checked.ok) return json(400, { error: checked.error });
+    // Clearing or removing keys is always safe offline. New keys must be proven
+    // against the connected provider catalog; the browser never supplies
+    // metadata. Keys already curated stay removable even if OpenCode stopped
+    // listing them (the picker already omits those).
+    const current = new Set(runtime.state.availableModels);
+    const additions = checked.value.filter((key) => !current.has(key));
+    if (additions.length) {
+      const catalog = await providerModelIndex(runtime);
+      for (const key of additions) {
+        const model = catalog.get(key);
+        if (!model) return json(400, { error: `That model is not listed by OpenCode: ${key}` });
+        if (model.type !== "chat") {
+          return json(400, { error: "Only chat models can be added to the chat picker" });
+        }
+        if (model.enabled === false) return json(400, { error: "That model is disabled in OpenCode" });
+      }
+    }
+    availableModels = checked.value;
+  }
   if (body.appearance === "light" || body.appearance === "dark") runtime.state.appearance = body.appearance;
   if (typeof body.connectionUrl === "string") runtime.state.connectionUrl = body.connectionUrl.trim();
   if (typeof body.connectionUsername === "string" && body.connectionUsername.trim()) {
@@ -225,6 +267,7 @@ async function updateSettings(runtime: ControllerRuntime, request: Request): Pro
   if (body.clearConnectionPassword === true) runtime.state.connectionPassword = "";
   else if (typeof body.connectionPassword === "string" && body.connectionPassword.trim() !== "") runtime.state.connectionPassword = body.connectionPassword;
   if (deskModel !== undefined) runtime.state.deskModel = deskModel;
+  if (availableModels !== undefined) runtime.state.availableModels = availableModels;
   runtime.persist();
   return json(200, publicState(runtime.state));
 }
@@ -376,9 +419,13 @@ async function listModels(runtime: ControllerRuntime): Promise<ApiResult> {
   if (!runtime.status.connected) return json(200, { models: [], default: "" });
   const directory = activeProject(runtime)?.path;
   const client = runtime.requireClient();
-  const [catalog, fallback] = await Promise.all([
+  const available = runtime.state.availableModels;
+  const [catalog, fallback, providerCatalog] = await Promise.all([
     client.listModels(directory),
     client.getDefaultModel(directory).catch(() => null),
+    available.length
+      ? client.getProviderCatalog(directory).catch(() => [] as OpenCodeProviderInfo[])
+      : Promise.resolve([] as OpenCodeProviderInfo[]),
   ]);
   const projected: Array<{
     modelKey: string;
@@ -392,10 +439,14 @@ async function listModels(runtime: ControllerRuntime): Promise<ApiResult> {
     tools: boolean;
     variantCount: number;
   }> = [];
+  const seen = new Set<string>();
   for (const entry of catalog) {
     if (!entry?.id || !entry.providerID || !entry.name) continue;
+    const modelKey = `${entry.providerID}/${entry.id}`;
+    if (seen.has(modelKey)) continue;
+    seen.add(modelKey);
     projected.push({
-      modelKey: `${entry.providerID}/${entry.id}`,
+      modelKey,
       id: entry.id,
       providerID: entry.providerID,
       name: entry.name,
@@ -406,6 +457,30 @@ async function listModels(runtime: ControllerRuntime): Promise<ApiResult> {
       tools: entry.capabilities?.tools === true,
       variantCount: Array.isArray(entry.variants) ? entry.variants.length : 0,
     });
+  }
+  // Curated additions come only from OpenCode's provider catalog. A saved key
+  // that disappeared upstream is omitted here but kept in state, so a temporary
+  // provider outage does not erase the user's selection.
+  if (available.length) {
+    const index = modelIndexFromProviders(providerCatalog);
+    for (const key of available) {
+      if (seen.has(key)) continue;
+      const model = index.get(key);
+      if (!model || model.type !== "chat" || model.enabled === false) continue;
+      seen.add(key);
+      projected.push({
+        modelKey: key,
+        id: model.id,
+        providerID: model.providerID,
+        name: model.name || model.id,
+        status: model.status ?? "active",
+        context: model.limit?.context ?? 0,
+        released: model.time?.released ?? 0,
+        enabled: true,
+        tools: model.capabilities?.tools === true,
+        variantCount: Array.isArray(model.variants) ? model.variants.length : 0,
+      });
+    }
   }
   const defaultKey =
     fallback?.providerID && fallback?.id ? `${fallback.providerID}/${fallback.id}` : "";
@@ -463,8 +538,8 @@ async function readOpenCode(runtime: ControllerRuntime, route: string): Promise<
     // Redact the provider list (it can carry headers/settings), but NOT the auth
     // map: its keys are provider IDs (e.g. "alibaba-token-plan"), and key-based
     // redaction would clobber any ID containing "token"/"key"/"secret" into a
-    // string, breaking `authMethods.some(...)`. getProviderAuth already strips
-    // credentials down to {type,label}, so the values are safe as-is.
+    // string, breaking `authMethods.some(...)`. getProviderAuth already projects
+    // methods to {id,type,label,form} and never returns credentials/connections.
     return json(200, { providers: redactSecrets(providers, secretNeedles(runtime)), auth });
   }
   if (route === "/agents") return json(200, redactSecrets(await client.getAgents(directory), secretNeedles(runtime)));
@@ -504,6 +579,194 @@ async function removeKey(runtime: ControllerRuntime, route: string): Promise<Api
   const providerId = decodeParam(route.split("/")[2] ?? "").replace(/\/key$/, "");
   await runtime.requireClient().removeApiKey(providerId);
   return json(200, { ok: true, providerId });
+}
+
+type ProviderCatalogModel = {
+  id: string;
+  providerID: string;
+  name?: string;
+  type?: string;
+  enabled?: boolean;
+  status?: string;
+  limit?: { context?: number };
+  time?: { released?: number };
+  capabilities?: { tools?: boolean };
+  variants?: unknown[];
+};
+
+/** Canonical `providerID/modelID` index of everything OpenCode's provider
+ *  catalog lists (not just the smaller picker catalog). */
+function modelIndexFromProviders(providers: OpenCodeProviderInfo[]): Map<string, ProviderCatalogModel> {
+  const index = new Map<string, ProviderCatalogModel>();
+  for (const provider of providers) {
+    const fallbackProviderID = typeof provider.id === "string" ? provider.id : "";
+    const models = provider.models && typeof provider.models === "object" ? provider.models : {};
+    for (const [modelKey, raw] of Object.entries(models)) {
+      if (!raw || typeof raw !== "object") continue;
+      const model = raw as NonNullable<OpenCodeProviderInfo["models"]>[string];
+      const providerID =
+        typeof model.providerID === "string" && model.providerID ? model.providerID : fallbackProviderID;
+      const id =
+        (typeof model.modelID === "string" && model.modelID) ||
+        (typeof model.id === "string" && model.id) ||
+        modelKey;
+      if (!providerID || !id) continue;
+      const key = `${providerID}/${id}`;
+      if (index.has(key)) continue;
+      index.set(key, {
+        id,
+        providerID,
+        ...(typeof model.name === "string" ? { name: model.name } : {}),
+        ...(typeof model.type === "string" ? { type: model.type } : {}),
+        ...(typeof model.enabled === "boolean" ? { enabled: model.enabled } : {}),
+        ...(typeof model.status === "string" ? { status: model.status } : {}),
+        ...(model.limit ? { limit: { context: model.limit.context } } : {}),
+        ...(model.time ? { time: { released: model.time.released } } : {}),
+        ...(model.capabilities ? { capabilities: { tools: model.capabilities.tools } } : {}),
+        ...(Array.isArray(model.variants) ? { variants: model.variants } : {}),
+      });
+    }
+  }
+  return index;
+}
+
+async function providerModelIndex(runtime: ControllerRuntime): Promise<Map<string, ProviderCatalogModel>> {
+  const providers = await runtime.requireClient().getProviderCatalog(activeProject(runtime)?.path);
+  return modelIndexFromProviders(providers);
+}
+
+// Integration.AttemptID in the v2.3.2 schema is `con_` + a generated id.
+const OAUTH_ATTEMPT = /^con_[A-Za-z0-9_-]{1,200}$/;
+const OAUTH_CODE_MAX_LENGTH = 8192;
+
+/**
+ * Same-origin proxy for OpenCode-owned OAuth attempts. Only the integration and
+ * method ids listed by OpenCode are forwarded; Paddy never sees or stores a
+ * token. The browser holds the attempt id for polling/cancel.
+ */
+async function integrationOAuth(
+  runtime: ControllerRuntime,
+  request: Request,
+  integrationID: string,
+  attemptID: string | undefined,
+  complete: boolean,
+): Promise<ApiResult> {
+  const client = runtime.requireClient();
+  const directory = activeProject(runtime)?.path;
+  const integrations = await client.listIntegrations(directory);
+  const integration = integrations.find((item) => item.id === integrationID);
+  if (!integration) return json(404, { error: "Integration not found" });
+
+  if (attemptID === undefined) {
+    if (request.method !== "POST") return json(404, { error: "Not found" });
+    const body = await readBody(request);
+    const methodID = typeof body.methodID === "string" ? body.methodID.trim() : "";
+    if (!methodID) return json(400, { error: "methodID is required" });
+    const methods = Array.isArray(integration.methods) ? integration.methods : [];
+    const method = methods.find((item) => item.id === methodID && item.type === "oauth");
+    if (!method) return json(400, { error: "That integration does not list this OAuth method" });
+    const answer = oauthAnswer(body.answer);
+    if (answer === null) return json(400, { error: "answer must be a form answer object" });
+    let label: string | undefined;
+    if (body.label !== undefined) {
+      if (typeof body.label !== "string") return json(400, { error: "label must be a string" });
+      label = body.label.trim();
+      if (label.length > 200) return json(400, { error: "label must be at most 200 characters" });
+    }
+    const attempt = await client.startOAuthConnect(directory, integrationID, {
+      methodID,
+      ...(answer === undefined ? {} : { answer }),
+      ...(label ? { label } : {}),
+    });
+    return json(200, { attempt: projectOAuthAttempt(attempt) });
+  }
+
+  if (!OAUTH_ATTEMPT.test(attemptID)) return json(400, { error: "Invalid OAuth attempt id" });
+
+  if (complete) {
+    if (request.method !== "POST") return json(404, { error: "Not found" });
+    const body = await readBody(request);
+    if (body.code !== undefined && typeof body.code !== "string") {
+      return json(400, { error: "code must be a string" });
+    }
+    const code = typeof body.code === "string" ? body.code : undefined;
+    if (code !== undefined && code.length > OAUTH_CODE_MAX_LENGTH) {
+      return json(400, { error: "code is too long" });
+    }
+    await client.completeOAuthConnect(directory, integrationID, attemptID, code);
+    return json(200, { ok: true });
+  }
+
+  if (request.method === "GET") {
+    const status = await client.getOAuthConnectStatus(directory, integrationID, attemptID);
+    return json(200, { attempt: projectOAuthStatus(status) });
+  }
+  if (request.method === "DELETE") {
+    await client.cancelOAuthConnect(directory, integrationID, attemptID);
+    return json(200, { ok: true });
+  }
+  return json(404, { error: "Not found" });
+}
+
+/** Form.Answer is a record of scalar/array values keyed by form field. */
+function oauthAnswer(value: unknown): Record<string, unknown> | undefined | null {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.entries(value);
+  if (entries.length > 50) return null;
+  const out: Record<string, unknown> = {};
+  for (const [key, item] of entries) {
+    if (!key || key.length > 200) return null;
+    if (Array.isArray(item)) {
+      if (item.length > 100 || !item.every(isScalarAnswer)) return null;
+      out[key] = item;
+    } else if (isScalarAnswer(item)) {
+      out[key] = item;
+    } else {
+      return null;
+    }
+  }
+  return out;
+}
+
+function isScalarAnswer(value: unknown): boolean {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+/** Allowlist the attempt fields the browser may see; nothing credential-shaped. */
+function projectOAuthAttempt(attempt: OpenCodeOAuthAttempt): Record<string, unknown> {
+  const time = projectOAuthTime(attempt.time);
+  return {
+    attemptID: typeof attempt.attemptID === "string" ? attempt.attemptID : "",
+    url: typeof attempt.url === "string" ? attempt.url : "",
+    ...(typeof attempt.instructions === "string" ? { instructions: attempt.instructions } : {}),
+    mode: attempt.mode === "code" ? "code" : "auto",
+    paste: attempt.paste === true,
+    ...(time ? { time } : {}),
+  };
+}
+
+function projectOAuthStatus(attempt: OpenCodeOAuthAttemptStatus): Record<string, unknown> {
+  const time = projectOAuthTime(attempt.time);
+  const status =
+    attempt.status === "complete" || attempt.status === "failed" || attempt.status === "expired"
+      ? attempt.status
+      : "pending";
+  return {
+    status,
+    ...(typeof attempt.message === "string" ? { message: attempt.message } : {}),
+    ...(time ? { time } : {}),
+  };
+}
+
+function projectOAuthTime(
+  time: { created?: number; expires?: number } | undefined,
+): Record<string, number> | null {
+  if (!time || typeof time !== "object") return null;
+  const projected: Record<string, number> = {};
+  if (typeof time.created === "number") projected.created = time.created;
+  if (typeof time.expires === "number") projected.expires = time.expires;
+  return Object.keys(projected).length ? projected : null;
 }
 
 async function addMcp(runtime: ControllerRuntime, request: Request): Promise<ApiResult> {
