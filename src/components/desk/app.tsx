@@ -1593,8 +1593,14 @@ function MessageView({ message }: { message: ChatMessage }) {
               )}
             </div>
           )}
-          {message.text ? <Markdown text={message.text} /> : null}
-          {message.error && <p className="mt-2 text-sm text-danger">{message.error}</p>}
+          {message.text || message.error ? (
+            // Chat bubble for assistant replies: hugs short text, caps long text,
+            // and mirrors the user bubble's corner treatment from the other side.
+            <div className="w-fit max-w-[min(100%,36rem)] break-words rounded-2xl rounded-bl-md bg-reply-bubble px-4 py-3 text-reply-bubble-fg selection:bg-black/30 selection:text-reply-bubble-fg shadow-[var(--shadow-border)]">
+              {message.text ? <Markdown text={message.text} /> : null}
+              {message.error && <p className="mt-2 text-sm text-danger">{message.error}</p>}
+            </div>
+          ) : null}
         </div>
       </div>
     </article>

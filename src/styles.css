@@ -13,6 +13,10 @@
   --color-bubble: #1e4a2a;
   --color-bubble-fg: #e3f1df;
   --color-bubble-muted: #a9c8a3;
+  /* Assistant replies: a neutral grey that still separates from the near-black
+     desk without competing with the green user bubble. */
+  --color-reply-bubble: #232326;
+  --color-reply-bubble-fg: #adc4a8;
   --color-ok: #8fad90;
   --color-warn: #c4a574;
   --color-danger: #c07a72;
@@ -41,6 +45,10 @@
   --color-bubble: #256a35;
   --color-bubble-fg: #ffffff;
   --color-bubble-muted: #dcefdc;
+  /* Light grey, one step below the page so the bubble reads as a card rather
+     than a washed-out highlight. */
+  --color-reply-bubble: #e7e7e5;
+  --color-reply-bubble-fg: #18181b;
   --color-ok: #3f7d4a;
   --color-warn: #9a6b2f;
   --color-danger: #a33b34;

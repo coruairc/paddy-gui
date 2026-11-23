@@ -2,8 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-// Locks in the WCAG AA claim for the user bubble (PR #17): text and timestamp
-// tokens on --color-bubble must stay >= 4.5:1 in both themes.
+// Locks in the WCAG AA claim for the user bubble (PR #17) and the assistant
+// reply bubble: text and timestamp tokens on --color-bubble / --color-reply-bubble
+// must stay >= 4.5:1 in both themes.
 const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 
 function block(selector: RegExp): Record<string, string> {
@@ -87,5 +88,45 @@ for (const [theme, tokens] of Object.entries(themes)) {
     const background = overBlack(tokens["--color-bubble"], selectionAlpha);
     const ratio = contrast(tokens["--color-bubble-fg"], background);
     assert.ok(ratio >= 4.5, `${theme} ${tokens["--color-bubble-fg"]} on ${background} = ${ratio.toFixed(2)}:1`);
+  });
+}
+
+// The assistant reply bubble mirrors the user bubble, so its selection classes
+// live in app.tsx too and are checked the same way rather than copied here.
+const replyBubbleClass = /className="[^"]*\bbg-reply-bubble\b[^"]*"/.exec(app)?.[0] ?? "";
+
+test("the reply bubble declares its own selection colours", () => {
+  assert.match(replyBubbleClass, /\bselection:bg-black\/\d+\b/);
+  assert.match(replyBubbleClass, /\bselection:text-reply-bubble-fg\b/);
+});
+
+const replySelectionAlpha =
+  Number(/\bselection:bg-black\/(\d+)\b/.exec(replyBubbleClass)?.[1] ?? NaN) / 100;
+
+for (const [theme, tokens] of Object.entries(themes)) {
+  // Markdown prose inside the bubble uses text-fg, so both the bubble's own
+  // token and the inherited prose colour have to hold up on the bubble.
+  for (const fg of ["--color-reply-bubble-fg", "--color-fg"]) {
+    test(`${theme}: ${fg} on --color-reply-bubble is at least 4.5:1`, () => {
+      assert.ok(tokens["--color-reply-bubble"], `${theme} defines --color-reply-bubble`);
+      assert.ok(tokens[fg], `${theme} defines ${fg}`);
+      const ratio = contrast(tokens[fg], tokens["--color-reply-bubble"]);
+      assert.ok(
+        ratio >= 4.5,
+        `${theme} ${fg} ${tokens[fg]} on ${tokens["--color-reply-bubble"]} = ${ratio.toFixed(2)}:1`,
+      );
+    });
+  }
+}
+
+for (const [theme, tokens] of Object.entries(themes)) {
+  test(`${theme}: selected reply text (reply-bubble-fg on black/${Math.round(replySelectionAlpha * 100)} over bubble) is at least 4.5:1`, () => {
+    assert.ok(Number.isFinite(replySelectionAlpha), "selection alpha parsed from app.tsx");
+    const background = overBlack(tokens["--color-reply-bubble"], replySelectionAlpha);
+    const ratio = contrast(tokens["--color-reply-bubble-fg"], background);
+    assert.ok(
+      ratio >= 4.5,
+      `${theme} ${tokens["--color-reply-bubble-fg"]} on ${background} = ${ratio.toFixed(2)}:1`,
+    );
   });
 }
